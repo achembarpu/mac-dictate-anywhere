@@ -347,9 +347,10 @@ private func captureDevice(for deviceID: AudioDeviceID) -> AVCaptureDevice? {
 
 func makeAudioCaptureController(
     deviceID: AudioDeviceID?,
+    usesExplicitMicrophoneSelection: Bool,
     onSamples: @escaping ([Float]) -> Void
 ) throws -> AudioCaptureController {
-    if Settings.shared.selectedMicrophoneUID != nil,
+    if usesExplicitMicrophoneSelection,
        let deviceID,
        let captureDevice = captureDevice(for: deviceID) {
         audioLogger.info(
@@ -367,6 +368,7 @@ func makeAudioCaptureController(
 
 enum TranscriptionError: LocalizedError {
     case audioEngineSetupFailed
+    case audioEngineSetupTimedOut
     case audioFormatError
     case deviceSelectionFailed
     case engineNotReady
@@ -377,6 +379,7 @@ enum TranscriptionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .audioEngineSetupFailed: return "Failed to set up audio capture."
+        case .audioEngineSetupTimedOut: return "Audio capture did not start in time. Check the selected microphone and try again."
         case .audioFormatError: return "Failed to create audio format."
         case .deviceSelectionFailed: return "Failed to select the specified microphone."
         case .engineNotReady: return "Transcription engine is not ready."
@@ -767,12 +770,17 @@ final class ParakeetEngine: TranscriptionEngine {
             self.audioSamples = []
         }
 
+        let usesExplicitMicrophoneSelection = Settings.shared.selectedMicrophoneUID != nil
+
         // Start audio engine (async to avoid deadlock — the tap callback dispatches to main)
         logger.info("startRecording: dispatching to engineQueue for audio engine setup")
         let captureController = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AudioCaptureController, Error>) in
             engineQueue.async {
                 do {
-                    let result = try makeAudioCaptureController(deviceID: deviceID) { [weak self] samples in
+                    let result = try makeAudioCaptureController(
+                        deviceID: deviceID,
+                        usesExplicitMicrophoneSelection: usesExplicitMicrophoneSelection
+                    ) { [weak self] samples in
                         guard let self else { return }
                         self.lastTapCallbackTime = CFAbsoluteTimeGetCurrent()
                         var droppedCount = 0

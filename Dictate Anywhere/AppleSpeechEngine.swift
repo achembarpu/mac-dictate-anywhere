@@ -78,6 +78,12 @@ final class AppleSpeechEngine: TranscriptionEngine {
     private var preparedLanguage: SupportedLanguage?
     private var preparedVocabulary: [String] = []
     private let levelSampleCap = 160_000
+    private let audioCaptureStartupTimeout: TimeInterval = 5
+    private let audioCaptureSetupQueue = DispatchQueue(
+        label: "com.dictate-anywhere.apple-speech-audio-startup",
+        qos: .userInitiated
+    )
+    private var audioCaptureStartupCancellation: AudioCaptureStartupCancellation?
 
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
@@ -150,18 +156,43 @@ final class AppleSpeechEngine: TranscriptionEngine {
             transcript = ""
             levelSampleBuffer.removeAll(keepingCapacity: true)
         }
+        let usesExplicitMicrophoneSelection = Settings.shared.selectedMicrophoneUID != nil
+        audioCaptureStartupCancellation?.cancel()
+        let startupCancellation = AudioCaptureStartupCancellation()
+        audioCaptureStartupCancellation = startupCancellation
 
         do {
             try await session.start()
-            audioCaptureController = try makeAudioCaptureController(deviceID: deviceID) { [weak self, weak session] samples in
-                guard let self, let session else { return }
-                self.appendLevelSamples(samples)
-                session.append(samples: samples)
+            let controller = try await startAudioCaptureOffMainActor(
+                timeout: audioCaptureStartupTimeout,
+                queue: audioCaptureSetupQueue,
+                cancellation: startupCancellation
+            ) {
+                try makeAudioCaptureController(
+                    deviceID: deviceID,
+                    usesExplicitMicrophoneSelection: usesExplicitMicrophoneSelection
+                ) { [weak self, weak session] samples in
+                    guard let self, let session else { return }
+                    self.appendLevelSamples(samples)
+                    session.append(samples: samples)
+                }
             }
+            guard audioCaptureStartupCancellation === startupCancellation,
+                  activeSession === session else {
+                controller.stop()
+                throw CancellationError()
+            }
+            audioCaptureStartupCancellation = nil
+            audioCaptureController = controller
             logger.info("Apple Speech recording started")
         } catch {
+            if audioCaptureStartupCancellation === startupCancellation {
+                audioCaptureStartupCancellation = nil
+            }
             await session.cancel()
-            activeSession = nil
+            if activeSession === session {
+                activeSession = nil
+            }
             logger.error("Failed to start Apple Speech recording: \(error.localizedDescription, privacy: .public)")
             throw error
         }
@@ -180,6 +211,8 @@ final class AppleSpeechEngine: TranscriptionEngine {
     }
 
     func cancel() async {
+        audioCaptureStartupCancellation?.cancel()
+        audioCaptureStartupCancellation = nil
         audioCaptureController?.stop()
         audioCaptureController = nil
         await activeSession?.cancel()

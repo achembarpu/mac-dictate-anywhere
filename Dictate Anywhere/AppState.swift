@@ -82,6 +82,7 @@ final class AppState {
     /// Engine pinned for the active dictation session (start -> stop/cancel).
     private var sessionEngine: TranscriptionEngine?
     private var sessionHotkeyMode: HotkeyMode?
+    private var activeRecordingStartupID: UUID?
     private var startupTask: Task<Void, Never>?
     private var hasStarted = false
 
@@ -388,6 +389,8 @@ final class AppState {
 
         isTransitioning = true
         pendingHoldRelease = false
+        let recordingStartupID = UUID()
+        activeRecordingStartupID = recordingStartupID
         sessionEngine = engine
         sessionHotkeyMode = mode
         configureEndOfUtteranceHandler(for: engine)
@@ -434,21 +437,25 @@ final class AppState {
             : nil
         var didStart = false
         for (index, candidateID) in startCandidates.enumerated() {
+            guard activeRecordingStartupID == recordingStartupID else { return }
             if index > 0 {
                 logger.warning(
                     "startDictation: retrying startRecording attempt \(index + 1, privacy: .public) with deviceID=\(candidateID.map { String($0) } ?? "nil", privacy: .public)"
                 )
                 try? await Task.sleep(for: .milliseconds(220))
+                guard activeRecordingStartupID == recordingStartupID else { return }
             }
 
             do {
                 try await engine.startRecording(deviceID: candidateID)
+                guard activeRecordingStartupID == recordingStartupID else { return }
                 didStart = true
                 logger.info(
                     "startDictation: startRecording succeeded on attempt \(index + 1, privacy: .public), deviceID=\(candidateID.map { String($0) } ?? "nil", privacy: .public)"
                 )
                 break
             } catch {
+                guard activeRecordingStartupID == recordingStartupID else { return }
                 lastStartError = error
                 logger.error(
                     "startDictation: startRecording attempt \(index + 1, privacy: .public) failed: \(error.localizedDescription, privacy: .public)"
@@ -468,6 +475,7 @@ final class AppState {
             }
             isTransitioning = false
             pendingHoldRelease = false
+            activeRecordingStartupID = nil
             clearEndOfUtteranceHandler(for: engine)
             sessionEngine = nil
             sessionHotkeyMode = nil
@@ -481,6 +489,7 @@ final class AppState {
         // Start audio level polling
         startAudioLevelPolling(engine: engine)
 
+        activeRecordingStartupID = nil
         isTransitioning = false
 
         // If the user released a hold-to-record key while we were starting up, stop now.
@@ -654,6 +663,9 @@ final class AppState {
     func cancelDictation() async {
         guard status == .recording || status == .processing else { return }
 
+        activeRecordingStartupID = nil
+        isTransitioning = false
+        pendingHoldRelease = false
         stopAudioLevelPolling()
 
         let engine = sessionEngine ?? activeEngine
