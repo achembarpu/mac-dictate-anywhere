@@ -107,6 +107,8 @@ enum ParakeetModelChoice: String, CaseIterable {
     case nemotron560 = "nemotron560"
     case nemotron1120 = "nemotron1120"
     case nemotron2240 = "nemotron2240"
+    case senseVoice = "senseVoice"
+    case nemotronMultilingual = "nemotronMultilingual"
 
     nonisolated var displayName: String {
         switch self {
@@ -117,6 +119,8 @@ enum ParakeetModelChoice: String, CaseIterable {
         case .nemotron560: return "Nemotron Streaming (560 ms)"
         case .nemotron1120: return "Nemotron Streaming (1120 ms)"
         case .nemotron2240: return "Nemotron Streaming (2240 ms)"
+        case .senseVoice: return "Chinese (SenseVoice)"
+        case .nemotronMultilingual: return "Multilingual Streaming (Nemotron)"
         }
     }
 
@@ -136,6 +140,10 @@ enum ParakeetModelChoice: String, CaseIterable {
             return "True streaming English dictation with a balanced Nemotron latency and accuracy tier."
         case .nemotron2240:
             return "True streaming English dictation with Nemotron's higher-throughput tier."
+        case .senseVoice:
+            return "Chinese (Simplified) dictation with mixed English, native punctuation, and the best accuracy for Mandarin."
+        case .nemotronMultilingual:
+            return "True streaming dictation across 40+ languages including Chinese, with lower accuracy than SenseVoice for Mandarin."
         }
     }
 
@@ -155,12 +163,16 @@ enum ParakeetModelChoice: String, CaseIterable {
             return "nemotron-streaming/1120ms"
         case .nemotron2240:
             return "nemotron-streaming/2240ms"
+        case .senseVoice:
+            return "sensevoice-small"
+        case .nemotronMultilingual:
+            return "nemotron-multilingual/multilingual/1120ms"
         }
     }
 
     nonisolated var isEnglishOnly: Bool {
         switch self {
-        case .multilingual:
+        case .multilingual, .senseVoice, .nemotronMultilingual:
             return false
         case .englishOnly, .compactEnglish, .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
             return true
@@ -169,9 +181,9 @@ enum ParakeetModelChoice: String, CaseIterable {
 
     nonisolated var usesTrueStreaming: Bool {
         switch self {
-        case .multilingual, .englishOnly, .compactEnglish:
+        case .multilingual, .englishOnly, .compactEnglish, .senseVoice:
             return false
-        case .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
+        case .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240, .nemotronMultilingual:
             return true
         }
     }
@@ -180,13 +192,20 @@ enum ParakeetModelChoice: String, CaseIterable {
         switch self {
         case .parakeetEou320:
             return true
-        case .multilingual, .englishOnly, .compactEnglish, .nemotron560, .nemotron1120, .nemotron2240:
+        case .multilingual, .englishOnly, .compactEnglish, .nemotron560, .nemotron1120, .nemotron2240,
+             .senseVoice, .nemotronMultilingual:
             return false
         }
     }
 
     nonisolated var languageSummary: String {
-        isEnglishOnly ? "English only" : "25 European languages"
+        switch self {
+        case .multilingual: return "25 European languages"
+        case .senseVoice: return "Chinese (Simplified) + English; also Cantonese, Japanese, Korean"
+        case .nemotronMultilingual: return "40+ languages including Chinese"
+        case .englishOnly, .compactEnglish, .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
+            return "English only"
+        }
     }
 
     nonisolated var sizeSummary: String {
@@ -199,6 +218,11 @@ enum ParakeetModelChoice: String, CaseIterable {
             return "~200 MB"
         case .nemotron560, .nemotron1120, .nemotron2240:
             return "~1 GB"
+        case .senseVoice:
+            // Without ANE access we download the fp32 encoder instead of int8.
+            return Hardware.canUseAppleNeuralEngine ? "~225 MB" : "~900 MB"
+        case .nemotronMultilingual:
+            return "~650 MB"
         }
     }
 
@@ -212,6 +236,10 @@ enum ParakeetModelChoice: String, CaseIterable {
             return "The compact 110M Parakeet model is English-only and optimized for faster startup with lower memory use."
         case .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
             return "The selected streaming model is English-only. Choose Multilingual if you dictate in other languages."
+        case .senseVoice:
+            return "SenseVoice auto-detects Chinese (Simplified) and English, including mixed-language dictation. Output uses Simplified characters."
+        case .nemotronMultilingual:
+            return "The multilingual Nemotron model streams transcription with a language hint for the selected language when available, including Chinese (Simplified); other languages fall back to automatic detection."
         }
     }
 
@@ -231,7 +259,121 @@ enum ParakeetModelChoice: String, CaseIterable {
             return "Choose Nemotron 1120 ms for a balanced streaming option."
         case .nemotron2240:
             return "Choose Nemotron 2240 ms for the higher-throughput streaming option."
+        case .senseVoice:
+            return "Choose Chinese (SenseVoice) for the most accurate Mandarin dictation with native punctuation and mixed English support."
+        case .nemotronMultilingual:
+            return "Choose Multilingual Streaming (Nemotron) for lower-latency live preview in Chinese and 40+ other languages, at reduced accuracy."
         }
+    }
+
+    /// Languages offered in the language picker, or nil when the model's
+    /// language handling is fixed (picker hidden, `fixedLanguageLabel` shown).
+    nonisolated var selectableLanguages: [SupportedLanguage]? {
+        switch self {
+        case .multilingual:
+            return SupportedLanguage.allCases.filter { $0 != .chinese }
+        case .nemotronMultilingual:
+            return SupportedLanguage.allCases
+        case .senseVoice, .englishOnly, .compactEnglish, .parakeetEou320,
+             .nemotron560, .nemotron1120, .nemotron2240:
+            return nil
+        }
+    }
+
+    nonisolated var fixedLanguageLabel: String? {
+        switch self {
+        case .senseVoice:
+            return "Chinese + English (auto-detected)"
+        case .englishOnly, .compactEnglish, .parakeetEou320,
+             .nemotron560, .nemotron1120, .nemotron2240:
+            return "English"
+        case .multilingual, .nemotronMultilingual:
+            return nil
+        }
+    }
+
+    nonisolated func supportsLanguage(_ language: SupportedLanguage) -> Bool {
+        switch self {
+        case .senseVoice, .nemotronMultilingual:
+            return true
+        case .multilingual:
+            return language != .chinese
+        case .englishOnly, .compactEnglish, .parakeetEou320,
+             .nemotron560, .nemotron1120, .nemotron2240:
+            return language == .english
+        }
+    }
+
+    /// FluidAudio vocabulary rescoring runs terms through the English-only
+    /// ctc110m tokenizer — unusable for Han text, so the Mandarin-capable
+    /// models opt out.
+    nonisolated var supportsFluidAudioVocabulary: Bool {
+        switch self {
+        case .senseVoice, .nemotronMultilingual: return false
+        default: return true
+        }
+    }
+
+    /// Nemotron multilingual ships only an int8 ANE-targeted encoder and is
+    /// documented by FluidAudio as "Apple Silicon only", with no CPU build to
+    /// fall back to. FluidAudio enforces that with a compile-time
+    /// `guard SystemInfo.isAppleSilicon else { throw ASRError.unsupportedPlatform }`,
+    /// so it also refuses on the x86_64 slice of our universal binary running
+    /// under Rosetta. Hide it wherever `Hardware.canUseAppleNeuralEngine` is
+    /// false rather than let a user pick a model that can only fail after a
+    /// ~650 MB download.
+    ///
+    /// SenseVoice is deliberately not listed here: its fp16/int8 encoders are
+    /// ANE-only, but FluidAudio also ships an fp32 encoder that runs on any
+    /// compute unit, which `ParakeetEngine.senseVoiceEncoderPrecision` selects
+    /// on non-ANE hardware.
+    nonisolated var requiresAppleNeuralEngine: Bool {
+        switch self {
+        case .nemotronMultilingual:
+            return true
+        case .multilingual, .englishOnly, .compactEnglish, .parakeetEou320,
+             .nemotron560, .nemotron1120, .nemotron2240, .senseVoice:
+            return false
+        }
+    }
+
+    // The `hasNeuralEngine` parameter exists so the non-ANE outcome (Intel, or
+    // our x86_64 slice under Rosetta) is testable from an arm64 test run;
+    // production callers use the no-argument variants, which read
+    // `Hardware.canUseAppleNeuralEngine` — a compile-time property of this
+    // process, not a runtime probe of the host.
+
+    nonisolated func isAvailable(hasNeuralEngine: Bool) -> Bool {
+        !requiresAppleNeuralEngine || hasNeuralEngine
+    }
+
+    nonisolated var isAvailableOnThisMac: Bool {
+        isAvailable(hasNeuralEngine: Hardware.canUseAppleNeuralEngine)
+    }
+
+    nonisolated static func availableCases(hasNeuralEngine: Bool) -> [ParakeetModelChoice] {
+        allCases.filter { $0.isAvailable(hasNeuralEngine: hasNeuralEngine) }
+    }
+
+    /// Models this Mac can actually run — the list the picker offers.
+    nonisolated static var availableCases: [ParakeetModelChoice] {
+        availableCases(hasNeuralEngine: Hardware.canUseAppleNeuralEngine)
+    }
+
+    /// Fallback when a stored selection isn't runnable on this hardware.
+    nonisolated static func availableFallback(
+        for language: SupportedLanguage,
+        hasNeuralEngine: Bool
+    ) -> ParakeetModelChoice {
+        let runnable = availableCases(hasNeuralEngine: hasNeuralEngine)
+        if let match = runnable.first(where: { $0.supportsLanguage(language) }) {
+            return match
+        }
+        return runnable.first ?? .multilingual
+    }
+
+    nonisolated static func availableFallback(for language: SupportedLanguage) -> ParakeetModelChoice {
+        availableFallback(for: language, hasNeuralEngine: Hardware.canUseAppleNeuralEngine)
     }
 }
 
@@ -527,6 +669,11 @@ final class Settings {
     var engineChoice: TranscriptionEngineChoice {
         didSet {
             UserDefaults.standard.set(engineChoice.rawValue, forKey: Keys.engineChoice)
+            if engineChoice == .parakeet,
+               !parakeetModelChoice.supportsFluidAudioVocabulary,
+               transcriptPostProcessingMode == .fluidAudioVocabulary {
+                transcriptPostProcessingMode = .none
+            }
         }
     }
 
@@ -534,8 +681,13 @@ final class Settings {
     var parakeetModelChoice: ParakeetModelChoice {
         didSet {
             UserDefaults.standard.set(parakeetModelChoice.rawValue, forKey: Keys.parakeetModelChoice)
-            if parakeetModelChoice.isEnglishOnly, selectedLanguage != .english {
+            if !parakeetModelChoice.supportsLanguage(selectedLanguage) {
                 selectedLanguage = .english
+            }
+            if engineChoice == .parakeet,
+               !parakeetModelChoice.supportsFluidAudioVocabulary,
+               transcriptPostProcessingMode == .fluidAudioVocabulary {
+                transcriptPostProcessingMode = .none
             }
         }
     }
@@ -592,7 +744,19 @@ final class Settings {
     /// Cached compiled regex for filler word removal (invalidated when words change)
     private var cachedFillerRegex: NSRegularExpression?
 
-    static let defaultFillerWords = ["um", "uh", "erm", "er", "hmm"]
+    /// 唔 is deliberately absent: it is a hesitation sound in Mandarin but the
+    /// standard negator in Cantonese (唔知 "don't know"), so removing it by
+    /// default can invert the meaning of a transcript.
+    static let defaultFillerWords = ["um", "uh", "erm", "er", "hmm", "嗯", "呃"]
+
+    /// Han fillers safe to delete from inside continuous text.
+    ///
+    /// Unsegmented Han has no word boundaries for `\b` to anchor to, so a CJK
+    /// filler pattern matches anywhere in the string. That is only safe for pure
+    /// interjections that never form part of a word — every other Han filler a
+    /// user adds is matched boundary-anchored instead, so it is removed only
+    /// when standing alone. Keep this list conservative.
+    static let bareMatchCJKFillers: Set<String> = ["嗯", "呃"]
 
     // MARK: - Transcript Post Processing
 
@@ -866,9 +1030,6 @@ final class Settings {
         selectedLanguage = SupportedLanguage(rawValue: langCode) ?? .english
         let appleLangCode = defaults.string(forKey: Keys.appleSpeechLanguage) ?? "en"
         appleSpeechLanguage = SupportedLanguage(rawValue: appleLangCode) ?? .english
-        if persistedParakeetModelChoice.isEnglishOnly {
-            selectedLanguage = .english
-        }
 
         // Filler words
         isFillerWordRemovalEnabled = defaults.object(forKey: Keys.isFillerWordRemovalEnabled) as? Bool ?? false
@@ -959,6 +1120,27 @@ final class Settings {
         launchAtLogin = defaults.object(forKey: Keys.launchAtLogin) as? Bool ?? false
         let appearStr = defaults.string(forKey: Keys.appAppearanceMode) ?? AppAppearanceMode.menuBarOnly.rawValue
         appAppearanceMode = AppAppearanceMode(rawValue: appearStr) ?? .menuBarOnly
+
+        // Mandarin model coercion: reading `self` properties requires all stored
+        // properties to be initialized first, so these run last even though they
+        // logically belong with the language/post-processing decoding above.
+        // A stored selection can outlive the hardware that could run it — a
+        // migration from an Apple Silicon Mac carries the preference across.
+        // Coerce in memory only, so the stored choice still applies if the same
+        // home directory later lands back on a Mac with a Neural Engine.
+        var effectiveParakeetModelChoice = persistedParakeetModelChoice
+        if !effectiveParakeetModelChoice.isAvailableOnThisMac {
+            effectiveParakeetModelChoice = ParakeetModelChoice.availableFallback(for: selectedLanguage)
+            parakeetModelChoice = effectiveParakeetModelChoice
+        }
+        if !effectiveParakeetModelChoice.supportsLanguage(selectedLanguage) {
+            selectedLanguage = .english
+        }
+        if engineChoice == .parakeet,
+           !effectiveParakeetModelChoice.supportsFluidAudioVocabulary,
+           transcriptPostProcessingMode == .fluidAudioVocabulary {
+            transcriptPostProcessingMode = .none
+        }
 
         updateLoginItem()
     }
@@ -1067,17 +1249,32 @@ final class Settings {
     func removeFillerWords(from text: String) -> String {
         guard isFillerWordRemovalEnabled, !fillerWordsToRemove.isEmpty else { return text }
 
-        // Build and cache the regex (invalidated when fillerWordsToRemove changes)
         let regex: NSRegularExpression
         if let cached = cachedFillerRegex {
             regex = cached
         } else {
-            let escapedWords = fillerWordsToRemove
-                .map { NSRegularExpression.escapedPattern(for: $0.trimmingCharacters(in: .whitespaces)) }
-                .filter { !$0.isEmpty }
-            guard !escapedWords.isEmpty else { return text }
+            let alternatives = fillerWordsToRemove.compactMap { word -> String? in
+                let trimmed = word.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return nil }
+                let escaped = NSRegularExpression.escapedPattern(for: trimmed)
+                // \b is meaningless inside unsegmented Han text, so Han fillers
+                // cannot anchor on it. A curated pure interjection matches bare,
+                // with a trailing + to collapse stutters (嗯嗯). Every other Han
+                // filler is boundary-anchored so it is only removed when
+                // standing alone — a word-forming character such as the
+                // Cantonese negator 唔 must never be cut out of running text.
+                if trimmed.unicodeScalars.contains(where: { CJKText.isCJK($0) }) {
+                    let repeated = "(?:\(escaped))+"
+                    guard Self.bareMatchCJKFillers.contains(trimmed) else {
+                        return "(?<![^\\s\\p{P}])\(repeated)(?![^\\s\\p{P}])"
+                    }
+                    return repeated
+                }
+                return "\\b\(escaped)\\b"
+            }
+            guard !alternatives.isEmpty else { return text }
 
-            let pattern = "\\b(" + escapedWords.joined(separator: "|") + ")\\b"
+            let pattern = "(?:" + alternatives.joined(separator: "|") + ")"
             do {
                 let compiled = try NSRegularExpression(pattern: pattern, options: .caseInsensitive)
                 cachedFillerRegex = compiled
@@ -1096,6 +1293,13 @@ final class Settings {
         result = result.replacingOccurrences(of: " .", with: ".")
         result = result.replacingOccurrences(of: " !", with: "!")
         result = result.replacingOccurrences(of: " ?", with: "?")
+        result = result.replacingOccurrences(of: " \u{FF0C}", with: "\u{FF0C}")   // ，
+        result = result.replacingOccurrences(of: " \u{3002}", with: "\u{3002}")   // 。
+        result = result.replacingOccurrences(of: " \u{FF01}", with: "\u{FF01}")   // ！
+        result = result.replacingOccurrences(of: " \u{FF1F}", with: "\u{FF1F}")   // ？
+        while result.contains("\u{FF0C}\u{FF0C}") {
+            result = result.replacingOccurrences(of: "\u{FF0C}\u{FF0C}", with: "\u{FF0C}")
+        }
         return result.trimmingCharacters(in: .whitespaces)
     }
 

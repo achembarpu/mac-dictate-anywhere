@@ -147,14 +147,15 @@ private extension ParakeetModelChoice {
             return .v2
         case .compactEnglish:
             return .tdtCtc110m
-        case .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
+        case .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240,
+             .senseVoice, .nemotronMultilingual:
             return nil
         }
     }
 
     nonisolated var streamingModelVariant: StreamingModelVariant? {
         switch self {
-        case .multilingual, .englishOnly, .compactEnglish:
+        case .multilingual, .englishOnly, .compactEnglish, .senseVoice, .nemotronMultilingual:
             return nil
         case .parakeetEou320:
             return .parakeetEou320ms
@@ -179,6 +180,28 @@ nonisolated private func fluidAudioModelCacheRoot() -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         .appendingPathComponent("FluidAudio", isDirectory: true)
         .appendingPathComponent("Models", isDirectory: true)
+}
+
+/// Removes now-empty parent directories left behind after deleting a model
+/// variant nested under the FluidAudio cache root (e.g. deleting
+/// "nemotron-multilingual/multilingual/1120ms" should also remove the
+/// now-empty "nemotron-multilingual/multilingual" and "nemotron-multilingual"
+/// directories). Stops as soon as a directory is non-empty, missing, or is
+/// the cache root itself — the cache root is never removed.
+nonisolated private func removeEmptyParentDirectories(from directory: URL) {
+    let fileManager = FileManager.default
+    let cacheRootComponents = fluidAudioModelCacheRoot().standardizedFileURL.pathComponents
+    var current = directory.standardizedFileURL
+
+    while current.pathComponents.count > cacheRootComponents.count,
+          Array(current.pathComponents.prefix(cacheRootComponents.count)) == cacheRootComponents {
+        guard let contents = try? fileManager.contentsOfDirectory(atPath: current.path),
+              contents.isEmpty else {
+            break
+        }
+        try? fileManager.removeItem(at: current)
+        current = current.deletingLastPathComponent()
+    }
 }
 
 // MARK: - Protocol
@@ -426,13 +449,38 @@ final class ParakeetEngine: TranscriptionEngine {
     private let minimumSpeechPeak: Float = 0.02
     private let minimumSpeechSampleRatio: Float = 0.015
     private let transcriptionIntervalMs: UInt64 = 500
-    private let sampleRate: Int = 16_000
+    private let sampleRate: Int = ParakeetEngine.transcriptionSampleRate
     private let minTranscriptionDeltaSamples: Int = 4_800
     private let audioLevelWindowSamples: Int = 1_600
     private let speechCheckWindowSamples: Int = 8_000
 
+    static let transcriptionSampleRate = 16_000
+    static let chunkTranscriptionSeconds = 20
+
+    /// Samples committed per buffered transcription chunk.
+    ///
+    /// Chunks are disjoint: `commitBufferedChunksIfNeeded` drops exactly this
+    /// many samples after each commit and retains no overlap, so consecutive
+    /// chunk transcripts meet at a hard seam that `joinChunkTranscripts` has
+    /// to join without removing anything. Tests split fixture audio on this
+    /// boundary to exercise that seam.
+    static var chunkTranscriptionSampleCount: Int {
+        transcriptionSampleRate * chunkTranscriptionSeconds
+    }
+
+    /// SenseVoice's fp16/int8 encoders are correct only on the Neural Engine —
+    /// FluidAudio documents them as producing NaN on CPU/GPU paths. The fp32
+    /// build runs on any compute unit, so non-ANE Macs load that instead.
+    /// `nonisolated`: the target defaults to `MainActor` isolation, but the
+    /// on-disk check and the ASR coordinator actor both read this from outside
+    /// the main actor. It derives from a compile-time constant, so there is no
+    /// state to protect.
+    nonisolated static var senseVoiceEncoderPrecision: SenseVoiceEncoderPrecision {
+        Hardware.canUseAppleNeuralEngine ? .int8 : .fp32
+    }
+
     /// Keeps pending Parakeet context bounded for long recordings.
-    private var chunkTranscriptionSamples: Int { sampleRate * 20 }
+    private var chunkTranscriptionSamples: Int { Self.chunkTranscriptionSampleCount }
     private var maxPendingSamplesBeforeCommit: Int { sampleRate * 30 }
     private var hardPendingSampleCap: Int { sampleRate * 120 }
 
@@ -550,6 +598,18 @@ final class ParakeetEngine: TranscriptionEngine {
             return AsrModels.modelsExist(at: modelDirectory, version: modelVersion)
         }
 
+        if modelChoice == .senseVoice {
+            let dir = fluidAudioModelCacheRoot()
+                .appendingPathComponent(modelChoice.modelDirectoryName, isDirectory: true)
+            return SenseVoiceModels.modelsExist(at: dir, precision: Self.senseVoiceEncoderPrecision)
+        }
+
+        if modelChoice == .nemotronMultilingual {
+            return nemotronMultilingualVariantIsComplete(
+                at: fluidAudioModelCacheRoot()
+                    .appendingPathComponent(modelChoice.modelDirectoryName, isDirectory: true))
+        }
+
         guard let variant = modelChoice.streamingModelVariant else { return false }
         let modelDirectory = fluidAudioModelCacheRoot().appendingPathComponent(variant.repo.folderName, isDirectory: true)
         guard FileManager.default.fileExists(atPath: modelDirectory.path) else { return false }
@@ -562,11 +622,51 @@ final class ParakeetEngine: TranscriptionEngine {
             requiredModels = ModelNames.NemotronStreaming.requiredModels
         case .multilingual, .englishOnly, .compactEnglish:
             return false
+        case .senseVoice, .nemotronMultilingual:
+            // Handled above; unreachable here.
+            return false
         }
 
         return requiredModels.allSatisfy {
             FileManager.default.fileExists(atPath: modelDirectory.appendingPathComponent($0).path)
         }
+    }
+
+    /// True when `directory` holds every artifact
+    /// `StreamingNemotronMultilingualAsrManager.loadModels(from:)` needs.
+    ///
+    /// `metadata.json` alone used to stand in for the whole variant, but it is
+    /// a 3 KB file that lands long before the ~600 MB encoder, so a download
+    /// interrupted part-way reported the model as installed and then failed at
+    /// load time. This checks the artifacts the loader actually opens, in the
+    /// same order of preference: compiled `.mlmodelc` first, uncompiled
+    /// `.mlpackage` second (the loader compiles and caches those in place).
+    ///
+    /// The decode stage is satisfied by either the separate decoder + joint
+    /// pair or any of the fused bundles, because the loader treats the pair as
+    /// optional once a fusion is present. `preprocessor` is deliberately *not*
+    /// required: FluidAudio replaced the CoreML preprocessor with a native
+    /// Swift log-mel front-end (their issue #739) and never opens it, so
+    /// demanding it would report a perfectly loadable variant as missing.
+    nonisolated private static func nemotronMultilingualVariantIsComplete(at directory: URL) -> Bool {
+        typealias Names = ModelNames.NemotronMultilingualStreaming
+        let fileManager = FileManager.default
+
+        func exists(_ name: String) -> Bool {
+            fileManager.fileExists(atPath: directory.appendingPathComponent(name).path)
+        }
+        /// A CoreML bundle counts as present in either compiled or raw form.
+        func hasBundle(_ baseName: String) -> Bool {
+            exists("\(baseName).mlmodelc") || exists("\(baseName).mlpackage")
+        }
+
+        guard exists(Names.metadata), exists(Names.tokenizer) else { return false }
+        guard hasBundle(Names.encoder) else { return false }
+
+        let hasSeparateDecodeStage = hasBundle(Names.decoder) && hasBundle(Names.joint)
+        let hasFusedDecodeStage = ["decoder_joint", "decoder_joint_noencproj", "decoder_joint_argmax"]
+            .contains(where: hasBundle)
+        return hasSeparateDecodeStage || hasFusedDecodeStage
     }
 
     func downloadModel() async throws {
@@ -592,7 +692,10 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         do {
-            if modelChoice.usesTrueStreaming {
+            if modelChoice == .senseVoice {
+                try await asrCoordinator.initializeSenseVoice()
+                loadedModels = nil
+            } else if modelChoice.usesTrueStreaming {
                 try await asrCoordinator.initializeStreaming(modelChoice: modelChoice)
                 loadedModels = nil
             } else if let modelVersion = modelChoice.tdtModelVersion {
@@ -633,11 +736,12 @@ final class ParakeetEngine: TranscriptionEngine {
         } else if let variant = modelChoice.streamingModelVariant {
             path = fluidAudioModelCacheRoot().appendingPathComponent(variant.repo.folderName, isDirectory: true)
         } else {
-            throw TranscriptionError.engineNotReady
+            path = fluidAudioModelCacheRoot().appendingPathComponent(modelChoice.modelDirectoryName, isDirectory: true)
         }
 
         if FileManager.default.fileExists(atPath: path.path) {
             try FileManager.default.removeItem(at: path)
+            removeEmptyParentDirectories(from: path.deletingLastPathComponent())
         }
 
         if await asrCoordinator.isInitialized(for: modelChoice) {
@@ -677,6 +781,24 @@ final class ParakeetEngine: TranscriptionEngine {
             await MainActor.run {
                 self.isReady = false
                 self.isModelDownloaded = false
+            }
+            return
+        }
+
+        if modelChoice == .senseVoice {
+            do {
+                try await asrCoordinator.initializeSenseVoice()
+            } catch {
+                await asrCoordinator.cleanup()
+                loadedModels = nil
+                await MainActor.run { self.isReady = false }
+                throw error
+            }
+            loadedModels = nil
+            modelOnDiskCached[modelChoice] = true
+            await MainActor.run {
+                self.isReady = true
+                self.isModelDownloaded = true
             }
             return
         }
@@ -752,6 +874,10 @@ final class ParakeetEngine: TranscriptionEngine {
             throw TranscriptionError.engineNotReady
         }
         try await asrCoordinator.resetSession(for: modelChoice)
+
+        if modelChoice == .nemotronMultilingual {
+            await asrCoordinator.setStreamingLanguage(Settings.shared.selectedLanguage.nemotronLanguageCode)
+        }
 
         // Ensure a previous engine is fully torn down before starting a new one.
         await teardownAudioEngineIfNeeded()
@@ -918,7 +1044,7 @@ final class ParakeetEngine: TranscriptionEngine {
                     let result = try await asrCoordinator.transcribe(pendingSamples)
                     logger.info("transcriptionLoop: transcribe returned \(result.text.count, privacy: .public) chars")
                     let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let merged = mergeTranscripts(base: committedTranscript, addition: text)
+                    let merged = Self.joinChunkTranscripts(base: committedTranscript, addition: text)
                     if !merged.isEmpty {
                         await MainActor.run { self.currentTranscript = merged }
                     }
@@ -1022,7 +1148,7 @@ final class ParakeetEngine: TranscriptionEngine {
         do {
             let result = try await asrCoordinator.transcribe(samples)
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            finalTranscript = mergeTranscripts(base: finalTranscript, addition: text)
+            finalTranscript = Self.joinChunkTranscripts(base: finalTranscript, addition: text)
         } catch {
             // Fall through to length comparison below
         }
@@ -1152,7 +1278,7 @@ final class ParakeetEngine: TranscriptionEngine {
                     }
                 }
                 if !text.isEmpty {
-                    committedTranscript = mergeTranscripts(base: committedTranscript, addition: text)
+                    committedTranscript = Self.joinChunkTranscripts(base: committedTranscript, addition: text)
                     await MainActor.run { self.currentTranscript = committedTranscript }
                 }
             } catch {
@@ -1162,32 +1288,49 @@ final class ParakeetEngine: TranscriptionEngine {
         }
     }
 
-    private func mergeTranscripts(base: String, addition: String) -> String {
+    /// Joins two transcripts of **disjoint** audio at a chunk seam.
+    ///
+    /// `commitBufferedChunksIfNeeded` transcribes a fixed-size prefix and then
+    /// drops exactly those samples, retaining no overlap, so consecutive chunk
+    /// transcripts describe audio that never repeats. Every caller joins such a
+    /// seam: the live-preview loop appends the pending buffer's transcript to
+    /// the already-committed chunks (whose samples are gone from the buffer),
+    /// finalize appends the leftover tail, and the commit loop appends the
+    /// chunk it just removed.
+    ///
+    /// This therefore concatenates and only decides the separator — it must
+    /// never remove text. Suffix/prefix overlap deduplication used to run here,
+    /// but on disjoint input a "repeat" is speech the user actually said:
+    /// "我真的不知道" + "不知道该怎么办" collapsed to "我真的不知道该怎么办",
+    /// losing a 不知道. Measured against a real fixture, dedup reached a 0.38
+    /// character-error rate at cleanly-aligned seams (it deleted a whole
+    /// repeated sentence) where plain concatenation scored 0.0000.
+    nonisolated static func joinChunkTranscripts(base: String, addition: String) -> String {
         let lhs = base.trimmingCharacters(in: .whitespacesAndNewlines)
         let rhs = addition.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !rhs.isEmpty else { return lhs }
         guard !lhs.isEmpty else { return rhs }
 
-        if lhs.hasSuffix(rhs) { return lhs }
-        if rhs.hasPrefix(lhs) { return rhs }
+        return lhs + chunkSeamSeparator(lhs: lhs, rhs: rhs) + rhs
+    }
 
-        let maxOverlap = min(120, min(lhs.count, rhs.count))
-        if maxOverlap > 0 {
-            for overlap in stride(from: maxOverlap, through: 8, by: -1) {
-                let leftSlice = lhs.suffix(overlap)
-                let rightSlice = rhs.prefix(overlap)
-                if leftSlice == rightSlice {
-                    let tail = String(rhs.dropFirst(overlap)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !tail.isEmpty else { return lhs }
-                    let separator = lhs.hasSuffix(" ") || tail.hasPrefix(",") || tail.hasPrefix(".") ? "" : " "
-                    return lhs + separator + tail
-                }
+    private nonisolated static func chunkSeamSeparator(lhs: String, rhs: String) -> String {
+        if lhs.hasSuffix(" ") { return "" }
+        if rhs.hasPrefix(",") || rhs.hasPrefix(".") { return "" }
+        if let first = rhs.unicodeScalars.first {
+            // Terminal and closing punctuation belongs to the text on its left,
+            // so it never takes a space before it.
+            if CJKText.cjkAttachedLeadingPunctuation.contains(first.value) { return "" }
+            // An opening bracket belongs to the text on its right; the space in
+            // front of one depends on the left side instead.
+            if CJKText.cjkOpeningPunctuation.contains(first.value) {
+                return CJKText.endsWithCJK(lhs) ? "" : " "
             }
         }
-
-        let separator = lhs.hasSuffix(" ") || rhs.hasPrefix(",") || rhs.hasPrefix(".") ? "" : " "
-        return lhs + separator + rhs
+        // No space between Han characters across a chunk boundary.
+        if CJKText.endsWithCJK(lhs) && CJKText.startsWithCJK(rhs) { return "" }
+        return " "
     }
 
     // MARK: - Audio Engine Lifecycle
@@ -1249,6 +1392,8 @@ private actor AsrManagerCoordinator {
     private var models: AsrModels?
     private var streamingManager: (any StreamingAsrManager)?
     private var streamingModelChoice: ParakeetModelChoice?
+    private var senseVoiceManager: SenseVoiceManager?
+    private var multilingualManager: StreamingNemotronMultilingualAsrManager?
     private var pendingEndOfUtterance = false
     private var ctcModels: CtcModels?
     private var ctcTokenizer: CtcTokenizer?
@@ -1257,13 +1402,38 @@ private actor AsrManagerCoordinator {
         category: "AsrCoordinator"
     )
 
-    func isInitialized() -> Bool { manager != nil || streamingManager != nil }
+    func isInitialized() -> Bool {
+        manager != nil || streamingManager != nil || senseVoiceManager != nil || multilingualManager != nil
+    }
 
     func isInitialized(for modelChoice: ParakeetModelChoice) -> Bool {
-        if let modelVersion = modelChoice.tdtModelVersion {
-            return manager != nil && models?.version == modelVersion
+        switch modelChoice {
+        case .senseVoice:
+            return senseVoiceManager != nil
+        case .nemotronMultilingual:
+            return multilingualManager != nil
+        default:
+            if let modelVersion = modelChoice.tdtModelVersion {
+                return manager != nil && models?.version == modelVersion
+            }
+            return streamingManager != nil && streamingModelChoice == modelChoice
         }
-        return streamingManager != nil && streamingModelChoice == modelChoice
+    }
+
+    func initializeSenseVoice() async throws {
+        await cleanup()
+        // int8: ~225 MB, ANE-targeted, accuracy-neutral per FluidAudio docs.
+        // Non-ANE Macs get the fp32 encoder instead — see senseVoiceEncoderPrecision.
+        let precision = ParakeetEngine.senseVoiceEncoderPrecision
+        let svModels = try await SenseVoiceModels.downloadAndLoad(precision: precision)
+        // textNorm 14 = withitn: punctuated, inverse-text-normalized output.
+        // The library default (15) strips punctuation — unusable for dictation.
+        senseVoiceManager = SenseVoiceManager(
+            models: svModels,
+            language: SenseVoiceConfig.defaultLanguage,  // 0 = auto-detect (zh/en code-switch)
+            textNorm: 14
+        )
+        logger.info("initializeSenseVoice: completed")
     }
 
     func initialize(models: AsrModels, config: ASRConfig) async throws {
@@ -1278,6 +1448,9 @@ private actor AsrManagerCoordinator {
 
     func initializeStreaming(modelChoice: ParakeetModelChoice) async throws {
         guard modelChoice.usesTrueStreaming else { throw TranscriptionError.engineNotReady }
+        // The picker already hides ANE-only models on Intel; this stops a stale
+        // persisted selection from starting a download that can never load.
+        guard modelChoice.isAvailableOnThisMac else { throw TranscriptionError.engineNotReady }
         if isInitialized(for: modelChoice) {
             try await resetSession(for: modelChoice)
             return
@@ -1310,7 +1483,21 @@ private actor AsrManagerCoordinator {
             try await streaming.loadModels(to: fluidAudioModelCacheRoot(), configuration: nil, progressHandler: nil)
             streamingManager = streaming
             streamingModelChoice = modelChoice
-        case .multilingual, .englishOnly, .compactEnglish:
+        case .nemotronMultilingual:
+            let streaming = StreamingNemotronMultilingualAsrManager(configuration: nil)
+            // Full-vocab variant ("auto" → multilingual/) at the 1120 ms tier:
+            // one download covers every language; punctuation degrades at 560 ms.
+            let variantDir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+                languageCode: "auto",
+                chunkMs: 1120,
+                to: nil,
+                progressHandler: nil
+            )
+            try await streaming.loadModels(from: variantDir)
+            multilingualManager = streaming
+            streamingModelChoice = modelChoice
+        case .multilingual, .englishOnly, .compactEnglish, .senseVoice:
+            // .senseVoice never reaches this switch (usesTrueStreaming is false, guarded above).
             throw TranscriptionError.engineNotReady
         }
 
@@ -1319,6 +1506,14 @@ private actor AsrManagerCoordinator {
 
     func resetSession(for modelChoice: ParakeetModelChoice) async throws {
         guard modelChoice.usesTrueStreaming else { return }
+        if modelChoice == .nemotronMultilingual {
+            guard let multilingualManager, streamingModelChoice == modelChoice else {
+                throw TranscriptionError.engineNotReady
+            }
+            pendingEndOfUtterance = false
+            await multilingualManager.reset()
+            return
+        }
         guard let streamingManager, streamingModelChoice == modelChoice else {
             throw TranscriptionError.engineNotReady
         }
@@ -1327,6 +1522,16 @@ private actor AsrManagerCoordinator {
     }
 
     func transcribe(_ samples: [Float]) async throws -> ASRResult {
+        if let senseVoiceManager {
+            let startedAt = Date()
+            let text = try await senseVoiceManager.transcribe(audio: samples)
+            return ASRResult(
+                text: text,
+                confidence: 0.0,
+                duration: Double(samples.count) / 16_000.0,
+                processingTime: Date().timeIntervalSince(startedAt)
+            )
+        }
         guard let manager else { throw TranscriptionError.engineNotReady }
         logger.info("transcribe: calling manager.transcribe with \(samples.count, privacy: .public) samples")
         var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
@@ -1428,24 +1633,44 @@ private actor AsrManagerCoordinator {
     }
 
     func appendStreamingAudio(_ buffer: AVAudioPCMBuffer) async throws {
+        if let multilingualManager {
+            try await multilingualManager.appendAudio(buffer)
+            return
+        }
         guard let streamingManager else { throw TranscriptionError.engineNotReady }
         try await streamingManager.appendAudio(buffer)
     }
 
     func processStreamingAudio() async throws {
+        if let multilingualManager {
+            // process(samples: []) drains any complete chunks already appended.
+            _ = try await multilingualManager.process(samples: [])
+            return
+        }
         guard let streamingManager else { throw TranscriptionError.engineNotReady }
         try await streamingManager.processBufferedAudio()
     }
 
     func currentStreamingTranscript() async -> String {
+        if let multilingualManager {
+            return await multilingualManager.getPartialTranscript()
+        }
         guard let streamingManager else { return "" }
         return await streamingManager.getPartialTranscript()
     }
 
     func finishStreaming() async throws -> String {
+        if let multilingualManager {
+            pendingEndOfUtterance = false
+            return try await multilingualManager.finish()
+        }
         guard let streamingManager else { throw TranscriptionError.engineNotReady }
         pendingEndOfUtterance = false
         return try await streamingManager.finish()
+    }
+
+    func setStreamingLanguage(_ code: String?) async {
+        await multilingualManager?.setLanguage(code)
     }
 
     private func markEndOfUtteranceDetected() {
@@ -1466,10 +1691,15 @@ private actor AsrManagerCoordinator {
         if let streamingManager {
             await streamingManager.cleanup()
         }
+        if let multilingualManager {
+            await multilingualManager.cleanup()
+        }
         manager = nil
         models = nil
         streamingManager = nil
         streamingModelChoice = nil
+        senseVoiceManager = nil
+        multilingualManager = nil
         pendingEndOfUtterance = false
         ctcModels = nil
         ctcTokenizer = nil
