@@ -61,7 +61,9 @@ final class AppState {
     let audioDeviceManager = AudioDeviceManager()
     let parakeetEngine = ParakeetEngine()
     let appleSpeechEngine = AppleSpeechEngine()
+    let inputSourceMonitor = InputSourceMonitor()
     var appleSpeechSupportedLanguages: [SupportedLanguage] = []
+    var appleSpeechInstalledLanguages: [SupportedLanguage] = []
     private var isShowingMigrationAlert = false
 
     /// Whether the app is transitioning between states (simple guard)
@@ -86,6 +88,9 @@ final class AppState {
     private var startupTask: Task<Void, Never>?
     private var hasStarted = false
 
+    /// Serializes profile applies; a change arriving mid-apply queues behind it.
+    private var inputSourceApplyTask: Task<Void, Never>?
+
     // MARK: - Active Engine
 
     var activeEngine: TranscriptionEngine {
@@ -106,6 +111,7 @@ final class AppState {
     init() {
         setupHotkeyCallbacks()
         setupPermissionCallbacks()
+        setupInputSourceCallbacks()
     }
 
     // MARK: - Hotkey Callbacks
@@ -156,6 +162,12 @@ final class AppState {
         }
     }
 
+    private func setupInputSourceCallbacks() {
+        inputSourceMonitor.onSelectedInputSourceChanged = { [weak self] inputSourceID in
+            self?.enqueueInputSourceProfileApply(for: inputSourceID)
+        }
+    }
+
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
@@ -169,6 +181,12 @@ final class AppState {
         await permissions.check()
         updateAccessibilityIntegration(granted: permissions.accessibilityGranted, promptIfNeeded: true)
         await prepareActiveEngine()
+        await refreshAppleSpeechAssetState()
+        inputSourceMonitor.startMonitoring()
+        if settings.inputSourceAutoSwitchEnabled,
+           let inputSourceID = inputSourceMonitor.currentInputSourceID() {
+            await enqueueInputSourceProfileApply(for: inputSourceID).value
+        }
     }
 
     private func handleAccessibilityPermissionChanged(_ granted: Bool) {
@@ -212,7 +230,7 @@ final class AppState {
                 settings.legacyAppleSpeechMigrationPending = false
             }
         case .appleSpeech:
-            await refreshAppleSpeechLanguages()
+            await refreshAppleSpeechAssetState()
             if !appleSpeechSupportedLanguages.contains(settings.appleSpeechLanguage),
                let fallback = appleSpeechSupportedLanguages.first {
                 settings.appleSpeechLanguage = fallback
@@ -239,6 +257,12 @@ final class AppState {
                 }
             }
             logger.info("prepareActiveEngine: prepare() completed, isReady=\(self.activeEngine.isReady, privacy: .public)")
+        }
+        // A just-completed prepare may have installed the Apple Speech asset
+        // the input-source mapping hint is watching; refresh so the hint
+        // clears without waiting for settings to reopen.
+        if settings.engineChoice == .appleSpeech {
+            appleSpeechInstalledLanguages = await AppleSpeechEngine.installedLanguages()
         }
         isPreparingEngine = false
     }
@@ -273,8 +297,130 @@ final class AppState {
         await prepareActiveEngine()
     }
 
-    private func refreshAppleSpeechLanguages() async {
+    /// Refreshes both the supportable and the installed Apple Speech language
+    /// sets. Installed state drives the input-source mapping UI, so it must be
+    /// fresh even while FluidAudio is the active engine.
+    func refreshAppleSpeechAssetState() async {
         appleSpeechSupportedLanguages = await AppleSpeechEngine.supportedLanguages()
+        appleSpeechInstalledLanguages = await AppleSpeechEngine.installedLanguages()
+    }
+
+    // MARK: - Input Source Auto-Switch
+
+    /// Serializes calls to `applyInputSourceProfile` so overlapping input
+    /// source changes apply in order. Internal (not private) so callers
+    /// outside AppState — e.g. the startup sequence and settings UI — also
+    /// go through the queue instead of calling `applyInputSourceProfile`
+    /// directly.
+    @discardableResult
+    func enqueueInputSourceProfileApply(
+        for inputSourceID: String,
+        showLoadingOverlay: Bool = false
+    ) -> Task<Void, Never> {
+        let previous = inputSourceApplyTask
+        let task = Task { [weak self] in
+            await previous?.value
+            await self?.applyInputSourceProfile(for: inputSourceID, showLoadingOverlay: showLoadingOverlay)
+        }
+        inputSourceApplyTask = task
+        return task
+    }
+
+    func applyInputSourceProfile(for inputSourceID: String, showLoadingOverlay: Bool = false) async {
+        // Looked up (and, for Apple Speech, awaited) before the idle guard so
+        // no suspension point lands between the guard and the settings
+        // writes below — an in-flight recording-start guard check must never
+        // race a suspended apply.
+        let mapping = settings.mapping(forInputSourceID: inputSourceID)
+        let installedAppleSpeechLanguages = mapping?.engine == .appleSpeech
+            ? await AppleSpeechEngine.installedLanguages()
+            : []
+        guard status == .idle else { return }
+        if mapping?.engine == .appleSpeech {
+            appleSpeechInstalledLanguages = installedAppleSpeechLanguages
+        }
+        let resolution = InputSourceProfileResolver.resolve(
+            mapping: mapping,
+            enabled: settings.inputSourceAutoSwitchEnabled,
+            currentEngine: settings.engineChoice,
+            currentParakeetModel: settings.parakeetModelChoice,
+            currentFluidAudioLanguage: settings.selectedLanguage,
+            currentAppleSpeechLanguage: settings.appleSpeechLanguage,
+            appleSpeechSupported: AppleSpeechEngine.isSupported,
+            // Availability = on disk AND runnable by this process (FluidAudio
+            // hard-fails Nemotron multilingual under Rosetta/x86_64).
+            isModelDownloaded: { parakeetEngine.checkModelOnDisk(for: $0) && $0.isAvailableOnThisMac },
+            isAppleSpeechAssetInstalled: { installedAppleSpeechLanguages.contains($0) }
+        )
+
+        var targetEngine = "n/a"
+        var targetModel = "n/a"
+        if case .fullApply = resolution, let mapping {
+            targetEngine = mapping.engine.rawValue
+            targetModel = mapping.parakeetModel?.rawValue ?? "n/a"
+        }
+        logger.info(
+            "applyInputSourceProfile: inputSourceID=\(inputSourceID, privacy: .public), resolution=\(String(describing: resolution), privacy: .public), targetEngine=\(targetEngine, privacy: .public), targetModel=\(targetModel, privacy: .public)"
+        )
+
+        switch resolution {
+        case .none, .inactive:
+            return
+
+        case .noChange:
+            // A source mapped to the already-active vocab-capable model must
+            // still trigger the restore (e.g. a prior switch away stripped
+            // `.fluidAudioVocabulary` and this source maps back to it).
+            settings.restoreVocabularyModeAfterAutoSwitchIfPending()
+            return
+
+        case .languageOnly(let language):
+            guard let mapping else { return }
+            switch mapping.engine {
+            case .parakeet:
+                // Read at recording start; no engine reload needed.
+                settings.selectedLanguage = language
+            case .appleSpeech:
+                if showLoadingOverlay { overlay.show(state: .preparingModel(name: "Apple Speech")) }
+                await handleAppleSpeechLanguageChange(language)
+                if showLoadingOverlay { overlay.hide(afterDelay: 0) }
+            }
+            settings.restoreVocabularyModeAfterAutoSwitchIfPending()
+
+        case .fullApply:
+            guard let mapping else { return }
+            let profileName = mapping.engine == .parakeet
+                ? (mapping.parakeetModel?.displayName ?? "model")
+                : "Apple Speech"
+            if showLoadingOverlay { overlay.show(state: .preparingModel(name: profileName)) }
+            switch mapping.engine {
+            case .parakeet:
+                guard let model = mapping.parakeetModel else { break }
+                let hadVocabularyMode = settings.transcriptPostProcessingMode == .fluidAudioVocabulary
+                // Model before language: the model didSet coerces unsupported
+                // languages back to English.
+                settings.parakeetModelChoice = model
+                settings.selectedLanguage = mapping.language
+                await handleParakeetModelSelectionChange(userInitiated: true)
+                settings.noteAutoSwitchModelChange(hadVocabularyMode: hadVocabularyMode)
+                settings.restoreVocabularyModeAfterAutoSwitchIfPending()
+            case .appleSpeech:
+                // Pin the language before the engine switch so the one and only
+                // prepare targets the gated, installed language (a stale
+                // appleSpeechLanguage would otherwise download the wrong
+                // assets). The explicit invalidate matters: a session prepared
+                // earlier for a different language would satisfy the isReady
+                // check in prepareActiveEngine and skip preparation entirely.
+                // handleEngineSelectionChange only invalidates when switching
+                // AWAY from Apple Speech, so it won't double-invalidate here,
+                // and no second language-change call is needed — that was the
+                // duplicate-preparation path.
+                settings.appleSpeechLanguage = mapping.language
+                await appleSpeechEngine.invalidatePreparedSession()
+                await handleEngineSelectionChange(.appleSpeech)
+            }
+            if showLoadingOverlay { overlay.hide(afterDelay: 0) }
+        }
     }
 
     // MARK: - Ollama Model Management
@@ -351,6 +497,12 @@ final class AppState {
             status = .idle
         }
         guard status == .idle, !isTransitioning else { return }
+        if settings.inputSourceAutoSwitchEnabled,
+           let inputSourceID = inputSourceMonitor.currentInputSourceID() {
+            // Backstop: the eager pre-warm usually already did this; going
+            // through the queue serializes against an apply still in flight.
+            await enqueueInputSourceProfileApply(for: inputSourceID, showLoadingOverlay: true).value
+        }
         let engine = activeEngine
         switch settings.engineChoice {
         case .parakeet:

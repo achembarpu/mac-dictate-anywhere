@@ -78,7 +78,7 @@ enum AppAppearanceMode: String, CaseIterable {
 
 // MARK: - Transcription Engine Choice
 
-enum TranscriptionEngineChoice: String, CaseIterable {
+enum TranscriptionEngineChoice: String, CaseIterable, Codable {
     case parakeet = "parakeet"
     case appleSpeech = "appleSpeech"
 
@@ -99,7 +99,7 @@ enum TranscriptionEngineChoice: String, CaseIterable {
     }
 }
 
-enum ParakeetModelChoice: String, CaseIterable {
+enum ParakeetModelChoice: String, CaseIterable, Codable {
     case multilingual = "multilingual"
     case englishOnly = "englishOnly"
     case compactEnglish = "compactEnglish"
@@ -528,6 +528,31 @@ struct HotkeyBinding: Codable, Identifiable, Equatable {
     )
 }
 
+/// One user-configured input-source → transcription-profile mapping.
+/// Language/model capability is never stored here — it is always resolved
+/// through `ParakeetModelChoice` / Apple Speech at read time.
+struct InputSourceMapping: Codable, Identifiable, Equatable {
+    var id: UUID
+    var inputSourceID: String
+    /// Cached for display when the source is no longer enabled in macOS.
+    var inputSourceDisplayName: String
+    var engine: TranscriptionEngineChoice
+    /// Present iff `engine == .parakeet`.
+    var parakeetModel: ParakeetModelChoice?
+    var language: SupportedLanguage
+}
+
+/// Decode-tolerant shape: enum raw values may vanish across app versions,
+/// and a strict `[InputSourceMapping]` decode would throw away every entry.
+private struct RawInputSourceMapping: Decodable {
+    let id: UUID
+    let inputSourceID: String
+    let inputSourceDisplayName: String
+    let engine: String
+    let parakeetModel: String?
+    let language: String
+}
+
 struct TranscriptHistoryEntry: Identifiable, Codable, Equatable {
     let id: UUID
     let text: String
@@ -646,6 +671,9 @@ final class Settings {
         static let openAICompatibleBaseURL = "openAICompatibleBaseURL"
         static let openAICompatibleModel = "openAICompatibleModel"
         static let openAICompatiblePostProcessingPrompt = "openAICompatiblePostProcessingPrompt"
+        static let inputSourceMappings = "inputSourceMappings"
+        static let inputSourceAutoSwitchEnabled = "inputSourceAutoSwitchEnabled"
+        static let pendingVocabularyModeRestore = "pendingVocabularyModeRestore"
     }
 
     // MARK: - Hotkey Settings
@@ -723,6 +751,63 @@ final class Settings {
     var appleSpeechLanguage: SupportedLanguage {
         didSet {
             UserDefaults.standard.set(appleSpeechLanguage.rawValue, forKey: Keys.appleSpeechLanguage)
+        }
+    }
+
+    // MARK: - Input Source Auto-Switch
+
+    var inputSourceMappings: [InputSourceMapping] {
+        didSet {
+            guard let data = try? JSONEncoder().encode(inputSourceMappings) else { return }
+            UserDefaults.standard.set(data, forKey: Keys.inputSourceMappings)
+        }
+    }
+
+    var inputSourceAutoSwitchEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(inputSourceAutoSwitchEnabled, forKey: Keys.inputSourceAutoSwitchEnabled)
+        }
+    }
+
+    /// Set when an auto-switch coerced `.fluidAudioVocabulary` away because
+    /// the destination model didn't support it. Consulted the next time an
+    /// auto-switch lands so the mode can be restored once a vocab-capable
+    /// model is active again, without clobbering a mode the user picked
+    /// manually in the meantime.
+    var pendingVocabularyModeRestore: Bool {
+        didSet {
+            UserDefaults.standard.set(pendingVocabularyModeRestore, forKey: Keys.pendingVocabularyModeRestore)
+        }
+    }
+
+    /// Decodes mappings, dropping entries whose enum raw values no longer
+    /// exist and parakeet entries missing a model. Also re-coerces the
+    /// language against the model's capability, since a model's supported
+    /// language set can change across app versions after a mapping was
+    /// stored (same rule as the `parakeetModelChoice` didSet and the
+    /// mutation helpers below).
+    nonisolated static func sanitizedMappings(from data: Data) -> [InputSourceMapping] {
+        guard let raw = try? JSONDecoder().decode([RawInputSourceMapping].self, from: data) else { return [] }
+        return raw.compactMap { entry in
+            guard let engine = TranscriptionEngineChoice(rawValue: entry.engine),
+                  var language = SupportedLanguage(rawValue: entry.language) else { return nil }
+            var model: ParakeetModelChoice?
+            if let rawModel = entry.parakeetModel {
+                guard let parsed = ParakeetModelChoice(rawValue: rawModel) else { return nil }
+                model = parsed
+            }
+            if engine == .parakeet, model == nil { return nil }
+            if engine == .parakeet, model?.supportsLanguage(language) == false {
+                language = .english
+            }
+            return InputSourceMapping(
+                id: entry.id,
+                inputSourceID: entry.inputSourceID,
+                inputSourceDisplayName: entry.inputSourceDisplayName,
+                engine: engine,
+                parakeetModel: model,
+                language: language
+            )
         }
     }
 
@@ -1031,6 +1116,15 @@ final class Settings {
         let appleLangCode = defaults.string(forKey: Keys.appleSpeechLanguage) ?? "en"
         appleSpeechLanguage = SupportedLanguage(rawValue: appleLangCode) ?? .english
 
+        // Input source auto-switching
+        if let mappingData = defaults.data(forKey: Keys.inputSourceMappings) {
+            inputSourceMappings = Self.sanitizedMappings(from: mappingData)
+        } else {
+            inputSourceMappings = []
+        }
+        inputSourceAutoSwitchEnabled = defaults.object(forKey: Keys.inputSourceAutoSwitchEnabled) as? Bool ?? false
+        pendingVocabularyModeRestore = defaults.object(forKey: Keys.pendingVocabularyModeRestore) as? Bool ?? false
+
         // Filler words
         isFillerWordRemovalEnabled = defaults.object(forKey: Keys.isFillerWordRemovalEnabled) as? Bool ?? false
         fillerWordsToRemove = defaults.object(forKey: Keys.fillerWordsToRemove) as? [String] ?? Self.defaultFillerWords
@@ -1198,6 +1292,105 @@ final class Settings {
     /// Removes a binding entirely
     func removeBinding(id: UUID) {
         hotkeyBindings.removeAll { $0.id == id }
+    }
+
+    // MARK: - Input Source Mapping Helpers
+
+    /// Adds a mapping for a not-yet-mapped input source, deriving sensible
+    /// defaults. `isModelDownloaded` is injected because on-disk state lives
+    /// in ParakeetEngine; auto-picking a model must never imply a download.
+    @discardableResult
+    func addInputSourceMapping(
+        inputSourceID: String,
+        displayName: String,
+        derivedLanguage: SupportedLanguage?,
+        isModelDownloaded: (ParakeetModelChoice) -> Bool
+    ) -> InputSourceMapping? {
+        guard !inputSourceMappings.contains(where: { $0.inputSourceID == inputSourceID }) else { return nil }
+        let engine = engineChoice
+        var language = derivedLanguage ?? (engine == .appleSpeech ? appleSpeechLanguage : selectedLanguage)
+        var model: ParakeetModelChoice?
+        if engine == .parakeet {
+            if let derived = derivedLanguage,
+               !parakeetModelChoice.supportsLanguage(derived),
+               let downloaded = ParakeetModelChoice.allCases.first(where: {
+                   $0.supportsLanguage(derived) && isModelDownloaded($0)
+               }) {
+                model = downloaded
+            } else {
+                model = parakeetModelChoice
+            }
+            if let chosen = model, !chosen.supportsLanguage(language) {
+                language = .english
+            }
+        }
+        let mapping = InputSourceMapping(
+            id: UUID(),
+            inputSourceID: inputSourceID,
+            inputSourceDisplayName: displayName,
+            engine: engine,
+            parakeetModel: model,
+            language: language
+        )
+        inputSourceMappings.append(mapping)
+        return mapping
+    }
+
+    /// Replaces a mapping by ID, normalizing model/language so every stored
+    /// mapping satisfies the capability rules. Apple Speech language
+    /// availability is validated at apply time (the authority is
+    /// AppleSpeechEngine, which Settings cannot query synchronously).
+    func updateInputSourceMapping(_ mapping: InputSourceMapping) {
+        guard let index = inputSourceMappings.firstIndex(where: { $0.id == mapping.id }) else { return }
+        guard !inputSourceMappings.contains(where: {
+            $0.id != mapping.id && $0.inputSourceID == mapping.inputSourceID
+        }) else { return }
+        var updated = mapping
+        switch updated.engine {
+        case .appleSpeech:
+            updated.parakeetModel = nil
+        case .parakeet:
+            let model = updated.parakeetModel ?? parakeetModelChoice
+            updated.parakeetModel = model
+            if !model.supportsLanguage(updated.language) {
+                updated.language = .english
+            }
+        }
+        inputSourceMappings[index] = updated
+    }
+
+    func removeInputSourceMapping(id: UUID) {
+        inputSourceMappings.removeAll { $0.id == id }
+    }
+
+    func mapping(forInputSourceID id: String) -> InputSourceMapping? {
+        inputSourceMappings.first { $0.inputSourceID == id }
+    }
+
+    /// Call right after an auto-switch may have driven the `parakeetModelChoice`
+    /// or `engineChoice` didSet coercion that strips `.fluidAudioVocabulary`.
+    /// `hadVocabularyMode` is the mode captured *before* that write. Sets the
+    /// pending-restore flag only when the coercion actually fired.
+    func noteAutoSwitchModelChange(hadVocabularyMode: Bool) {
+        guard hadVocabularyMode, transcriptPostProcessingMode != .fluidAudioVocabulary else { return }
+        pendingVocabularyModeRestore = true
+    }
+
+    /// Call after every auto-switch resolution (including no-ops) so a
+    /// pending restore lands as soon as a vocab-capable Parakeet model is
+    /// active again, without overriding a mode the user picked manually in
+    /// the meantime.
+    func restoreVocabularyModeAfterAutoSwitchIfPending() {
+        guard pendingVocabularyModeRestore else { return }
+
+        if transcriptPostProcessingMode == .fluidAudioVocabulary {
+            pendingVocabularyModeRestore = false
+        } else if transcriptPostProcessingMode != .none {
+            pendingVocabularyModeRestore = false
+        } else if engineChoice == .parakeet, parakeetModelChoice.supportsFluidAudioVocabulary {
+            transcriptPostProcessingMode = .fluidAudioVocabulary
+            pendingVocabularyModeRestore = false
+        }
     }
 
     func addTranscriptHistoryEntry(_ text: String) {
