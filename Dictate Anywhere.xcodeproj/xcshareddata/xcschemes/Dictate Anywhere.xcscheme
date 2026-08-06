@@ -59,6 +59,16 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "E2A66B572F18203C00DABF41"
+            BuildableName = "Dictate Anywhere.app"
+            BlueprintName = "Dictate Anywhere"
+            ReferencedContainer = "container:Dictate Anywhere.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "RUN_MODEL_SWITCH_BENCHMARK"
@@ -76,16 +86,6 @@
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "E2A66B572F18203C00DABF41"
-            BuildableName = "Dictate Anywhere.app"
-            BlueprintName = "Dictate Anywhere"
-            ReferencedContainer = "container:Dictate Anywhere.xcodeproj">
-         </BuildableReference>
-      </BuildableProductRunnable>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
