@@ -78,8 +78,10 @@ final class TextInserter {
     ) -> String {
         if let context,
            let style,
-           context.hasTextPositionSnapshot,
-           context.bundleIdentifier == targetBundleIdentifier {
+           Self.shouldUseContextualInsertion(
+               context: context,
+               targetBundleIdentifier: targetBundleIdentifier
+           ) {
             resetPendingSeparator()
             return Self.contextualizedForInsertion(
                 text,
@@ -100,6 +102,14 @@ final class TextInserter {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    static func shouldUseContextualInsertion(
+        context: DictationContext,
+        targetBundleIdentifier: String?
+    ) -> Bool {
+        context.bundleIdentifier == targetBundleIdentifier
+            && (context.hasTextPositionSnapshot || context.fieldPurpose == .searchQuery)
+    }
+
     /// Applies the retained cursor snapshot and category style without reading
     /// the destination again after the target app is reactivated.
     static func contextualizedForInsertion(
@@ -111,7 +121,13 @@ final class TextInserter {
         var body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return "" }
 
-        if context.continuesExistingSentence {
+        if context.fieldPurpose == .searchQuery {
+            body = removingLightFinalPeriod(from: body)
+            body = lowercasingLeadingOrdinaryWord(
+                in: body,
+                preserving: knownTerms + context.lexicalHints
+            )
+        } else if context.continuesExistingSentence {
             body = removingMidSentenceTerminalPunctuation(
                 from: body,
                 textAfterCursor: context.textAfterCursor

@@ -57,6 +57,39 @@ final class DictationContextTests: XCTestCase {
         )
     }
 
+    func testNativeSearchFieldSubroleIsClassifiedAsSearchQuery() {
+        XCTAssertEqual(
+            DictationFieldPurpose.classify(
+                role: "AXTextField",
+                subrole: "AXSearchField",
+                metadata: []
+            ),
+            .searchQuery
+        )
+    }
+
+    func testWebSearchFieldMetadataIsClassifiedAsSearchQuery() {
+        XCTAssertEqual(
+            DictationFieldPurpose.classify(
+                role: "AXTextField",
+                subrole: nil,
+                metadata: ["Search Amazon.ca", "twotabsearchtextbox"]
+            ),
+            .searchQuery
+        )
+    }
+
+    func testGenericTextFieldIsNotClassifiedAsSearchQuery() {
+        XCTAssertEqual(
+            DictationFieldPurpose.classify(
+                role: "AXTextField",
+                subrole: nil,
+                metadata: ["First name", "customer-name"]
+            ),
+            .unknown
+        )
+    }
+
     func testCategoryLimitsWritingStyleOptions() {
         XCTAssertEqual(
             DictationWritingStyle.options(for: .personalMessaging),
@@ -159,6 +192,58 @@ final class DictationContextTests: XCTestCase {
         XCTAssertEqual(output, "sounds good")
     }
 
+    func testSearchQueryInsertionDropsSpeechModelPeriodAndSentenceCapitalization() {
+        let output = TextInserter.contextualizedForInsertion(
+            "Inflatable pool.",
+            context: makeContext(
+                category: .other,
+                before: "",
+                after: "",
+                fieldRole: "AXTextField",
+                fieldPurpose: .searchQuery
+            ),
+            style: .original
+        )
+
+        XCTAssertEqual(output, "inflatable pool")
+    }
+
+    func testSearchQueryInsertionPreservesKnownTermCapitalization() {
+        let output = TextInserter.contextualizedForInsertion(
+            "Amazon Echo.",
+            context: makeContext(
+                category: .other,
+                before: "",
+                after: "",
+                fieldRole: "AXTextField",
+                fieldPurpose: .searchQuery
+            ),
+            style: .original,
+            knownTerms: ["Amazon Echo"]
+        )
+
+        XCTAssertEqual(output, "Amazon Echo")
+    }
+
+    func testSearchQueryUsesContextualInsertionWithoutTextPositionSnapshot() {
+        let context = makeContext(
+            category: .other,
+            before: nil,
+            selected: nil,
+            after: nil,
+            fieldRole: "AXTextField",
+            fieldPurpose: .searchQuery
+        )
+
+        XCTAssertFalse(context.hasTextPositionSnapshot)
+        XCTAssertTrue(
+            TextInserter.shouldUseContextualInsertion(
+                context: context,
+                targetBundleIdentifier: "com.example.target"
+            )
+        )
+    }
+
     func testInsertionInsideExistingSentenceDoesNotAddPeriod() {
         let output = TextInserter.contextualizedForInsertion(
             "brave new",
@@ -238,6 +323,19 @@ final class DictationContextTests: XCTestCase {
         XCTAssertTrue(context.requestSection.contains("<continues_existing_sentence>true</continues_existing_sentence>"))
     }
 
+    func testPostProcessingContextDeclaresSearchQueryRulesWithoutSharingCapturedText() {
+        let context = makeContext(
+            category: .other,
+            fieldRole: "AXTextField",
+            fieldPurpose: .searchQuery
+        ).postProcessingContext(style: .original, includeCapturedText: false)
+
+        XCTAssertTrue(context.instructions.contains("search or query field"))
+        XCTAssertTrue(context.instructions.contains("Do not add a final period"))
+        XCTAssertTrue(context.requestSection.contains("<field_purpose>search_query</field_purpose>"))
+        XCTAssertFalse(context.requestSection.contains("<field_role>"))
+    }
+
     func testCJKInsertionDoesNotAddLatinSpaces() {
         let output = TextInserter.contextualizedForInsertion(
             "朋友",
@@ -255,6 +353,9 @@ final class DictationContextTests: XCTestCase {
         before: String? = "",
         selected: String? = "",
         after: String? = "",
+        fieldRole: String? = "AXTextArea",
+        fieldSubrole: String? = nil,
+        fieldPurpose: DictationFieldPurpose = .unknown,
         isSecure: Bool = false,
         isExcluded: Bool = false
     ) -> DictationContext {
@@ -265,8 +366,9 @@ final class DictationContextTests: XCTestCase {
             category: category,
             documentURL: documentURL,
             documentTitle: "Document",
-            fieldRole: "AXTextArea",
-            fieldSubrole: nil,
+            fieldRole: fieldRole,
+            fieldSubrole: fieldSubrole,
+            fieldPurpose: fieldPurpose,
             textBeforeCursor: before,
             selectedText: selected,
             textAfterCursor: after,
