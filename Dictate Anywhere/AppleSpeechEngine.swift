@@ -77,6 +77,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
     private var activeSession: (any AppleSpeechSessionProtocol)?
     private var preparedLanguage: SupportedLanguage?
     private var preparedVocabulary: [String] = []
+    private var sessionContextualVocabulary: [String] = []
     private let levelSampleCap = 160_000
     private let audioCaptureStartupTimeout: TimeInterval = 5
     private let audioCaptureSetupQueue = DispatchQueue(
@@ -94,6 +95,10 @@ final class AppleSpeechEngine: TranscriptionEngine {
         stateLock.withLock {
             Array(levelSampleBuffer.suffix(max(0, count)))
         }
+    }
+
+    func setSessionContextualVocabulary(_ terms: [String]) {
+        sessionContextualVocabulary = terms
     }
 
     func prepare() async throws {
@@ -269,8 +274,16 @@ final class AppleSpeechEngine: TranscriptionEngine {
     }
 
     private func appleContextualVocabulary() -> [String] {
-        guard Settings.shared.fluidAudioVocabularyEnabled else { return [] }
-        return Settings.shared.customVocabulary
+        var terms = sessionContextualVocabulary
+        if Settings.shared.fluidAudioVocabularyEnabled {
+            terms.append(contentsOf: Settings.shared.customVocabulary)
+        }
+
+        var seen: Set<String> = []
+        return terms.filter {
+            let normalized = $0.lowercased()
+            return !$0.isEmpty && seen.insert(normalized).inserted
+        }
     }
 
     private func appendLevelSamples(_ samples: [Float]) {

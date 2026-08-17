@@ -80,6 +80,7 @@ final class AppState {
 
     /// App that was frontmost when dictation started (used as paste target)
     private var insertionTargetApp: NSRunningApplication?
+    private var sessionDictationContext: DictationContext?
 
     /// Engine pinned for the active dictation session (start -> stop/cancel).
     private var sessionEngine: TranscriptionEngine?
@@ -537,7 +538,8 @@ final class AppState {
                 return
             }
         }
-        captureInsertionTargetApp()
+        await captureInsertionTargetAppAndContext()
+        engine.setSessionContextualVocabulary(sessionDictationContext?.lexicalHints ?? [])
 
         isTransitioning = true
         pendingHoldRelease = false
@@ -621,6 +623,8 @@ final class AppState {
             overlay.show(state: .processing)
             overlay.hide(afterDelay: 2.0)
             insertionTargetApp = nil
+            sessionDictationContext = nil
+            engine.setSessionContextualVocabulary([])
             volumeController.restoreMicrophoneVolume()
             if settings.muteSystemAudioDuringRecordingEnabled {
                 volumeController.restoreAfterRecording()
@@ -669,6 +673,7 @@ final class AppState {
 
         // Get final transcript
         let transcript = await engine.stopRecording()
+        engine.setSessionContextualVocabulary([])
         clearEndOfUtteranceHandler(for: engine)
         sessionEngine = nil
         sessionHotkeyMode = nil
@@ -690,6 +695,7 @@ final class AppState {
             overlay.hide(afterDelay: 0.5)
             status = .idle
             insertionTargetApp = nil
+            sessionDictationContext = nil
             return
         }
 
@@ -712,14 +718,17 @@ final class AppState {
                 )
             }
         case .appleIntelligence:
-            if !settings.aiPostProcessingPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let context = postProcessingContext(includeCapturedText: true)
+            if !settings.aiPostProcessingPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || context != nil {
                 if #available(macOS 26, *) {
                     if case .available = AIPostProcessingService.availability {
                         do {
                             processedText = try await AIPostProcessingService.process(
                                 text: finalText,
                                 prompt: settings.aiPostProcessingPrompt,
-                                vocabulary: settings.customVocabulary
+                                vocabulary: settings.customVocabulary,
+                                context: context
                             )
                         } catch {
                             logger.error("postProcessing: Apple Intelligence failed: \(error.localizedDescription, privacy: .public)")
@@ -739,7 +748,11 @@ final class AppState {
                     model: settings.ollamaModel,
                     reasoning: settings.ollamaReasoningSetting,
                     prompt: settings.ollamaPostProcessingPrompt,
-                    vocabulary: settings.customVocabulary
+                    vocabulary: settings.customVocabulary,
+                    context: postProcessingContext(
+                        includeCapturedText: settings.shareDictationContextWithRemoteProviders
+                            || OllamaPostProcessingService.isLocalServer(baseURL: settings.ollamaBaseURL)
+                    )
                 )
             } catch {
                 logger.error("postProcessing: Ollama failed: \(error.localizedDescription, privacy: .public)")
@@ -752,7 +765,10 @@ final class AppState {
                     prompt: settings.openRouterPostProcessingPrompt,
                     vocabulary: settings.customVocabulary,
                     apiKey: settings.openRouterAPIKey,
-                    apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable
+                    apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable,
+                    context: postProcessingContext(
+                        includeCapturedText: settings.shareDictationContextWithRemoteProviders
+                    )
                 )
             } catch {
                 logger.error("postProcessing: OpenRouter failed: \(error.localizedDescription, privacy: .public)")
@@ -765,7 +781,11 @@ final class AppState {
                     model: settings.openAICompatibleModel,
                     apiKey: settings.openAICompatibleAPIKey,
                     prompt: settings.openAICompatiblePostProcessingPrompt,
-                    vocabulary: settings.customVocabulary
+                    vocabulary: settings.customVocabulary,
+                    context: postProcessingContext(
+                        includeCapturedText: settings.shareDictationContextWithRemoteProviders
+                            || OllamaPostProcessingService.isLocalServer(baseURL: settings.openAICompatibleBaseURL)
+                    )
                 )
             } catch {
                 logger.error("postProcessing: OpenAI Compatible failed: \(error.localizedDescription, privacy: .public)")
@@ -788,8 +808,15 @@ final class AppState {
         // Insert text
         NotificationCenter.default.post(name: .dismissMenusForPaste, object: nil)
         await reactivateInsertionTargetIfNeeded()
-        let result = await textInserter.insertText(processedText)
+        let insertionStyle = sessionDictationContext.map { settings.dictationWritingStyle(for: $0.category) }
+        let result = await textInserter.insertText(
+            processedText,
+            context: sessionDictationContext,
+            style: insertionStyle,
+            knownTerms: settings.customVocabulary
+        )
         insertionTargetApp = nil
+        sessionDictationContext = nil
 
         // Restore mic volume and recording audio state after text insertion.
         // gives Bluetooth audio routing time to settle back to playback mode.
@@ -822,6 +849,7 @@ final class AppState {
 
         let engine = sessionEngine ?? activeEngine
         await engine.cancel()
+        engine.setSessionContextualVocabulary([])
         clearEndOfUtteranceHandler(for: engine)
         sessionEngine = nil
         sessionHotkeyMode = nil
@@ -836,18 +864,46 @@ final class AppState {
         overlay.hide(afterDelay: 0)
         status = .idle
         insertionTargetApp = nil
+        sessionDictationContext = nil
     }
 
     // MARK: - Audio Level Polling
 
-    private func captureInsertionTargetApp() {
+    private func captureInsertionTargetAppAndContext() async {
         let currentPID = ProcessInfo.processInfo.processIdentifier
         guard let frontmost = NSWorkspace.shared.frontmostApplication,
               frontmost.processIdentifier != currentPID else {
             insertionTargetApp = nil
+            sessionDictationContext = nil
             return
         }
         insertionTargetApp = frontmost
+        guard settings.dictationContextAwarenessEnabled else {
+            sessionDictationContext = nil
+            return
+        }
+
+        let processIdentifier = frontmost.processIdentifier
+        let bundleIdentifier = frontmost.bundleIdentifier
+        let appName = frontmost.localizedName ?? bundleIdentifier ?? "Unknown app"
+        let rules = settings.dictationAppRules
+        sessionDictationContext = await Task.detached(priority: .userInitiated) {
+            DictationContextCapture.capture(
+                processIdentifier: processIdentifier,
+                bundleIdentifier: bundleIdentifier,
+                appName: appName,
+                rules: rules
+            )
+        }.value
+    }
+
+    private func postProcessingContext(includeCapturedText: Bool) -> DictationPostProcessingContext? {
+        guard settings.dictationContextAwarenessEnabled,
+              let context = sessionDictationContext else { return nil }
+        return context.postProcessingContext(
+            style: settings.dictationWritingStyle(for: context.category),
+            includeCapturedText: includeCapturedText
+        )
     }
 
     private func reactivateInsertionTargetIfNeeded() async {

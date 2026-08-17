@@ -659,6 +659,13 @@ final class Settings {
         static let aiPostProcessingEnabled = "aiPostProcessingEnabled"
         static let aiPostProcessingPrompt = "aiPostProcessingPrompt"
         static let customVocabulary = "customVocabulary"
+        static let dictationContextAwarenessEnabled = "dictationContextAwarenessEnabled"
+        static let shareDictationContextWithRemoteProviders = "shareDictationContextWithRemoteProviders"
+        static let emailDictationWritingStyle = "emailDictationWritingStyle"
+        static let workMessagingDictationWritingStyle = "workMessagingDictationWritingStyle"
+        static let personalMessagingDictationWritingStyle = "personalMessagingDictationWritingStyle"
+        static let otherDictationWritingStyle = "otherDictationWritingStyle"
+        static let dictationAppRules = "dictationAppRules"
         static let transcriptHistory = "transcriptHistory"
         static let transcriptPostProcessingMode = "transcriptPostProcessingMode"
         static let ollamaBaseURL = "ollamaBaseURL"
@@ -849,6 +856,72 @@ final class Settings {
         didSet {
             UserDefaults.standard.set(customVocabulary, forKey: Keys.customVocabulary)
         }
+    }
+
+    var dictationContextAwarenessEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                dictationContextAwarenessEnabled,
+                forKey: Keys.dictationContextAwarenessEnabled
+            )
+        }
+    }
+
+    var shareDictationContextWithRemoteProviders: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                shareDictationContextWithRemoteProviders,
+                forKey: Keys.shareDictationContextWithRemoteProviders
+            )
+        }
+    }
+
+    var emailDictationWritingStyle: DictationWritingStyle {
+        didSet {
+            UserDefaults.standard.set(emailDictationWritingStyle.rawValue, forKey: Keys.emailDictationWritingStyle)
+        }
+    }
+
+    var workMessagingDictationWritingStyle: DictationWritingStyle {
+        didSet {
+            UserDefaults.standard.set(
+                workMessagingDictationWritingStyle.rawValue,
+                forKey: Keys.workMessagingDictationWritingStyle
+            )
+        }
+    }
+
+    var personalMessagingDictationWritingStyle: DictationWritingStyle {
+        didSet {
+            UserDefaults.standard.set(
+                personalMessagingDictationWritingStyle.rawValue,
+                forKey: Keys.personalMessagingDictationWritingStyle
+            )
+        }
+    }
+
+    var otherDictationWritingStyle: DictationWritingStyle {
+        didSet {
+            UserDefaults.standard.set(otherDictationWritingStyle.rawValue, forKey: Keys.otherDictationWritingStyle)
+        }
+    }
+
+    var dictationAppRules: [DictationAppRule] {
+        didSet {
+            guard let data = try? JSONEncoder().encode(dictationAppRules) else { return }
+            UserDefaults.standard.set(data, forKey: Keys.dictationAppRules)
+        }
+    }
+
+    func dictationWritingStyle(for category: DictationContextCategory) -> DictationWritingStyle {
+        let style: DictationWritingStyle
+        switch category {
+        case .email: style = emailDictationWritingStyle
+        case .workMessaging: style = workMessagingDictationWritingStyle
+        case .personalMessaging: style = personalMessagingDictationWritingStyle
+        case .other: style = otherDictationWritingStyle
+        }
+        return style.sanitized(for: category)
     }
 
     var transcriptPostProcessingMode: TranscriptPostProcessingMode {
@@ -1131,6 +1204,33 @@ final class Settings {
 
         // Custom Vocabulary
         customVocabulary = defaults.object(forKey: Keys.customVocabulary) as? [String] ?? []
+
+        // Context awareness is local by default. Captured text is never sent to
+        // a remote cleanup provider unless the user explicitly enables it.
+        dictationContextAwarenessEnabled = defaults.object(
+            forKey: Keys.dictationContextAwarenessEnabled
+        ) as? Bool ?? true
+        shareDictationContextWithRemoteProviders = defaults.object(
+            forKey: Keys.shareDictationContextWithRemoteProviders
+        ) as? Bool ?? false
+        emailDictationWritingStyle = DictationWritingStyle(
+            rawValue: defaults.string(forKey: Keys.emailDictationWritingStyle) ?? ""
+        ) ?? .formal
+        workMessagingDictationWritingStyle = DictationWritingStyle(
+            rawValue: defaults.string(forKey: Keys.workMessagingDictationWritingStyle) ?? ""
+        ) ?? .formal
+        personalMessagingDictationWritingStyle = DictationWritingStyle(
+            rawValue: defaults.string(forKey: Keys.personalMessagingDictationWritingStyle) ?? ""
+        ) ?? .casual
+        otherDictationWritingStyle = DictationWritingStyle(
+            rawValue: defaults.string(forKey: Keys.otherDictationWritingStyle) ?? ""
+        ) ?? .formal
+        if let rulesData = defaults.data(forKey: Keys.dictationAppRules),
+           let decodedRules = try? JSONDecoder().decode([DictationAppRule].self, from: rulesData) {
+            dictationAppRules = decodedRules
+        } else {
+            dictationAppRules = []
+        }
 
         if let historyData = defaults.data(forKey: Keys.transcriptHistory),
            let decodedHistory = try? JSONDecoder().decode([TranscriptHistoryEntry].self, from: historyData) {

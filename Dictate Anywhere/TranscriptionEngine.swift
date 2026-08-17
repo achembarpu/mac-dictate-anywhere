@@ -216,6 +216,13 @@ protocol TranscriptionEngine: AnyObject {
     func startRecording(deviceID: AudioDeviceID?) async throws
     func stopRecording() async -> String
     func cancel() async
+    /// Session-scoped local recognition hints. Engines that do not support
+    /// contextual vocabulary safely ignore this value.
+    func setSessionContextualVocabulary(_ terms: [String])
+}
+
+extension TranscriptionEngine {
+    func setSessionContextualVocabulary(_ terms: [String]) {}
 }
 
 // MARK: - Shared Audio Helpers

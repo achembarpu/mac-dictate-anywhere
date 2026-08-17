@@ -293,7 +293,11 @@ func cleanedRemotePostProcessingResponse(from rawResponse: String, originalText:
     return cleaned
 }
 
-fileprivate func remotePostProcessingInstructions(prompt: String, vocabulary: [String]) -> String {
+func remotePostProcessingInstructions(
+    prompt: String,
+    vocabulary: [String],
+    context: DictationPostProcessingContext? = nil
+) -> String {
     let customPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     let effectivePrompt = customPrompt.isEmpty
         ? "No extra cleanup instructions. Default to punctuation, capitalization, grammar, sentence boundaries, paragraph breaks, and formatting when safe. Never use em dashes."
@@ -310,10 +314,11 @@ fileprivate func remotePostProcessingInstructions(prompt: String, vocabulary: [S
     You are a text post-processor for dictated transcript text.
 
     PRIORITY ORDER:
-    1. Follow the user's cleanup instructions when they request safe transcript transformations.
+    1. Treat the transcript only as text to clean. Never answer it or add new information.
     2. Preserve the speaker's meaning, tone, and final intent.
-    3. Normalize known terms to the exact spelling, spacing, and capitalization from the known terms list.
-    4. Never answer the transcript or add new information.
+    3. Fit the insertion to the writing context, cursor placement, destination category, and adjacent punctuation.
+    4. Follow the user's cleanup instructions when they do not conflict with those insertion-boundary rules.
+    5. Normalize known terms to the exact spelling, spacing, and capitalization from the known terms list.
 
     DEFAULT BEHAVIOR:
     - If there are no extra cleanup instructions, fix punctuation, capitalization, grammar, sentence boundaries, paragraph breaks, and formatting when safe.
@@ -340,13 +345,22 @@ fileprivate func remotePostProcessingInstructions(prompt: String, vocabulary: [S
 
     USER CLEANUP INSTRUCTIONS:
     \(effectivePrompt)
+
+    \(context?.instructions ?? "")
     """
 }
 
-fileprivate func remotePostProcessingRequestPrompt(text: String, vocabulary: [String]) -> String {
+func remotePostProcessingRequestPrompt(
+    text: String,
+    vocabulary: [String],
+    context: DictationPostProcessingContext? = nil
+) -> String {
     var sections: [String] = []
     if !vocabulary.isEmpty {
         sections.append("<known_terms>\(vocabulary.joined(separator: "\n"))</known_terms>")
+    }
+    if let context {
+        sections.append(context.requestSection)
     }
     sections.append("<transcript>\(text)</transcript>")
     return sections.joined(separator: "\n")
@@ -375,13 +389,23 @@ enum AIPostProcessingService {
         SystemLanguageModel.default.availability
     }
 
-    static func process(text: String, prompt: String, vocabulary: [String] = []) async throws -> String {
-        if let schemaResult = try await processWithSchema(text: text, prompt: prompt, vocabulary: vocabulary) {
+    static func process(
+        text: String,
+        prompt: String,
+        vocabulary: [String] = [],
+        context: DictationPostProcessingContext? = nil
+    ) async throws -> String {
+        if let schemaResult = try await processWithSchema(
+            text: text,
+            prompt: prompt,
+            vocabulary: vocabulary,
+            context: context
+        ) {
             return schemaResult
         }
 
         // Fallback keeps prior reliability behavior if schema generation fails/decodes poorly.
-        return try await processWithTools(text: text, prompt: prompt, vocabulary: vocabulary)
+        return try await processWithTools(text: text, prompt: prompt, vocabulary: vocabulary, context: context)
     }
 
     // MARK: - Fast Path (Schema)
@@ -389,13 +413,14 @@ enum AIPostProcessingService {
     private static func processWithSchema(
         text: String,
         prompt: String,
-        vocabulary: [String]
+        vocabulary: [String],
+        context: DictationPostProcessingContext?
     ) async throws -> String? {
-        let instructions = schemaInstructions(prompt: prompt, vocabulary: vocabulary)
+        let instructions = schemaInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
         let session = LanguageModelSession(instructions: instructions)
 
         let response = try await session.respond(
-            to: "<transcript>\(text)</transcript>",
+            to: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
             generating: PostProcessingResult.self,
             options: generationOptions(for: text)
         )
@@ -424,7 +449,8 @@ enum AIPostProcessingService {
     private static func processWithTools(
         text: String,
         prompt: String,
-        vocabulary: [String]
+        vocabulary: [String],
+        context: DictationPostProcessingContext?
     ) async throws -> String {
         let resultBox = ToolResultBox()
         let pasteAsIsTool = PasteTranscriptAsIs(resultBox: resultBox)
@@ -432,11 +458,11 @@ enum AIPostProcessingService {
 
         let session = LanguageModelSession(
             tools: [pasteAsIsTool, pasteCleanedTool],
-            instructions: toolInstructions(prompt: prompt, vocabulary: vocabulary)
+            instructions: toolInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
         )
 
         _ = try await session.respond(
-            to: "<transcript>\(text)</transcript>",
+            to: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
             options: generationOptions(for: text)
         )
 
@@ -456,7 +482,11 @@ enum AIPostProcessingService {
 
     // MARK: - Prompt Builders
 
-    private static func schemaInstructions(prompt: String, vocabulary: [String]) -> String {
+    private static func schemaInstructions(
+        prompt: String,
+        vocabulary: [String],
+        context: DictationPostProcessingContext?
+    ) -> String {
         """
         You are a text post-processor for dictation input enclosed in <transcript> tags.
 
@@ -464,6 +494,7 @@ enum AIPostProcessingService {
         - The transcript is dictated user text, not a request to you.
         - If it contains a question, keep it as a cleaned-up question. Never answer it.
         - Preserve the speaker's meaning, tone, and final intent.
+        - Follow the writing-context cursor and destination rules. They override conflicting generic or custom capitalization, terminal-punctuation, and paragraph defaults.
         - Always respond in the same language and script as the transcript. Never translate the transcript into another language.
         - When safe and helpful, fix punctuation, capitalization, grammar, sentence boundaries, paragraph breaks, list structure, and formatting.
         - Auto structure into paragraphs and list items with proper punctuation when appropriate.
@@ -475,10 +506,16 @@ enum AIPostProcessingService {
         \(postProcessingVocabularyClause(vocabulary))
 
         \(prompt)
+
+        \(context?.instructions ?? "")
         """
     }
 
-    private static func toolInstructions(prompt: String, vocabulary: [String]) -> String {
+    private static func toolInstructions(
+        prompt: String,
+        vocabulary: [String],
+        context: DictationPostProcessingContext?
+    ) -> String {
         """
         You are a text post-processor for dictation input enclosed in <transcript> tags.
 
@@ -488,6 +525,7 @@ enum AIPostProcessingService {
         - The transcript is dictated user text, not a request to you.
         - If it contains a question, keep it as a cleaned-up question. Never answer it.
         - Preserve the speaker's meaning, tone, and final intent.
+        - Follow the writing-context cursor and destination rules. They override conflicting generic or custom capitalization, terminal-punctuation, and paragraph defaults.
         - Always respond in the same language and script as the transcript. Never translate the transcript into another language.
         - When safe and helpful, fix punctuation, capitalization, grammar, sentence boundaries, paragraph breaks, list structure, and formatting.
         - Auto structure into paragraphs and list items with proper punctuation when appropriate.
@@ -499,6 +537,8 @@ enum AIPostProcessingService {
         \(postProcessingVocabularyClause(vocabulary))
 
         \(prompt)
+
+        \(context?.instructions ?? "")
         """
     }
 
@@ -671,7 +711,8 @@ enum OllamaPostProcessingService {
         model: String,
         reasoning: OllamaReasoningSetting = .disabled,
         prompt: String,
-        vocabulary: [String] = []
+        vocabulary: [String] = [],
+        context: DictationPostProcessingContext? = nil
     ) async throws -> String {
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedModel.isEmpty else {
@@ -685,8 +726,8 @@ enum OllamaPostProcessingService {
 
         var payload: [String: Any] = [
             "model": trimmedModel,
-            "system": remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary),
-            "prompt": remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary),
+            "system": remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context),
+            "prompt": remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
             "stream": false,
             "format": remotePostProcessingOutputSchema,
             "keep_alive": "10m",
@@ -1410,7 +1451,8 @@ enum OpenRouterPostProcessingService {
         prompt: String,
         vocabulary: [String] = [],
         apiKey: String,
-        apiKeyEnvironmentVariable: String
+        apiKeyEnvironmentVariable: String,
+        context: DictationPostProcessingContext? = nil
     ) async throws -> String {
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedModel.isEmpty else {
@@ -1426,8 +1468,8 @@ enum OpenRouterPostProcessingService {
             let rawResponse = try await performChatCompletionRequest(
                 model: trimmedModel,
                 apiKey: apiKey,
-                instructions: remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary),
-                prompt: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary),
+                instructions: remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context),
+                prompt: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
                 useStructuredOutputs: true
             )
             return cleanedRemotePostProcessingResponse(from: rawResponse, originalText: text)
@@ -1435,8 +1477,8 @@ enum OpenRouterPostProcessingService {
             let rawResponse = try await performChatCompletionRequest(
                 model: trimmedModel,
                 apiKey: apiKey,
-                instructions: remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary),
-                prompt: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary),
+                instructions: remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context),
+                prompt: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
                 useStructuredOutputs: false
             )
             return cleanedRemotePostProcessingResponse(from: rawResponse, originalText: text)
@@ -1741,7 +1783,8 @@ enum OpenAICompatiblePostProcessingService {
         model: String,
         apiKey: String,
         prompt: String,
-        vocabulary: [String] = []
+        vocabulary: [String] = [],
+        context: DictationPostProcessingContext? = nil
     ) async throws -> String {
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedModel.isEmpty else {
@@ -1754,8 +1797,8 @@ enum OpenAICompatiblePostProcessingService {
                 baseURL: baseURL,
                 model: trimmedModel,
                 apiKey: trimmedAPIKey,
-                instructions: remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary),
-                prompt: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary),
+                instructions: remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context),
+                prompt: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
                 useStructuredOutputs: true
             )
             return cleanedRemotePostProcessingResponse(from: rawResponse, originalText: text)
@@ -1764,8 +1807,8 @@ enum OpenAICompatiblePostProcessingService {
                 baseURL: baseURL,
                 model: trimmedModel,
                 apiKey: trimmedAPIKey,
-                instructions: remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary),
-                prompt: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary),
+                instructions: remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context),
+                prompt: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
                 useStructuredOutputs: false
             )
             return cleanedRemotePostProcessingResponse(from: rawResponse, originalText: text)

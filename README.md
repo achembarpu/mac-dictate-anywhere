@@ -32,6 +32,7 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **Live Preview** - See your transcription in real-time with animated waveform
 - **Filler Word Removal** - Automatically removes "um", "uh", and other filler words
 - **Custom Vocabulary** - Preserve product names, people names, and domain-specific terms during transcript cleanup
+- **Context Awareness** - Detect the active app or supported website, read a bounded snapshot around the cursor, and apply separate styles for email, work chat, personal chat, and other apps
 - **Ollama Integration** - Connect to a local or remote Ollama server, refresh installed models, and manage recommended local models from the app
 - **OpenRouter Integration** - Use hosted models through OpenRouter with model search, structured-output-aware selection, and secure API key storage
 - **Optional Transcript Cleanup** - Post-process the final transcript with Apple Intelligence, Ollama, or OpenRouter for punctuation, grammar, formatting, and wording cleanup
@@ -53,7 +54,7 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 
 ## Optional AI Transcript Cleanup
 
-Dictate Anywhere always transcribes audio locally with FluidAudio. AI cleanup happens only after transcription, on the final text transcript. That means your raw audio stays on your Mac even when you enable Ollama or OpenRouter.
+Dictate Anywhere always transcribes audio locally with FluidAudio. AI cleanup happens only after transcription, so your raw audio stays on your Mac even when you enable Ollama or OpenRouter. Context Awareness keeps surrounding text local by default; sharing it with a remote cleanup provider requires a separate opt-in.
 
 | Provider | Runs Where | Best For | Benefits |
 |----------|------------|----------|----------|
@@ -235,16 +236,18 @@ When your local signing setup is ready, package the release with:
 1. **Activation** - Press and hold Fn key, or tap a hands-free shortcut
 2. **Recording** - Speak naturally while dictation is active
 3. **Processing** - Release the key, tap again, or let Parakeet EOU auto-stop when enabled
-4. **Optional Cleanup** - The final transcript can be cleaned up with Apple Intelligence, Ollama, or OpenRouter
-5. **Insertion** - Text is automatically inserted at your cursor position
+4. **Context** - When enabled, a bounded Accessibility snapshot classifies the destination and supplies local recognition hints
+5. **Optional Cleanup** - The final transcript can be cleaned up with Apple Intelligence, Ollama, or OpenRouter using the selected category style
+6. **Insertion** - Text is automatically inserted with cursor-aware spacing; the insertion layer never adds terminal punctuation
 
 The app uses FluidAudio speech models that run entirely on your Mac. Parakeet TDT remains the default path, and optional Parakeet EOU or Nemotron streaming models can be downloaded for lower-latency live previews.
 
 ## Privacy
 
 - **100% On-Device Speech Recognition** - All audio transcription happens locally on your Mac
-- **Ollama Can Stay Fully Local** - If you use a local Ollama server, transcript cleanup can stay on your machine; if you use a remote Ollama server, only transcript text is sent there
-- **Optional Cloud Transcript Cleanup** - Audio never leaves your Mac, but transcript text can be sent to OpenRouter if you enable hosted post-processing
+- **Context Stays Local by Default** - Surrounding text is used by on-device/local processing but is withheld from remote servers unless you explicitly enable remote context sharing
+- **Ollama Can Stay Fully Local** - If you use a local Ollama server, transcript cleanup and surrounding context can stay on your machine; a remote Ollama server receives the transcript plus category/style, and receives surrounding text only with the separate opt-in
+- **Optional Cloud Transcript Cleanup** - Audio never leaves your Mac; transcript text and category/style can be sent to OpenRouter when enabled, while surrounding text remains separately opt-in
 - **Secure OpenRouter Key Storage** - API keys pasted into the app are stored in Keychain
 - **No Analytics** - No tracking or telemetry (optional anonymous usage stats only)
 - **Clipboard Only** - Text insertion uses the clipboard + Cmd+V simulation

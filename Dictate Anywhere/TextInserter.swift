@@ -22,9 +22,20 @@ final class TextInserter {
     // MARK: - Public
 
     /// Inserts text into the currently focused input field
-    func insertText(_ text: String) async -> TextInsertionResult {
+    func insertText(
+        _ text: String,
+        context: DictationContext? = nil,
+        style: DictationWritingStyle? = nil,
+        knownTerms: [String] = []
+    ) async -> TextInsertionResult {
         let targetBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let insertionText = preparedTextForInsertion(text, targetBundleIdentifier: targetBundleIdentifier)
+        let insertionText = preparedTextForInsertion(
+            text,
+            targetBundleIdentifier: targetBundleIdentifier,
+            context: context,
+            style: style,
+            knownTerms: knownTerms
+        )
         guard !insertionText.isEmpty else { return .failed }
 
         // Copy to clipboard first (always)
@@ -58,19 +69,200 @@ final class TextInserter {
 
     // MARK: - Private
 
-    private func preparedTextForInsertion(_ text: String, targetBundleIdentifier: String?) -> String {
+    private func preparedTextForInsertion(
+        _ text: String,
+        targetBundleIdentifier: String?,
+        context: DictationContext?,
+        style: DictationWritingStyle?,
+        knownTerms: [String]
+    ) -> String {
+        if let context,
+           let style,
+           context.hasTextPositionSnapshot,
+           context.bundleIdentifier == targetBundleIdentifier {
+            resetPendingSeparator()
+            return Self.contextualizedForInsertion(
+                text,
+                context: context,
+                style: style,
+                knownTerms: knownTerms
+            )
+        }
+
         let normalized = Self.normalizedForInsertion(text)
         guard !normalized.isEmpty else { return "" }
         let separatorPrefix = separatorPrefixIfNeeded(for: targetBundleIdentifier, insertionText: normalized)
         return separatorPrefix + normalized
     }
 
-    /// Trims and guarantees terminal punctuation, matching the script of the text.
+    /// Trims insertion-boundary whitespace without inventing punctuation.
     static func normalizedForInsertion(_ text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-        guard !hasTerminalPunctuation(trimmed) else { return trimmed }
-        return trimmed + (CJKText.endsWithCJK(trimmed) ? "\u{3002}" : ".")
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Applies the retained cursor snapshot and category style without reading
+    /// the destination again after the target app is reactivated.
+    static func contextualizedForInsertion(
+        _ text: String,
+        context: DictationContext,
+        style: DictationWritingStyle,
+        knownTerms: [String] = []
+    ) -> String {
+        var body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return "" }
+
+        if context.continuesExistingSentence {
+            body = removingMidSentenceTerminalPunctuation(
+                from: body,
+                textAfterCursor: context.textAfterCursor
+            )
+            body = lowercasingLeadingOrdinaryWord(
+                in: body,
+                preserving: knownTerms + context.lexicalHints
+            )
+        }
+
+        let hasFollowingText = !(context.textAfterCursor ?? "").isEmpty
+        let effectiveStyle = style.sanitized(for: context.category)
+        if (effectiveStyle == .casual || effectiveStyle == .veryCasual),
+           !hasFollowingText,
+           isShortSingleMessage(body) {
+            body = removingLightFinalPeriod(from: body)
+        }
+
+        let prefix = contextualSeparator(
+            left: context.textBeforeCursor,
+            right: body,
+            rightStartsWithAttachedPunctuation: startsWithAttachedPunctuation(body)
+        )
+        let suffix = contextualSeparator(
+            left: body,
+            right: context.textAfterCursor,
+            rightStartsWithAttachedPunctuation: startsWithAttachedPunctuation(context.textAfterCursor ?? "")
+        )
+        return prefix + body + suffix
+    }
+
+    private static func lowercasingLeadingOrdinaryWord(
+        in text: String,
+        preserving knownTerms: [String]
+    ) -> String {
+        let allowedLeadingCharacters = CharacterSet(charactersIn: "\"'‘’“”([{「『【《")
+        var wordStart: String.Index?
+
+        for index in text.indices {
+            let character = text[index]
+            if character.isLetter {
+                wordStart = index
+                break
+            }
+            if character.isWhitespace
+                || character.unicodeScalars.allSatisfy({ allowedLeadingCharacters.contains($0) }) {
+                continue
+            }
+            return text
+        }
+
+        guard let wordStart else { return text }
+        var wordEnd = text.index(after: wordStart)
+        while wordEnd < text.endIndex {
+            let character = text[wordEnd]
+            guard character.isLetter || character == "'" || character == "’" || character == "-" else {
+                break
+            }
+            wordEnd = text.index(after: wordEnd)
+        }
+
+        let word = String(text[wordStart..<wordEnd])
+        guard word != "I",
+              word.first?.isUppercase == true,
+              !word.dropFirst().contains(where: \Character.isUppercase) else {
+            return text
+        }
+
+        let normalizedWord = word.lowercased()
+        let preservedLeadingWords = Set(knownTerms.compactMap { term -> String? in
+            let leadingWord = term.split(whereSeparator: {
+                !$0.isLetter && $0 != "'" && $0 != "’" && $0 != "-"
+            }).first
+            return leadingWord.map { String($0).lowercased() }
+        })
+        guard !preservedLeadingWords.contains(normalizedWord) else { return text }
+
+        var result = text
+        let nextIndex = result.index(after: wordStart)
+        result.replaceSubrange(wordStart..<nextIndex, with: String(result[wordStart]).lowercased())
+        return result
+    }
+
+    private static func removingMidSentenceTerminalPunctuation(
+        from text: String,
+        textAfterCursor: String?
+    ) -> String {
+        let closingCharacters = CharacterSet(charactersIn: "\"')]}’”」』】》")
+        var removableCharacters = CharacterSet(charactersIn: ".。!?！？…")
+        let followingText = (textAfterCursor ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if startsWithAttachedPunctuation(followingText) {
+            removableCharacters.formUnion(CharacterSet(charactersIn: ",;:，；："))
+        }
+
+        var scalars = Array(text.unicodeScalars)
+        var punctuationEnd = scalars.count
+        while punctuationEnd > 0, closingCharacters.contains(scalars[punctuationEnd - 1]) {
+            punctuationEnd -= 1
+        }
+
+        var punctuationStart = punctuationEnd
+        while punctuationStart > 0, removableCharacters.contains(scalars[punctuationStart - 1]) {
+            punctuationStart -= 1
+        }
+        guard punctuationStart < punctuationEnd else { return text }
+
+        scalars.removeSubrange(punctuationStart..<punctuationEnd)
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    private static func contextualSeparator(
+        left: String?,
+        right: String?,
+        rightStartsWithAttachedPunctuation: Bool
+    ) -> String {
+        guard let left, let right, !left.isEmpty, !right.isEmpty,
+              let leftScalar = left.unicodeScalars.last,
+              let rightScalar = right.unicodeScalars.first else { return "" }
+        if CharacterSet.whitespacesAndNewlines.contains(leftScalar)
+            || CharacterSet.whitespacesAndNewlines.contains(rightScalar)
+            || rightStartsWithAttachedPunctuation
+            || "([{\"'“".unicodeScalars.contains(leftScalar)
+            || CJKText.endsWithCJK(left)
+            || CJKText.startsWithCJK(right) {
+            return ""
+        }
+        return " "
+    }
+
+    private static func isShortSingleMessage(_ text: String) -> Bool {
+        guard !text.contains("\n"), text.split(whereSeparator: \Character.isWhitespace).count <= 20 else {
+            return false
+        }
+        let bodyWithoutLastScalar = String(text.unicodeScalars.dropLast())
+        return !bodyWithoutLastScalar.contains(".")
+            && !bodyWithoutLastScalar.contains("。")
+            && !bodyWithoutLastScalar.contains("!")
+            && !bodyWithoutLastScalar.contains("?")
+    }
+
+    private static func removingLightFinalPeriod(from text: String) -> String {
+        let closingCharacters = CharacterSet(charactersIn: "\"')]}’”」』】》")
+        var scalars = Array(text.unicodeScalars)
+        var index = scalars.count - 1
+        while index > 0, closingCharacters.contains(scalars[index]) {
+            index -= 1
+        }
+        guard scalars[index] == "." || scalars[index] == "。" else { return text }
+        scalars.remove(at: index)
+        return String(String.UnicodeScalarView(scalars))
     }
 
     private func separatorPrefixIfNeeded(for targetBundleIdentifier: String?, insertionText: String) -> String {
@@ -114,36 +306,6 @@ final class TextInserter {
             return false
         }
         return !Self.isWhitespaceOrNewline(precedingText)
-    }
-
-    static func hasTerminalPunctuation(_ text: String) -> Bool {
-        let closingScalarValues: Set<UInt32> = Set([
-            34, // "
-            39, // '
-            41, // )
-            93, // ]
-            125, // }
-            0x2019,
-            0x201D,
-        ]).union(CJKText.cjkClosingPunctuation)
-        let punctuationScalarValues: Set<UInt32> = Set([
-            33, // !
-            44, // ,
-            46, // .
-            58, // :
-            59, // ;
-            63, // ?
-            0x2026,
-        ]).union(CJKText.cjkTerminalPunctuation)
-
-        for scalar in text.unicodeScalars.reversed() {
-            if closingScalarValues.contains(scalar.value) {
-                continue
-            }
-            return punctuationScalarValues.contains(scalar.value)
-        }
-
-        return false
     }
 
     static func startsWithAttachedPunctuation(_ text: String) -> Bool {

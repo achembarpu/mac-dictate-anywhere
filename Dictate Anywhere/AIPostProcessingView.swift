@@ -7,6 +7,7 @@
 
 import SwiftUI
 import FoundationModels
+import AppKit
 
 struct AIPostProcessingView: View {
     @Environment(AppState.self) private var appState
@@ -76,6 +77,8 @@ struct AIPostProcessingView: View {
                 }
             }
 
+            contextAwarenessContent(settings: settings)
+
             localFillerWordCleanupContent(settings: settings)
 
             switch settings.transcriptPostProcessingMode {
@@ -132,6 +135,220 @@ struct AIPostProcessingView: View {
         } message: {
             Text("This will remove \(ollamaPendingDeletionModel ?? "this model") from the configured Ollama server.")
         }
+    }
+
+    // MARK: - Context awareness
+
+    @ViewBuilder
+    private func contextAwarenessContent(settings: Settings) -> some View {
+        @Bindable var settings = settings
+
+        DSSection(overline: "Context Awareness") {
+            DSStackedRow(
+                label: "Adapt to the current app and text field",
+                caption: "Reads a bounded snapshot around the cursor when dictation starts, classifies the destination, and applies its writing style. Password fields and excluded apps are never read.",
+                isOn: $settings.dictationContextAwarenessEnabled
+            )
+
+            if settings.dictationContextAwarenessEnabled {
+                DSDivider()
+                DSStackedRow(
+                    label: "Share surrounding text with remote providers",
+                    caption: "Off by default. Category and style are still sent, but nearby text stays on this Mac unless cleanup runs locally through Apple Intelligence, localhost Ollama, or a localhost OpenAI-compatible server.",
+                    isOn: $settings.shareDictationContextWithRemoteProviders
+                )
+                DSDivider()
+                writingStyleRow(settings: settings, category: .email)
+                DSDivider()
+                writingStyleRow(settings: settings, category: .workMessaging)
+                DSDivider()
+                writingStyleRow(settings: settings, category: .personalMessaging)
+                DSDivider()
+                writingStyleRow(settings: settings, category: .other)
+            }
+        }
+
+        if settings.dictationContextAwarenessEnabled {
+            DSSection(overline: "App Categories") {
+                if settings.dictationAppRules.isEmpty {
+                    cardCaption("Common email and messaging apps and sites are categorized automatically. Add an override only when an app should use another category or should not expose surrounding text.")
+                } else {
+                    ForEach(Array(settings.dictationAppRules.enumerated()), id: \.element.id) { index, rule in
+                        appRuleRow(settings: settings, index: index, rule: rule)
+                        if index < settings.dictationAppRules.count - 1 {
+                            DSDivider()
+                        }
+                    }
+                }
+
+                if !settings.dictationAppRules.isEmpty {
+                    DSDivider()
+                }
+                cardPadded {
+                    Menu {
+                        let apps = availableRunningApps(settings: settings)
+                        if apps.isEmpty {
+                            Text("No other running apps")
+                        } else {
+                            ForEach(apps) { app in
+                                Button(app.name) {
+                                    addAppRule(app, settings: settings)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Add Running App", systemImage: "plus")
+                    }
+                    .buttonStyle(.dsSecondary)
+                }
+            }
+        }
+    }
+
+    private func writingStyleRow(
+        settings: Settings,
+        category: DictationContextCategory
+    ) -> some View {
+        DSDetailRow(
+            label: category.displayName,
+            caption: styleCaption(for: category)
+        ) {
+            DSDropdown(
+                selection: writingStyleBinding(settings: settings, category: category),
+                options: DictationWritingStyle.options(for: category),
+                title: \.displayName
+            )
+        }
+    }
+
+    private func appRuleRow(settings: Settings, index: Int, rule: DictationAppRule) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(rule.appName)
+                    .font(DS.Fonts.ui(13.5, .medium))
+                    .foregroundStyle(DS.Colors.ink)
+                Text(rule.bundleIdentifier)
+                    .font(DS.Fonts.ui(11.5))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 12)
+            DSDropdown(
+                selection: appRuleCategoryBinding(settings: settings, index: index),
+                options: DictationContextCategory.allCases,
+                title: \.displayName
+            )
+            Toggle(
+                "Read context",
+                isOn: appRuleContextBinding(settings: settings, index: index)
+            )
+            .toggleStyle(.dsSwitch)
+            .fixedSize()
+            DSIconButton(
+                systemImage: "trash",
+                tint: DS.Colors.destructive,
+                accessibilityLabel: "Remove \(rule.appName) override"
+            ) {
+                guard settings.dictationAppRules.indices.contains(index) else { return }
+                settings.dictationAppRules.remove(at: index)
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, DS.Spacing.rowHorizontal)
+    }
+
+    private func writingStyleBinding(
+        settings: Settings,
+        category: DictationContextCategory
+    ) -> Binding<DictationWritingStyle> {
+        Binding(
+            get: { settings.dictationWritingStyle(for: category) },
+            set: { value in
+                switch category {
+                case .email: settings.emailDictationWritingStyle = value
+                case .workMessaging: settings.workMessagingDictationWritingStyle = value
+                case .personalMessaging: settings.personalMessagingDictationWritingStyle = value
+                case .other: settings.otherDictationWritingStyle = value
+                }
+            }
+        )
+    }
+
+    private func appRuleCategoryBinding(settings: Settings, index: Int) -> Binding<DictationContextCategory> {
+        Binding(
+            get: {
+                guard settings.dictationAppRules.indices.contains(index) else { return .other }
+                return settings.dictationAppRules[index].category
+            },
+            set: { category in
+                guard settings.dictationAppRules.indices.contains(index) else { return }
+                settings.dictationAppRules[index].category = category
+            }
+        )
+    }
+
+    private func appRuleContextBinding(settings: Settings, index: Int) -> Binding<Bool> {
+        Binding(
+            get: {
+                settings.dictationAppRules.indices.contains(index)
+                    ? settings.dictationAppRules[index].contextEnabled
+                    : false
+            },
+            set: { enabled in
+                guard settings.dictationAppRules.indices.contains(index) else { return }
+                settings.dictationAppRules[index].contextEnabled = enabled
+            }
+        )
+    }
+
+    private func styleCaption(for category: DictationContextCategory) -> String {
+        switch category {
+        case .email: return "Used in mail apps and webmail."
+        case .workMessaging: return "Used in Slack, Teams, Discord, and similar work chat."
+        case .personalMessaging: return "Used in Messages, WhatsApp, Telegram, and similar personal chat."
+        case .other: return "Used when no email or messaging category matches."
+        }
+    }
+
+    private struct RunningContextApp: Identifiable {
+        let bundleIdentifier: String
+        let name: String
+        var id: String { bundleIdentifier }
+    }
+
+    private func availableRunningApps(settings: Settings) -> [RunningContextApp] {
+        let currentBundleIdentifier = Bundle.main.bundleIdentifier
+        let existing = Set(settings.dictationAppRules.map { $0.bundleIdentifier.lowercased() })
+        return NSWorkspace.shared.runningApplications
+            .filter {
+                $0.activationPolicy == .regular
+                    && $0.bundleIdentifier != currentBundleIdentifier
+                    && $0.bundleIdentifier != nil
+            }
+            .compactMap { app -> RunningContextApp? in
+                guard let bundleIdentifier = app.bundleIdentifier,
+                      !existing.contains(bundleIdentifier.lowercased()) else { return nil }
+                return RunningContextApp(
+                    bundleIdentifier: bundleIdentifier,
+                    name: app.localizedName ?? bundleIdentifier
+                )
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func addAppRule(_ app: RunningContextApp, settings: Settings) {
+        let classification = DictationContextClassifier.classification(
+            bundleIdentifier: app.bundleIdentifier,
+            documentURL: nil,
+            rules: []
+        )
+        settings.dictationAppRules.append(
+            DictationAppRule(
+                bundleIdentifier: app.bundleIdentifier,
+                appName: app.name,
+                category: classification.category
+            )
+        )
     }
 
     // MARK: - Shared row helpers
