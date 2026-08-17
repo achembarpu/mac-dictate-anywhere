@@ -200,11 +200,74 @@ fileprivate let remotePostProcessingOutputSchema: [String: Any] = [
     "required": ["action", "text"]
 ]
 
-fileprivate func cleanedRemotePostProcessingResponse(from rawResponse: String, originalText: String) -> String {
+private func decodeRemotePostProcessingResult(from response: String) -> RemotePostProcessingResult? {
+    let decoder = JSONDecoder()
+
+    func decodeCandidate(_ candidate: Substring) -> RemotePostProcessingResult? {
+        guard let data = String(candidate).data(using: .utf8),
+              let result = try? decoder.decode(RemotePostProcessingResult.self, from: data),
+              let action = result.action?.trimmingCharacters(in: .whitespacesAndNewlines),
+              action == "pasteCleanedText" || action == "pasteTranscriptAsIs" else {
+            return nil
+        }
+        return result
+    }
+
+    if let result = decodeCandidate(response[...]) {
+        return result
+    }
+
+    // Some reasoning models wrap otherwise valid structured output in thinking
+    // tokens or commentary. Find a complete JSON object without treating braces
+    // or quotes inside JSON strings as structure.
+    var objectStarts: [String.Index] = []
+    var isInsideString = false
+    var isEscaped = false
+
+    for index in response.indices {
+        let character = response[index]
+
+        if objectStarts.isEmpty {
+            guard character == "{" else { continue }
+            objectStarts.append(index)
+            isInsideString = false
+            isEscaped = false
+            continue
+        }
+
+        if isInsideString {
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == "\"" {
+                isInsideString = false
+            }
+            continue
+        }
+
+        switch character {
+        case "\"":
+            isInsideString = true
+        case "{":
+            objectStarts.append(index)
+        case "}":
+            guard let start = objectStarts.popLast() else { continue }
+            if let result = decodeCandidate(response[start...index]) {
+                return result
+            }
+        default:
+            break
+        }
+    }
+
+    return nil
+}
+
+func cleanedRemotePostProcessingResponse(from rawResponse: String, originalText: String) -> String {
     let normalized = stripMarkdownCodeFences(from: rawResponse)
     guard !normalized.isEmpty else { return originalText }
-    if let data = normalized.data(using: .utf8),
-       let structured = try? JSONDecoder().decode(RemotePostProcessingResult.self, from: data),
+    if let structured = decodeRemotePostProcessingResult(from: normalized),
        let action = structured.action?.trimmingCharacters(in: .whitespacesAndNewlines) {
         switch action {
         case "pasteTranscriptAsIs":
@@ -456,15 +519,7 @@ enum OllamaPostProcessingService {
         subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
         category: "OllamaPostProcessing"
     )
-    static let suggestedModels: [SuggestedModel] = [
-        SuggestedModel(
-            name: "gemma4:e4b",
-            badge: "Recommended",
-            description: "Best default balance for transcript cleanup quality and latency.",
-            downloadSizeLabel: nil,
-            parameterSizeLabel: "4B params"
-        ),
-    ]
+    static let suggestedModels: [SuggestedModel] = []
 
     struct SuggestedModel: Identifiable, Hashable, Sendable {
         let name: String

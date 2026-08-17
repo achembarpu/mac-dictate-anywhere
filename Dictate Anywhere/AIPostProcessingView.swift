@@ -353,7 +353,7 @@ struct AIPostProcessingView: View {
             DSDivider()
             fieldRow(label: "Model") {
                 DSTextField(
-                    placeholder: "gemma4:e4b",
+                    placeholder: "Enter an installed model name",
                     text: Binding(
                         get: { settings.ollamaModel },
                         set: { settings.ollamaModel = $0 }
@@ -408,7 +408,9 @@ struct AIPostProcessingView: View {
             cardCaption("Runs transcript cleanup through your local Ollama server. Use the server base URL and an installed model name. Larger models are noticeably better at following cleanup instructions and vocabulary normalization.")
         }
 
-        ollamaSuggestedModelsSection(settings: settings)
+        if !OllamaPostProcessingService.suggestedModels.isEmpty {
+            ollamaSuggestedModelsSection(settings: settings)
+        }
 
         if let capability = ollamaAvailability?.selectedModelReasoningCapability,
            capability.supportsReasoning {
@@ -1578,7 +1580,7 @@ private struct AIPostProcessingViewPreviewHost: View {
         let appState = AppState()
         appState.settings.transcriptPostProcessingMode = .ollama
         appState.settings.ollamaBaseURL = OllamaPostProcessingService.defaultBaseURL
-        appState.settings.ollamaModel = "gemma4:e4b"
+        appState.settings.ollamaModel = ""
         appState.settings.ollamaPostProcessingPrompt = Settings.recommendedTranscriptCleanupPrompt
         appState.settings.customVocabulary = ["Dictate Anywhere", "Parakeet", "Ollama"]
         _appState = State(initialValue: appState)
