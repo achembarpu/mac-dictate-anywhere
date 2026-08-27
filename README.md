@@ -198,6 +198,26 @@ xcodebuild -project "Dictate Anywhere.xcodeproj" -scheme "Dictate Anywhere" -con
 
 If you only want to run the app locally, you do not need the release packaging script.
 
+### Stable Local Debug Workflow
+
+For local development, use the shared **Dictate Anywhere** scheme through `scripts/dev.sh`. The script uses the **Debug** configuration, normal local signing, and one stable user-home DerivedData path. It always launches the canonical `Dictate Anywhere Dev.app`, so macOS Accessibility permission stays tied to one signed app identity.
+
+Keep your local team ID only in the ignored `Config/Signing.local.xcconfig` file. Never commit that file or its team ID. The checked-in configuration must not contain personal signing identifiers.
+
+From the repository root, run:
+
+```bash
+scripts/dev.sh check
+scripts/dev.sh build
+scripts/dev.sh launch
+scripts/dev.sh test
+scripts/dev.sh stop
+```
+
+Set `DERIVED_DATA_PATH` to another absolute, stable, non-temporary path when needed. The default is `$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev`.
+
+If Accessibility permission is stale, remove the app from **System Settings → Privacy & Security → Accessibility**, then run `scripts/dev.sh launch` and add that exact app again.
+
 If you want to sign builds with your own Apple Developer account, create `Config/Signing.local.xcconfig` on your machine with:
 
 ```xcconfig
