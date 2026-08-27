@@ -397,7 +397,6 @@
 		};
 		E2A66B652F18203D00DABF41 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = E2A66B6B2F18203D00DABF41 /* Config/Signing.shared.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -462,7 +461,6 @@
 		};
 		E2TEST000005 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = E2A66B6B2F18203D00DABF41 /* Config/Signing.shared.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
