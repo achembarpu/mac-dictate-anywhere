@@ -6,6 +6,30 @@
         <description>Dictate Anywhere update feed.</description>
         <language>en</language>
         <item>
+            <title>2.8.0</title>
+            <pubDate>Thu, 27 Aug 2026 14:35:15 -0400</pubDate>
+            <link>https://github.com/hoomanaskari/mac-dictate-anywhere</link>
+            <sparkle:version>35</sparkle:version>
+            <sparkle:shortVersionString>2.8.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# Dictate Anywhere 2.8.0
+
+- Added S1-mini by Superwhisper as a private, fully local cleanup option for final English transcripts.
+- Added one-click download and deletion of the pinned 462 MB model, with visible progress and integrity verification before installation.
+- Added S1-mini's trained styling, structure, and email/general context controls, with Metal acceleration on Apple Silicon and CPU support on Intel Macs.
+- Kept live preview transcription unchanged: S1-mini runs only after dictation finishes, and the original transcript is preserved if local cleanup cannot run.
+- Reorganized Transcript Cleanup settings so the selected method's setup, availability, and privacy behavior are easier to understand.
+]]></description>
+            <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.8.0/DictateAnywhere-2.8.0.zip" length="12383508" type="application/octet-stream" sparkle:edSignature="ufj9c1/o7GmZiPPqDZAXOs6EvyrlQAEZXBBIvrG4opKkRcfUpDP2YPMm8kICBgwn897okisOUYaX4X36rZ+kAw=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.8.0/Dictate.Anywhere35-34.delta" sparkle:deltaFrom="34" length="4312498" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977840" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="3s78eeUc6Vwq5dzIbhYlA0nvs6eAZUImRGxUSAqFbGOmTOzUwucpTa2piG68CN5PN1aW6vXtIIAfTm0l80ROAg=="/>
+                <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.8.0/Dictate.Anywhere35-33.delta" sparkle:deltaFrom="33" length="4367002" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977840" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="jBPJc3lwCXt8qlgbuHJbhCqmY2rQQwlSzsdJINqmsFH3I/0U8o2+Pi539ZmiiQc9DMlYLA7bVJXJ/BNKvfmMBg=="/>
+                <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.8.0/Dictate.Anywhere35-30.delta" sparkle:deltaFrom="30" length="5332226" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977840" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="tOFiFmsVPB9a61lz3JNst6AgTQPk3QB1aA/cswEQ8NqlJz1V27siZ1F3zh9X6zabM2jB11ablhSDwXjrjj1tBQ=="/>
+                <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.8.0/Dictate.Anywhere35-29.delta" sparkle:deltaFrom="29" length="5356746" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977840" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="WPE6VF04ah6ZL9QD+GEqc3p0m+XPvk/x0mY8rYO1j8SvfFM+Hlw7iyETMMij6bEOIPGGYdhYYXPEGY+JW/v9Bw=="/>
+                <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.8.0/Dictate.Anywhere35-28.delta" sparkle:deltaFrom="28" length="5365902" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977840" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="ECFSmolyVWLnRbXCmlPN6IVqG87fLfdCYqmH5gdzXrnez4YN2joJHJ3fRtK70hvWLB7vshy8mpX/BqLJA6e2AA=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>2.7.1</title>
             <pubDate>Mon, 17 Aug 2026 17:00:41 -0400</pubDate>
             <link>https://github.com/hoomanaskari/mac-dictate-anywhere</link>
@@ -52,24 +76,6 @@
                 <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.7.0/Dictate.Anywhere33-27.delta" sparkle:deltaFrom="27" length="3010758" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977840" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="DpIx//M2kpsspCOVY1ZbvoappTtuMKpLW3NihPlJ648iqaroY3Ap0ooOE0hXvvHb+7JTCLTvXIgFByeeVX41CA=="/>
                 <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.7.0/Dictate.Anywhere33-26.delta" sparkle:deltaFrom="26" length="3023590" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977840" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="t8cHTtSR6on1I7/FEFgJUq+THOm40SjUdz7nLj1mR5K5r+CEvx5Hm39fuPSVpNKOc4QbZSEhxgBs1rVMukC/Bw=="/>
             </sparkle:deltas>
-        </item>
-        <item>
-            <title>2.6.0</title>
-            <pubDate>Thu, 06 Aug 2026 10:40:02 -0400</pubDate>
-            <link>https://github.com/hoomanaskari/mac-dictate-anywhere</link>
-            <sparkle:version>32</sparkle:version>
-            <sparkle:shortVersionString>2.6.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Dictate Anywhere 2.6.0
-
-- Added automatic speech-model and language switching when you change the macOS keyboard input source.
-- Added per-keyboard mappings in General settings, so inputs such as ABC and Pinyin can use different transcription engines, models, and languages.
-- Mapped models are prepared as soon as the active keyboard source changes, including immediately after you edit its mapping.
-- Auto-switching only uses models and Apple Speech language assets already available on your Mac. It never starts a model download without you choosing one.
-- Added clear guidance when a mapped model is not downloaded, an Apple Speech language is not installed, or a model is unavailable on the current Mac.
-- Preserved vocabulary post-processing when switching away from and back to a compatible transcription model.
-]]></description>
-            <enclosure url="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/download/v2.6.0/DictateAnywhere-2.6.0.zip" length="7130969" type="application/octet-stream" sparkle:edSignature="PNqSImCqn2eORSBOP9a09pwUGbtABhEg35t587Z6WEG1P/vANCiDxNfxY/Ep3wCahZ62MgcKu6v7zKtnqRkQAQ=="/>
         </item>
     </channel>
 </rss>
