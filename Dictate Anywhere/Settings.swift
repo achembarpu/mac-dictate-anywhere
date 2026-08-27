@@ -381,6 +381,7 @@ enum TranscriptPostProcessingMode: String, CaseIterable {
     case none = "none"
     case fluidAudioVocabulary = "fluidAudioVocabulary"
     case appleIntelligence = "appleIntelligence"
+    case s1Mini = "s1Mini"
     case ollama = "ollama"
     case openRouter = "openRouter"
     case openAICompatible = "openAICompatible"
@@ -390,9 +391,35 @@ enum TranscriptPostProcessingMode: String, CaseIterable {
         case .none: return "None"
         case .fluidAudioVocabulary: return "FluidAudio Vocabulary"
         case .appleIntelligence: return "Apple Intelligence"
+        case .s1Mini: return "S1-mini by Superwhisper"
         case .ollama: return "Ollama"
         case .openRouter: return "OpenRouter"
         case .openAICompatible: return "OpenAI Compatible"
+        }
+    }
+
+    /// Modes that actually consume the dictation context snapshot (destination
+    /// category and writing style). `none` and `fluidAudioVocabulary` never
+    /// reach a language model, so context awareness has nothing to act on and
+    /// its settings are hidden — and the snapshot is never captured.
+    var usesDictationContext: Bool {
+        switch self {
+        case .none, .fluidAudioVocabulary:
+            return false
+        case .appleIntelligence, .s1Mini, .ollama, .openRouter, .openAICompatible:
+            return true
+        }
+    }
+
+    /// Modes that can be pointed at a server off this Mac, so the "share
+    /// surrounding text" opt-in is meaningful for them. Apple Intelligence and
+    /// S1-mini always run on-device.
+    var canSendContextOffDevice: Bool {
+        switch self {
+        case .ollama, .openRouter, .openAICompatible:
+            return true
+        case .none, .fluidAudioVocabulary, .appleIntelligence, .s1Mini:
+            return false
         }
     }
 }
@@ -668,6 +695,9 @@ final class Settings {
         static let dictationAppRules = "dictationAppRules"
         static let transcriptHistory = "transcriptHistory"
         static let transcriptPostProcessingMode = "transcriptPostProcessingMode"
+        static let s1MiniStyling = "s1MiniStyling"
+        static let s1MiniStructure = "s1MiniStructure"
+        static let s1MiniContextSetting = "s1MiniContextSetting"
         static let ollamaBaseURL = "ollamaBaseURL"
         static let ollamaModel = "ollamaModel"
         static let ollamaReasoningSetting = "ollamaReasoningSetting"
@@ -930,6 +960,24 @@ final class Settings {
         }
     }
 
+    var s1MiniStyling: S1MiniStyling {
+        didSet {
+            UserDefaults.standard.set(s1MiniStyling.rawValue, forKey: Keys.s1MiniStyling)
+        }
+    }
+
+    var s1MiniStructure: S1MiniStructure {
+        didSet {
+            UserDefaults.standard.set(s1MiniStructure.rawValue, forKey: Keys.s1MiniStructure)
+        }
+    }
+
+    var s1MiniContextSetting: S1MiniContextSetting {
+        didSet {
+            UserDefaults.standard.set(s1MiniContextSetting.rawValue, forKey: Keys.s1MiniContextSetting)
+        }
+    }
+
     var transcriptHistory: [TranscriptHistoryEntry] {
         didSet {
             guard let data = try? JSONEncoder().encode(transcriptHistory) else { return }
@@ -1027,6 +1075,10 @@ final class Settings {
 
     var appleIntelligencePostProcessingEnabled: Bool {
         transcriptPostProcessingMode == .appleIntelligence
+    }
+
+    var s1MiniPostProcessingEnabled: Bool {
+        transcriptPostProcessingMode == .s1Mini
     }
 
     var ollamaPostProcessingEnabled: Bool {
@@ -1255,6 +1307,15 @@ final class Settings {
             defaults.set(migratedMode.rawValue, forKey: Keys.transcriptPostProcessingMode)
         }
         aiPostProcessingPrompt = defaults.string(forKey: Keys.aiPostProcessingPrompt) ?? ""
+        s1MiniStyling = S1MiniStyling(
+            rawValue: defaults.string(forKey: Keys.s1MiniStyling) ?? ""
+        ) ?? .semiFormal
+        s1MiniStructure = S1MiniStructure(
+            rawValue: defaults.string(forKey: Keys.s1MiniStructure) ?? ""
+        ) ?? .prose
+        s1MiniContextSetting = S1MiniContextSetting(
+            rawValue: defaults.string(forKey: Keys.s1MiniContextSetting) ?? ""
+        ) ?? .automatic
         ollamaBaseURL = defaults.string(forKey: Keys.ollamaBaseURL) ?? OllamaPostProcessingService.defaultBaseURL
         ollamaModel = defaults.string(forKey: Keys.ollamaModel) ?? ""
         ollamaReasoningSetting = OllamaReasoningSetting(

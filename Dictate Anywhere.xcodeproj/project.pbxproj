@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		E2FLUID0001 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = E2FLUID0002 /* FluidAudio */; };
+		E2LLAMA0001 /* LlamaSwift in Frameworks */ = {isa = PBXBuildFile; productRef = E2LLAMA0002 /* LlamaSwift */; };
 		E2SPARKLE001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E2SPARKLE002 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -59,6 +60,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E2FLUID0001 /* FluidAudio in Frameworks */,
+				E2LLAMA0001 /* LlamaSwift in Frameworks */,
 				E2SPARKLE001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -113,6 +115,7 @@
 			name = "Dictate Anywhere";
 			packageProductDependencies = (
 				E2FLUID0002 /* FluidAudio */,
+				E2LLAMA0002 /* LlamaSwift */,
 				E2SPARKLE002 /* Sparkle */,
 			);
 			productName = "Dictate Anywhere";
@@ -172,6 +175,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				E2FLUID0003 /* XCRemoteSwiftPackageReference "FluidAudio" */,
+				E2LLAMA0003 /* XCRemoteSwiftPackageReference "llama" */,
 				E2SPARKLE003 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -359,7 +363,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Dictate Anywhere/Dictate_Anywhere.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -377,7 +381,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.7.1;
+				MARKETING_VERSION = 2.8.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pixelforty.dictate-anywhere.dev";
 				PRODUCT_NAME = "Dictate Anywhere Dev";
 				REGISTER_APP_GROUPS = YES;
@@ -400,7 +404,7 @@
 				CODE_SIGN_IDENTITY = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -418,7 +422,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.7.1;
+				MARKETING_VERSION = 2.8.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pixelforty.dictate-anywhere";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -437,11 +441,11 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.7.1;
+				MARKETING_VERSION = 2.8.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pixelforty.dictate-anywhere.tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -459,11 +463,11 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.7.1;
+				MARKETING_VERSION = 2.8.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pixelforty.dictate-anywhere.tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -516,6 +520,14 @@
 				version = 0.15.5;
 			};
 		};
+		E2LLAMA0003 /* XCRemoteSwiftPackageReference "llama" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mattt/llama.swift";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10549.0;
+			};
+		};
 		E2SPARKLE003 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle.git";
@@ -531,6 +543,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E2FLUID0003 /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;
+		};
+		E2LLAMA0002 /* LlamaSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E2LLAMA0003 /* XCRemoteSwiftPackageReference "llama" */;
+			productName = LlamaSwift;
 		};
 		E2SPARKLE002 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -173,6 +173,7 @@ final class SettingsLogicTests: XCTestCase {
         settings.transcriptPostProcessingMode = .none
         XCTAssertFalse(settings.ollamaPostProcessingEnabled)
         XCTAssertFalse(settings.appleIntelligencePostProcessingEnabled)
+        XCTAssertFalse(settings.s1MiniPostProcessingEnabled)
         XCTAssertFalse(settings.openRouterPostProcessingEnabled)
         XCTAssertFalse(settings.openAICompatiblePostProcessingEnabled)
         XCTAssertFalse(settings.fluidAudioVocabularyEnabled)
@@ -182,6 +183,9 @@ final class SettingsLogicTests: XCTestCase {
 
         settings.transcriptPostProcessingMode = .appleIntelligence
         XCTAssertTrue(settings.appleIntelligencePostProcessingEnabled)
+
+        settings.transcriptPostProcessingMode = .s1Mini
+        XCTAssertTrue(settings.s1MiniPostProcessingEnabled)
 
         settings.transcriptPostProcessingMode = .openRouter
         XCTAssertTrue(settings.openRouterPostProcessingEnabled)

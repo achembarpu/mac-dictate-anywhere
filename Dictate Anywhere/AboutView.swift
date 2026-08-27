@@ -51,6 +51,20 @@ struct AboutView: View {
                 )
                 DSDivider()
                 LibraryRow(
+                    name: "S1-mini by Superwhisper",
+                    url: "https://huggingface.co/superwhisper/s1-mini",
+                    license: "Apache 2.0 + naming term",
+                    description: "Optional on-device model for English transcript normalization. Model files and license are downloaded separately at the user's request."
+                )
+                DSDivider()
+                LibraryRow(
+                    name: "llama.cpp / llama.swift",
+                    url: "https://github.com/mattt/llama.swift",
+                    license: "MIT License",
+                    description: "Local inference runtime used by S1-mini by Superwhisper."
+                )
+                DSDivider()
+                LibraryRow(
                     name: "Ollama",
                     url: "https://github.com/ollama/ollama",
                     license: "MIT License",

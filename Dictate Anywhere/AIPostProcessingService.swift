@@ -104,7 +104,7 @@ fileprivate func postProcessingVocabularyClause(_ vocabulary: [String]) -> Strin
 /// The model sometimes generates content (definitions, essays) instead of
 /// cleaning the transcript. If the output is drastically longer than the input,
 /// it's generating rather than processing.
-fileprivate func looksLikeGeneratedContent(input: String, output: String) -> Bool {
+func looksLikeGeneratedContent(input: String, output: String) -> Bool {
     let inputLength = input.unicodeScalars.count
     let outputLength = output.unicodeScalars.count
     if inputLength < 30 {
@@ -113,7 +113,7 @@ fileprivate func looksLikeGeneratedContent(input: String, output: String) -> Boo
     return outputLength > inputLength * 2
 }
 
-fileprivate func looksLikeRefusalMessage(_ text: String) -> Bool {
+func looksLikeRefusalMessage(_ text: String) -> Bool {
     let lowered = text.lowercased()
     let refusalPhrases = [
         "i cannot",

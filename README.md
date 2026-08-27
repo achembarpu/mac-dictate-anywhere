@@ -1,6 +1,6 @@
 # Dictate Anywhere
 
-A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom shortcut) to dictate text directly into any app using on-device speech recognition, with optional transcript cleanup through Apple Intelligence, Ollama, or OpenRouter.
+A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom shortcut) to dictate text directly into any app using on-device speech recognition, with optional transcript cleanup through S1-mini by Superwhisper, Apple Intelligence, Ollama, or OpenRouter.
 
 <p align="center">
   <a href="https://github.com/hoomanaskari/mac-dictate-anywhere/releases/latest">
@@ -33,9 +33,10 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **Filler Word Removal** - Automatically removes "um", "uh", and other filler words
 - **Custom Vocabulary** - Preserve product names, people names, and domain-specific terms during transcript cleanup
 - **Context Awareness** - Detect the active app or supported website, read a bounded snapshot around the cursor, and apply separate styles for email, work chat, personal chat, and other apps
+- **S1-mini by Superwhisper** - Download or delete a compact English transcript normalizer and run it fully on-device without a separate model server
 - **Ollama Integration** - Connect to a local or remote Ollama server, refresh installed models, and manage recommended local models from the app
 - **OpenRouter Integration** - Use hosted models through OpenRouter with model search, structured-output-aware selection, and secure API key storage
-- **Optional Transcript Cleanup** - Post-process the final transcript with Apple Intelligence, Ollama, or OpenRouter for punctuation, grammar, formatting, and wording cleanup
+- **Optional Transcript Cleanup** - Post-process the final transcript with S1-mini by Superwhisper, Apple Intelligence, Ollama, or OpenRouter for punctuation, grammar, formatting, and wording cleanup
 - **Safe Fallbacks** - If AI cleanup fails or returns unusable output, the original local transcript is pasted instead
 - **Menu Bar App** - Runs quietly in your menu bar
 
@@ -54,15 +55,26 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 
 ## Optional AI Transcript Cleanup
 
-Dictate Anywhere always transcribes audio locally with FluidAudio. AI cleanup happens only after transcription, so your raw audio stays on your Mac even when you enable Ollama or OpenRouter. Context Awareness keeps surrounding text local by default; sharing it with a remote cleanup provider requires a separate opt-in.
+Dictate Anywhere always transcribes audio locally with FluidAudio. Cleanup happens only after transcription, so your raw audio stays on your Mac even when you enable Ollama or OpenRouter. Context Awareness keeps surrounding text local by default; sharing it with a remote cleanup provider requires a separate opt-in.
 
 | Provider | Runs Where | Best For | Benefits |
 |----------|------------|----------|----------|
 | None | Nowhere | Fastest raw dictation | Uses the local FluidAudio transcript as-is |
 | FluidAudio Vocabulary | On-device | Lightweight terminology correction | Applies vocabulary rescoring to Parakeet TDT final transcripts without an LLM |
 | Apple Intelligence | On-device | Native macOS cleanup | On-device cleanup on supported Macs |
+| S1-mini by Superwhisper | On-device | Compact English transcript normalization | One-click 462 MB download, fixed style/structure/context controls, and no separate server |
 | Ollama | Local or self-hosted server | Privacy-first LLM cleanup | Local model choice, optional reasoning controls, and in-app model management for local Ollama setups |
 | OpenRouter | Cloud | Broad hosted model access | Large model catalog, model search, secure key storage, and structured-output-aware selection |
+
+### S1-mini by Superwhisper
+
+[S1-mini by Superwhisper](https://huggingface.co/superwhisper/s1-mini) is a compact model trained specifically to normalize speech-to-text transcripts.
+
+- Downloads a pinned Q4_K_M model directly from Hugging Face and verifies its exact size and SHA-256 before installation
+- Runs through the embedded llama.cpp runtime, with Metal acceleration on Apple Silicon and CPU inference on Intel
+- Provides the model's trained styling, structure, and context controls instead of an arbitrary prompt
+- Supports English transcripts up to approximately 1,000 model tokens; unsupported languages or failed cleanup preserve the original transcript
+- Can be removed from the Transcript Cleanup page, including its locally stored license file
 
 ### Ollama
 
@@ -237,7 +249,7 @@ When your local signing setup is ready, package the release with:
 2. **Recording** - Speak naturally while dictation is active
 3. **Processing** - Release the key, tap again, or let Parakeet EOU auto-stop when enabled
 4. **Context** - When enabled, a bounded Accessibility snapshot classifies the destination and supplies local recognition hints
-5. **Optional Cleanup** - The final transcript can be cleaned up with Apple Intelligence, Ollama, or OpenRouter using the selected category style
+5. **Optional Cleanup** - The final transcript can be cleaned up with S1-mini by Superwhisper, Apple Intelligence, Ollama, or OpenRouter
 6. **Insertion** - Text is automatically inserted with cursor-aware spacing; the insertion layer never adds terminal punctuation
 
 The app uses FluidAudio speech models that run entirely on your Mac. Parakeet TDT remains the default path, and optional Parakeet EOU or Nemotron streaming models can be downloaded for lower-latency live previews.
@@ -246,6 +258,7 @@ The app uses FluidAudio speech models that run entirely on your Mac. Parakeet TD
 
 - **100% On-Device Speech Recognition** - All audio transcription happens locally on your Mac
 - **Context Stays Local by Default** - Surrounding text is used by on-device/local processing but is withheld from remote servers unless you explicitly enable remote context sharing
+- **S1-mini Stays Fully Local** - After its one-time model download, S1-mini by Superwhisper receives transcript text only in local memory and does not require a model server
 - **Ollama Can Stay Fully Local** - If you use a local Ollama server, transcript cleanup and surrounding context can stay on your machine; a remote Ollama server receives the transcript plus category/style, and receives surrounding text only with the separate opt-in
 - **Optional Cloud Transcript Cleanup** - Audio never leaves your Mac; transcript text and category/style can be sent to OpenRouter when enabled, while surrounding text remains separately opt-in
 - **Secure OpenRouter Key Storage** - API keys pasted into the app are stored in Keychain
@@ -269,5 +282,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - [FluidAudio](https://github.com/FluidInference/FluidAudio) - For local Parakeet and Nemotron speech-to-text models
+- [S1-mini by Superwhisper](https://huggingface.co/superwhisper/s1-mini) - For compact local English transcript normalization
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) and [llama.swift](https://github.com/mattt/llama.swift) - For embedded local S1-mini inference
 - [Ollama](https://ollama.com/) - For enabling optional local LLM-based transcript cleanup
 - [create-dmg](https://github.com/create-dmg/create-dmg) - For the DMG creation tool

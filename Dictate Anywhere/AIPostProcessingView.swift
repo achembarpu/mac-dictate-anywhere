@@ -24,6 +24,8 @@ struct AIPostProcessingView: View {
     @State private var openAICompatibleAvailability: OpenAICompatiblePostProcessingService.Availability?
     @State private var openAICompatibleStatusMessage: String?
     @State private var isCheckingOpenAICompatible = false
+    @State private var isConfirmingS1MiniDeletion = false
+    @State private var s1MiniActionError: String?
     private let shouldAutoRefreshProviderAvailability: Bool
 
     init(
@@ -55,10 +57,10 @@ struct AIPostProcessingView: View {
                 subtitle: "Choose how your transcript is polished before it's pasted."
             )
 
-            DSSection(overline: "AI Processing") {
+            DSSection(overline: "Cleanup Method") {
                 DSDetailRow(
                     label: "Transcript processing",
-                    caption: "Choose how the final transcript is cleaned up before it is pasted."
+                    caption: "The sections that follow set up the method you choose. Local filler-word removal at the bottom of the page runs before all of them."
                 ) {
                     DSDropdown(
                         selection: $settings.transcriptPostProcessingMode,
@@ -73,38 +75,22 @@ struct AIPostProcessingView: View {
                 if settings.engineChoice == .parakeet,
                    !settings.parakeetModelChoice.supportsFluidAudioVocabulary {
                     DSDivider()
-                    DSHint(text: "FluidAudio Vocabulary is unavailable for the selected speech model — its terminology rescoring supports English text only.")
+                    cardPadded {
+                        DSHint(text: "FluidAudio Vocabulary is unavailable for the selected speech model — its terminology rescoring supports English text only.")
+                    }
                 }
             }
 
-            contextAwarenessContent(settings: settings)
+            // Setup for the selected method sits directly under the picker, so
+            // its status and any blocking action stay in the same viewport.
+            selectedMethodContent(settings: settings)
+
+            // Context only reaches methods that run text through a model.
+            if settings.transcriptPostProcessingMode.usesDictationContext {
+                contextAwarenessContent(settings: settings)
+            }
 
             localFillerWordCleanupContent(settings: settings)
-
-            switch settings.transcriptPostProcessingMode {
-            case .none:
-                DSPanel(
-                    text: "No AI cleanup will run. The raw FluidAudio transcript is pasted after the local filler-word cleanup above.",
-                    icon: "sparkles"
-                )
-            case .fluidAudioVocabulary:
-                fluidAudioVocabularyContent(settings: settings)
-            case .appleIntelligence:
-                if #available(macOS 26, *) {
-                    appleIntelligenceContent(settings: settings)
-                } else {
-                    DSPanel(
-                        text: "Apple Intelligence transcript processing requires macOS 26 or later.",
-                        icon: "exclamationmark.triangle"
-                    )
-                }
-            case .ollama:
-                ollamaContent(settings: settings)
-            case .openRouter:
-                openRouterContent(settings: settings)
-            case .openAICompatible:
-                openAICompatibleContent(settings: settings)
-            }
         }
         .task(id: providerTaskID(settings: settings)) {
             guard shouldAutoRefreshProviderAvailability else { return }
@@ -135,6 +121,57 @@ struct AIPostProcessingView: View {
         } message: {
             Text("This will remove \(ollamaPendingDeletionModel ?? "this model") from the configured Ollama server.")
         }
+        .alert("Delete S1-mini by Superwhisper?", isPresented: $isConfirmingS1MiniDeletion) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    do {
+                        try await appState.s1MiniModelManager.deleteModel()
+                        s1MiniActionError = nil
+                    } catch {
+                        s1MiniActionError = error.localizedDescription
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the local model and its downloaded license file. You can download them again later.")
+        }
+    }
+
+    // MARK: - Selected method
+
+    /// Setup for whichever cleanup method is selected. Every branch opens with
+    /// a section named after that method that carries its status and blockers,
+    /// so the page never shows configuration for a method you did not pick.
+    @ViewBuilder
+    private func selectedMethodContent(settings: Settings) -> some View {
+        switch settings.transcriptPostProcessingMode {
+        case .none:
+            DSSection(overline: "No Cleanup") {
+                cardCaption("Your transcript is pasted exactly as the speech model produced it, after the local filler-word removal below. Pick another method to turn on AI cleanup, per-destination writing styles, and app context.")
+            }
+        case .fluidAudioVocabulary:
+            fluidAudioVocabularyContent(settings: settings)
+        case .appleIntelligence:
+            if #available(macOS 26, *) {
+                appleIntelligenceContent(settings: settings)
+            } else {
+                DSSection(overline: "Apple Intelligence") {
+                    cardPanel(
+                        "Apple Intelligence transcript processing requires macOS 26 or later. Choose another cleanup method on this Mac.",
+                        icon: "exclamationmark.triangle"
+                    )
+                }
+            }
+        case .s1Mini:
+            s1MiniContent(settings: settings)
+        case .ollama:
+            ollamaContent(settings: settings)
+        case .openRouter:
+            openRouterContent(settings: settings)
+        case .openAICompatible:
+            openAICompatibleContent(settings: settings)
+        }
     }
 
     // MARK: - Context awareness
@@ -143,6 +180,9 @@ struct AIPostProcessingView: View {
     private func contextAwarenessContent(settings: Settings) -> some View {
         @Bindable var settings = settings
 
+        let mode = settings.transcriptPostProcessingMode
+
+        // What gets read.
         DSSection(overline: "Context Awareness") {
             DSStackedRow(
                 label: "Adapt to the current app and text field",
@@ -151,24 +191,38 @@ struct AIPostProcessingView: View {
             )
 
             if settings.dictationContextAwarenessEnabled {
-                DSDivider()
-                DSStackedRow(
-                    label: "Share surrounding text with remote providers",
-                    caption: "Off by default. Category and style are still sent, but nearby text stays on this Mac unless cleanup runs locally through Apple Intelligence, localhost Ollama, or a localhost OpenAI-compatible server.",
-                    isOn: $settings.shareDictationContextWithRemoteProviders
-                )
-                DSDivider()
-                writingStyleRow(settings: settings, category: .email)
-                DSDivider()
-                writingStyleRow(settings: settings, category: .workMessaging)
-                DSDivider()
-                writingStyleRow(settings: settings, category: .personalMessaging)
-                DSDivider()
-                writingStyleRow(settings: settings, category: .other)
+                if mode.canSendContextOffDevice {
+                    DSDivider()
+                    DSStackedRow(
+                        label: "Share surrounding text with \(mode.displayName)",
+                        caption: shareContextCaption(for: mode),
+                        isOn: $settings.shareDictationContextWithRemoteProviders
+                    )
+                } else {
+                    DSDivider()
+                    cardCaption(onDeviceContextCaption(for: mode))
+                }
             }
         }
 
         if settings.dictationContextAwarenessEnabled {
+            // S1-mini has its own trained Styling control. Other model-backed
+            // methods consume the app-specific writing styles configured here.
+            if mode != .s1Mini {
+                DSSection(overline: "Writing Style") {
+                    writingStyleRow(settings: settings, category: .email)
+                    DSDivider()
+                    writingStyleRow(settings: settings, category: .workMessaging)
+                    DSDivider()
+                    writingStyleRow(settings: settings, category: .personalMessaging)
+                    DSDivider()
+                    writingStyleRow(settings: settings, category: .other)
+                    DSDivider()
+                    cardCaption("\(mode.displayName) is told which of these four destinations you are dictating into, and matches the style you set for it.")
+                }
+            }
+
+            // Which app counts as which destination.
             DSSection(overline: "App Categories") {
                 if settings.dictationAppRules.isEmpty {
                     cardCaption("Common email and messaging apps and sites are categorized automatically. Add an override only when an app should use another category or should not expose surrounding text.")
@@ -202,6 +256,28 @@ struct AIPostProcessingView: View {
                     .buttonStyle(.dsSecondary)
                 }
             }
+        }
+    }
+
+    /// Opt-in copy for the one selected method that could reach off this Mac.
+    private func shareContextCaption(for mode: TranscriptPostProcessingMode) -> String {
+        switch mode {
+        case .openRouter:
+            return "Off by default. The destination category and writing style are always sent. The text around your cursor stays on this Mac unless you turn this on."
+        case .ollama, .openAICompatible:
+            return "Off by default. The destination category and writing style are always sent. The text around your cursor stays on this Mac unless you turn this on — or unless the server URL points at localhost, which never leaves this Mac either way."
+        case .none, .fluidAudioVocabulary, .appleIntelligence, .s1Mini:
+            return ""
+        }
+    }
+
+    /// Reassurance for the methods that can only ever run on this Mac.
+    private func onDeviceContextCaption(for mode: TranscriptPostProcessingMode) -> String {
+        switch mode {
+        case .s1Mini:
+            return "S1-mini by Superwhisper receives only the destination category, so its Automatic context control can choose email or general formatting. The text around your cursor is never passed to the model, and nothing leaves this Mac."
+        case .appleIntelligence, .none, .fluidAudioVocabulary, .ollama, .openRouter, .openAICompatible:
+            return "Apple Intelligence runs on this Mac, so anything read around your cursor stays on this device."
         }
     }
 
@@ -384,6 +460,15 @@ struct AIPostProcessingView: View {
             .padding(.horizontal, DS.Spacing.rowHorizontal)
     }
 
+    /// Blocking notice rendered inside a card, so a warning always reads as
+    /// belonging to the section it sits in rather than floating between two.
+    @ViewBuilder
+    private func cardPanel(_ text: String, icon: String) -> some View {
+        DSPanel(text: text, icon: icon)
+            .padding(.vertical, 12)
+            .padding(.horizontal, DS.Spacing.rowHorizontal)
+    }
+
     @ViewBuilder
     private func cardPadded<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -458,10 +543,12 @@ struct AIPostProcessingView: View {
     @ViewBuilder
     private func fluidAudioVocabularyContent(settings: Settings) -> some View {
         if settings.parakeetModelChoice.usesTrueStreaming {
-            DSPanel(
-                text: "FluidAudio Vocabulary is only available with Parakeet TDT models. Choose Multilingual, English Only, or English Compact to use vocabulary rescoring. For streaming models, use Apple Intelligence, Ollama, OpenRouter, or OpenAI Compatible cleanup.",
-                icon: "exclamationmark.triangle"
-            )
+            DSSection(overline: "FluidAudio Vocabulary") {
+                cardPanel(
+                    "FluidAudio Vocabulary is only available with Parakeet TDT models. Choose Multilingual, English Only, or English Compact on the Speech Model page to use vocabulary rescoring. For streaming models, pick Apple Intelligence, S1-mini by Superwhisper, Ollama, OpenRouter, or OpenAI Compatible instead.",
+                    icon: "exclamationmark.triangle"
+                )
+            }
         } else {
             vocabularySection(
                 settings: settings,
@@ -498,10 +585,12 @@ struct AIPostProcessingView: View {
             )
 
         case .unavailable(.deviceNotEligible):
-            DSPanel(
-                text: "Your Mac doesn't support Apple Intelligence. AI Post Processing requires a Mac that supports Apple Intelligence.",
-                icon: "xmark.circle"
-            )
+            DSSection(overline: "Apple Intelligence") {
+                cardPanel(
+                    "This Mac doesn't support Apple Intelligence. Pick another cleanup method — S1-mini by Superwhisper also runs entirely on this Mac.",
+                    icon: "xmark.circle"
+                )
+            }
 
         case .unavailable(.appleIntelligenceNotEnabled):
             DSSection(overline: "Apple Intelligence") {
@@ -542,10 +631,171 @@ struct AIPostProcessingView: View {
             }
 
         case .unavailable(_):
-            DSPanel(
-                text: "Apple Intelligence is currently unavailable. Try again later.",
-                icon: "exclamationmark.triangle"
-            )
+            DSSection(overline: "Apple Intelligence") {
+                cardPanel(
+                    "Apple Intelligence is currently unavailable. Try again later.",
+                    icon: "exclamationmark.triangle"
+                )
+            }
+        }
+    }
+
+    // MARK: - S1-mini
+
+    @ViewBuilder
+    private func s1MiniContent(settings: Settings) -> some View {
+        @Bindable var settings = settings
+        let manager = appState.s1MiniModelManager
+
+        DSSection(overline: "S1-mini by Superwhisper") {
+            if activeSpeechLanguage(settings: settings) != .english {
+                cardPanel(
+                    "S1-mini supports English only. With the current speech language, Dictate Anywhere pastes the transcript without S1-mini cleanup.",
+                    icon: "exclamationmark.triangle"
+                )
+                DSDivider()
+            }
+            cardPadded {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: s1MiniStatusIcon(manager: manager))
+                        .foregroundStyle(manager.isModelDownloaded ? DS.Colors.success : DS.Colors.accent)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(s1MiniStatusTitle(manager: manager))
+                            .font(DS.Fonts.ui(13.5, .semibold))
+                            .foregroundStyle(DS.Colors.ink)
+                        Text("462 MB · English · Local transcript normalizer")
+                            .font(DS.Fonts.ui(12.5))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                    }
+                    Spacer(minLength: 12)
+
+                    if manager.isModelDownloaded {
+                        Button(manager.isDeleting ? "Deleting…" : "Delete") {
+                            isConfirmingS1MiniDeletion = true
+                        }
+                        .buttonStyle(.dsSecondary)
+                        .disabled(manager.isBusy)
+                    } else {
+                        Button(manager.isDownloading ? "Downloading…" : "Download Model") {
+                            downloadS1MiniModel()
+                        }
+                        .buttonStyle(.dsPrimary)
+                        .disabled(manager.isBusy)
+                    }
+                }
+
+                if manager.isDownloading {
+                    ProgressView(value: s1MiniVisibleDownloadProgress(manager: manager))
+                        .progressViewStyle(.linear)
+                    Text(s1MiniDownloadProgressText(manager: manager))
+                        .font(DS.Fonts.ui(11.5, .medium))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+
+                if let error = s1MiniActionError ?? manager.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(DS.Fonts.ui(12.5))
+                        .foregroundStyle(DS.Colors.accentDeep)
+                }
+            }
+            DSDivider()
+            cardPadded {
+                Text("Downloads a pinned, integrity-checked copy directly from Hugging Face. Once installed, transcript cleanup runs entirely on this Mac and does not send transcript text to a server. Apple Silicon uses Metal acceleration; Intel uses CPU inference and will be slower.")
+                    .font(DS.Fonts.ui(12.5))
+                    .lineSpacing(12.5 * 0.5 - 3)
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Link(
+                    "View the model and its license on Hugging Face",
+                    destination: URL(string: "https://huggingface.co/superwhisper/s1-mini")!
+                )
+                .font(DS.Fonts.ui(12.5, .medium))
+                .foregroundStyle(DS.Colors.accent)
+            }
+        }
+
+        DSSection(overline: "Cleanup Controls") {
+            DSDetailRow(
+                label: "Styling",
+                caption: "Controls how casual or formal the normalized transcript should sound."
+            ) {
+                DSDropdown(
+                    selection: $settings.s1MiniStyling,
+                    options: S1MiniStyling.allCases,
+                    title: \.displayName
+                )
+            }
+            DSDivider()
+            DSDetailRow(
+                label: "Structure",
+                caption: "Choose prose paragraphs or a list-oriented result."
+            ) {
+                DSDropdown(
+                    selection: $settings.s1MiniStructure,
+                    options: S1MiniStructure.allCases,
+                    title: \.displayName
+                )
+            }
+            DSDivider()
+            DSDetailRow(
+                label: "Context",
+                caption: "Automatic uses email formatting for email destinations and general formatting elsewhere."
+            ) {
+                DSDropdown(
+                    selection: $settings.s1MiniContextSetting,
+                    options: S1MiniContextSetting.allCases,
+                    title: \.displayName
+                )
+            }
+            DSDivider()
+            cardCaption("S1-mini by Superwhisper uses these fixed, trained controls rather than an arbitrary prompt or custom vocabulary. Local filler-word removal still runs before them.")
+        }
+    }
+
+    private func activeSpeechLanguage(settings: Settings) -> SupportedLanguage {
+        settings.engineChoice == .appleSpeech
+            ? settings.appleSpeechLanguage
+            : settings.selectedLanguage
+    }
+
+    private func s1MiniStatusTitle(manager: S1MiniModelManager) -> String {
+        if manager.isDownloading { return "Downloading and verifying…" }
+        if manager.isDeleting { return "Deleting…" }
+        if manager.isVerifying { return "Verifying installation…" }
+        return manager.isModelDownloaded ? "Ready" : "Not downloaded"
+    }
+
+    private func s1MiniStatusIcon(manager: S1MiniModelManager) -> String {
+        if manager.isDownloading { return "arrow.down.circle" }
+        if manager.isDeleting { return "trash.circle" }
+        if manager.isVerifying { return "checkmark.shield" }
+        return manager.isModelDownloaded ? "checkmark.circle.fill" : "internaldrive"
+    }
+
+    private func s1MiniVisibleDownloadProgress(manager: S1MiniModelManager) -> Double {
+        min(1, manager.downloadProgress / S1MiniDownloadProgress.installationFraction)
+    }
+
+    private func s1MiniDownloadProgressText(manager: S1MiniModelManager) -> String {
+        guard manager.downloadProgress < S1MiniDownloadProgress.installationFraction else {
+            return "Verifying model integrity…"
+        }
+
+        let fraction = s1MiniVisibleDownloadProgress(manager: manager)
+        let downloadedMiB = Int(Double(S1MiniModelSpec.byteCount) * fraction / 1_048_576)
+        let totalMiB = Int(ceil(Double(S1MiniModelSpec.byteCount) / 1_048_576))
+        return "\(Int(fraction * 100))% · \(downloadedMiB) of \(totalMiB) MB"
+    }
+
+    private func downloadS1MiniModel() {
+        s1MiniActionError = nil
+        Task {
+            do {
+                try await appState.s1MiniModelManager.downloadModel()
+            } catch {
+                s1MiniActionError = error.localizedDescription
+            }
         }
     }
 
@@ -553,11 +803,11 @@ struct AIPostProcessingView: View {
 
     @ViewBuilder
     private func ollamaContent(settings: Settings) -> some View {
-        if !ollamaCLIAvailability.isAvailable {
-            ollamaInstallCard(settings: settings)
-        }
-
         DSSection(overline: "Ollama") {
+            if !ollamaCLIAvailability.isAvailable {
+                ollamaInstallContent()
+                DSDivider()
+            }
             fieldRow(label: "Server URL") {
                 DSTextField(
                     placeholder: OllamaPostProcessingService.defaultBaseURL,
@@ -865,63 +1115,42 @@ struct AIPostProcessingView: View {
         )
     }
 
-    // MARK: - Ollama install card
+    // MARK: - Ollama install prompt
 
+    /// Shown as the first row of the Ollama section when the CLI is missing,
+    /// so the blocker and the server fields it blocks stay together.
     @ViewBuilder
-    private func ollamaInstallCard(settings: Settings) -> some View {
-        DSCard {
-            cardPadded {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "shippingbox.circle.fill")
-                        .font(.system(size: 30))
-                        .foregroundStyle(DS.Colors.accent)
+    private func ollamaInstallContent() -> some View {
+        cardPadded {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "shippingbox")
+                    .foregroundStyle(DS.Colors.accent)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Install Ollama for local transcript cleanup")
-                            .font(DS.Fonts.ui(14, .semibold))
-                            .foregroundStyle(DS.Colors.ink)
-
-                        Text("Ollama lets Dictate Anywhere clean up transcripts with a local language model on your Mac. It can improve punctuation, grammar, formatting, and term normalization without relying on a hosted API.")
-                            .font(DS.Fonts.ui(12.5))
-                            .foregroundStyle(DS.Colors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    ollamaInstallBullet("Run post-processing on your machine", systemImage: "lock.shield")
-                    ollamaInstallBullet("Use local models for stronger cleanup and normalization", systemImage: "sparkles.rectangle.stack")
-                    ollamaInstallBullet("Download recommended models directly from this app once installed", systemImage: "arrow.down.circle")
-                }
-
-                HStack(alignment: .center, spacing: 12) {
-                    Button {
-                        guard let url = URL(string: "https://ollama.com/download") else { return }
-                        NSWorkspace.shared.open(url)
-                    } label: {
-                        Label("Download Ollama", systemImage: "arrow.down.circle.fill")
-                    }
-                    .buttonStyle(.dsPrimary)
-
-                    Text("You can still connect to a remote Ollama server by entering its URL below.")
-                        .font(DS.Fonts.ui(12))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Not installed")
+                        .font(DS.Fonts.ui(13.5, .semibold))
+                        .foregroundStyle(DS.Colors.ink)
+                    Text("Local models · Free · Runs on this Mac")
+                        .font(DS.Fonts.ui(12.5))
                         .foregroundStyle(DS.Colors.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-        }
-    }
 
-    @ViewBuilder
-    private func ollamaInstallBullet(_ text: String, systemImage: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(DS.Colors.accent)
-                .frame(width: 16)
-            Text(text)
-                .font(DS.Fonts.ui(13))
-                .foregroundStyle(DS.Colors.ink)
+                Spacer(minLength: 12)
+
+                Button {
+                    guard let url = URL(string: "https://ollama.com/download") else { return }
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label("Download Ollama", systemImage: "arrow.down.circle.fill")
+                }
+                .buttonStyle(.dsPrimary)
+            }
+
+            Text("Install Ollama to clean up transcripts with a local language model and pull recommended models from this app. You can also leave it uninstalled and point the server URL below at a remote Ollama server.")
+                .font(DS.Fonts.ui(12.5))
+                .lineSpacing(12.5 * 0.5 - 3)
+                .foregroundStyle(DS.Colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1332,13 +1561,6 @@ struct AIPostProcessingView: View {
                     .font(DS.Fonts.ui(12.5))
                     .foregroundStyle(DS.Colors.textSecondary)
             }
-        } else if !ollamaCLIAvailability.isAvailable &&
-                    OllamaPostProcessingService.isLocalServer(baseURL: settings.ollamaBaseURL) {
-            statusLabel(
-                "Ollama is not installed on this Mac yet. Install it to run transcript cleanup locally, or enter a remote Ollama server URL.",
-                systemImage: "info.circle",
-                tint: DS.Colors.accent
-            )
         } else if let message = ollamaStatusMessage {
             statusLabel(message, systemImage: "xmark.circle", tint: DS.Colors.destructive)
         } else if let availability = ollamaAvailability {
@@ -1586,7 +1808,7 @@ struct AIPostProcessingView: View {
             resetOllamaAvailability()
             resetOpenRouterAvailability()
             await refreshOpenAICompatibleAvailability(settings: settings, debounce: true)
-        case .none, .fluidAudioVocabulary, .appleIntelligence:
+        case .none, .fluidAudioVocabulary, .appleIntelligence, .s1Mini:
             resetOllamaAvailability()
             resetOpenRouterAvailability()
             resetOpenAICompatibleAvailability()
