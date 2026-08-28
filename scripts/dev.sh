@@ -8,17 +8,19 @@ CONFIGURATION="Debug"
 APP_NAME="Dictate Anywhere Dev.app"
 DEFAULT_DERIVED_DATA_PATH="$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$DEFAULT_DERIVED_DATA_PATH}"
-APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME"
 SIGNING_CONFIG_PATH="${SIGNING_CONFIG_PATH:-$ROOT_DIR/Config/Signing.local.xcconfig}"
+RELEASE_SIGNING_ARGS=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") <command>
 
 Commands:
-  build   Build the signed Debug app with automatic signing
+  build [OPTIONS]
+          Build the Debug app with automatic signing
   launch  Build and launch the canonical Debug app
-  test    Build and run the project tests
+  test [OPTIONS]
+          Build and run the project tests
   check   Validate the Xcode project and Debug scheme
   stop    Stop the running canonical app
   signing [TEAM_ID]
@@ -27,6 +29,14 @@ Commands:
 
 DerivedData: $DERIVED_DATA_PATH
 Override with DERIVED_DATA_PATH, using a stable non-temporary path.
+
+Build and test options:
+  --configuration Debug|Release
+          Select the build configuration (default: Debug)
+  --release
+          Alias for --configuration Release
+
+Release validation disables code signing and does not package or notarize the app.
 EOF
 }
 
@@ -39,6 +49,33 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
 }
 
+parse_configuration_options() {
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --configuration)
+        [[ "$#" -ge 2 ]] || fail "Missing value for --configuration (expected Debug or Release)"
+        CONFIGURATION="$2"
+        shift 2
+        ;;
+      --release)
+        CONFIGURATION="Release"
+        shift
+        ;;
+      --*)
+        fail "Unknown option for build/test: $1"
+        ;;
+      *)
+        fail "Unexpected argument for build/test: $1"
+        ;;
+    esac
+  done
+
+  case "$CONFIGURATION" in
+    Debug|Release) ;;
+    *) fail "Unknown configuration: $CONFIGURATION (expected Debug or Release)" ;;
+  esac
+}
+
 validate_derived_data_path() {
   case "$DERIVED_DATA_PATH" in
     ""|/*/../*|/*/..|/tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/folders|/var/folders/*)
@@ -49,16 +86,22 @@ validate_derived_data_path() {
   esac
 }
 
-xcodebuild_args=(
-  -project "$PROJECT_PATH"
-  -scheme "$SCHEME"
-  -configuration "$CONFIGURATION"
-  -derivedDataPath "$DERIVED_DATA_PATH"
-)
+configure_xcodebuild_args() {
+  xcodebuild_args=(
+    -project "$PROJECT_PATH"
+    -scheme "$SCHEME"
+    -configuration "$CONFIGURATION"
+    -derivedDataPath "$DERIVED_DATA_PATH"
+  )
 
-if [[ -f "$SIGNING_CONFIG_PATH" ]]; then
-  xcodebuild_args+=( -xcconfig "$SIGNING_CONFIG_PATH" )
-fi
+  if [[ "$CONFIGURATION" == "Debug" && -f "$SIGNING_CONFIG_PATH" ]]; then
+    xcodebuild_args+=( -xcconfig "$SIGNING_CONFIG_PATH" )
+  fi
+
+  if [[ "$CONFIGURATION" == "Release" ]]; then
+    xcodebuild_args+=( "${RELEASE_SIGNING_ARGS[@]}" )
+  fi
+}
 
 build() {
   printf 'Building %s (%s)\n' "$SCHEME" "$CONFIGURATION"
@@ -159,6 +202,18 @@ if [[ "$command" == "signing" ]]; then
   signing "${@:2}"
   exit 0
 fi
+
+case "$command" in
+  build|test)
+    parse_configuration_options "${@:2}"
+    ;;
+  *)
+    CONFIGURATION="Debug"
+    ;;
+esac
+
+APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME"
+configure_xcodebuild_args
 
 require_command xcodebuild
 validate_derived_data_path

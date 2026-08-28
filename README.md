@@ -198,9 +198,9 @@ xcodebuild -project "Dictate Anywhere.xcodeproj" -scheme "Dictate Anywhere" -con
 
 If you only want to run the app locally, you do not need the release packaging script.
 
-### Stable Local Debug Workflow
+### Stable Local Development Workflow
 
-For local development, use `scripts/dev.sh` with the shared **Dictate Anywhere** scheme. The workflow uses the **Debug** configuration, stable DerivedData, and the isolated `Dictate Anywhere Dev.app` so local permissions do not affect Release builds.
+For local development, use `scripts/dev.sh` with the shared **Dictate Anywhere** scheme. The workflow defaults to the **Debug** configuration, stable DerivedData, and the isolated `Dictate Anywhere Dev.app` so local permissions do not affect Release builds.
 
 Create the ignored local signing override when needed:
 
@@ -215,16 +215,21 @@ Common commands:
 ```bash
 scripts/dev.sh check
 scripts/dev.sh build
+scripts/dev.sh build --configuration Release
+scripts/dev.sh build --release
 scripts/dev.sh launch
 scripts/dev.sh test
+scripts/dev.sh test --configuration Release
 scripts/dev.sh stop
 ```
+
+Use `--configuration Debug` or `--configuration Release` with `build` and `test`. The default is `Debug`, and `--release` is an alias for `--configuration Release`. Release validation uses signing-disabled flags for local, non-packaging checks. It does not package, notarize, update the appcast, or change production Release settings.
 
 Set the optional `DERIVED_DATA_PATH` environment variable to use another stable path. The default is `$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev`.
 
 If Accessibility permission is stale, remove `Dictate Anywhere Dev.app` from **System Settings → Privacy & Security → Accessibility**, launch it again, and add that exact app.
 
-Release signing remains separate from this local Debug workflow.
+Release signing remains separate from this local workflow.
 
 ### Create DMG (optional)
 
