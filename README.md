@@ -200,11 +200,17 @@ If you only want to run the app locally, you do not need the release packaging s
 
 ### Stable Local Debug Workflow
 
-For local development, use the shared **Dictate Anywhere** scheme through `scripts/dev.sh`. The script uses the **Debug** configuration, normal local signing, and one stable user-home DerivedData path. It always launches the canonical `Dictate Anywhere Dev.app`, so macOS Accessibility permission stays tied to one signed app identity.
+For local development, use `scripts/dev.sh` with the shared **Dictate Anywhere** scheme. The workflow uses the **Debug** configuration, stable DerivedData, and the isolated `Dictate Anywhere Dev.app` so local permissions do not affect Release builds.
 
-Keep your local team ID only in the ignored `Config/Signing.local.xcconfig` file. Never commit that file or its team ID. The checked-in configuration must not contain personal signing identifiers.
+Create the ignored local signing override when needed:
 
-From the repository root, run:
+```bash
+scripts/dev.sh signing [TEAM_ID]
+```
+
+Automatic signing requires an Xcode account with the matching Apple Developer team and a matching development certificate. Keep `Config/Signing.local.xcconfig` ignored and do not commit it.
+
+Common commands:
 
 ```bash
 scripts/dev.sh check
@@ -214,15 +220,11 @@ scripts/dev.sh test
 scripts/dev.sh stop
 ```
 
-Set `DERIVED_DATA_PATH` to another absolute, stable, non-temporary path when needed. The default is `$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev`.
+Set the optional `DERIVED_DATA_PATH` environment variable to use another stable path. The default is `$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev`.
 
-If Accessibility permission is stale, remove the app from **System Settings → Privacy & Security → Accessibility**, then run `scripts/dev.sh launch` and add that exact app again.
+If Accessibility permission is stale, remove `Dictate Anywhere Dev.app` from **System Settings → Privacy & Security → Accessibility**, launch it again, and add that exact app.
 
-If you want to sign builds with your own Apple Developer account, create `Config/Signing.local.xcconfig` on your machine with:
-
-```xcconfig
-DEVELOPMENT_TEAM = YOUR_TEAM_ID
-```
+Release signing remains separate from this local Debug workflow.
 
 ### Create DMG (optional)
 
