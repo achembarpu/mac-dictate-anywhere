@@ -722,7 +722,7 @@ final class AppState {
                 )
             }
         case .appleIntelligence:
-            let context = postProcessingContext(includeCapturedText: true)
+            let context = postProcessingContext(for: .appleIntelligence)
             if !settings.aiPostProcessingPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || context != nil {
                 if #available(macOS 26, *) {
@@ -755,13 +755,14 @@ final class AppState {
             } else {
                 do {
                     let modelURL = try await s1MiniModelManager.validatedModelURL()
+                    let context = postProcessingContext(for: .s1Mini)
                     processedText = try await S1MiniPostProcessingService.process(
                         text: finalText,
                         modelURL: modelURL,
-                        styling: settings.s1MiniStyling,
+                        styling: settings.s1MiniStyling(for: context?.category),
                         structure: settings.s1MiniStructure,
                         contextSetting: settings.s1MiniContextSetting,
-                        context: postProcessingContext(includeCapturedText: false)
+                        context: context
                     )
                 } catch {
                     logger.error("postProcessing: S1-mini failed: \(error.localizedDescription, privacy: .public)")
@@ -769,6 +770,7 @@ final class AppState {
             }
         case .ollama:
             do {
+                let isLocalServer = OllamaPostProcessingService.isLocalServer(baseURL: settings.ollamaBaseURL)
                 processedText = try await OllamaPostProcessingService.process(
                     text: finalText,
                     baseURL: settings.ollamaBaseURL,
@@ -777,8 +779,8 @@ final class AppState {
                     prompt: settings.ollamaPostProcessingPrompt,
                     vocabulary: settings.customVocabulary,
                     context: postProcessingContext(
-                        includeCapturedText: settings.shareDictationContextWithRemoteProviders
-                            || OllamaPostProcessingService.isLocalServer(baseURL: settings.ollamaBaseURL)
+                        for: .ollama,
+                        isConfiguredServerLocal: isLocalServer
                     )
                 )
             } catch {
@@ -793,15 +795,16 @@ final class AppState {
                     vocabulary: settings.customVocabulary,
                     apiKey: settings.openRouterAPIKey,
                     apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable,
-                    context: postProcessingContext(
-                        includeCapturedText: settings.shareDictationContextWithRemoteProviders
-                    )
+                    context: postProcessingContext(for: .openRouter)
                 )
             } catch {
                 logger.error("postProcessing: OpenRouter failed: \(error.localizedDescription, privacy: .public)")
             }
         case .openAICompatible:
             do {
+                let isLocalServer = OllamaPostProcessingService.isLocalServer(
+                    baseURL: settings.openAICompatibleBaseURL
+                )
                 processedText = try await OpenAICompatiblePostProcessingService.process(
                     text: finalText,
                     baseURL: settings.openAICompatibleBaseURL,
@@ -810,8 +813,8 @@ final class AppState {
                     prompt: settings.openAICompatiblePostProcessingPrompt,
                     vocabulary: settings.customVocabulary,
                     context: postProcessingContext(
-                        includeCapturedText: settings.shareDictationContextWithRemoteProviders
-                            || OllamaPostProcessingService.isLocalServer(baseURL: settings.openAICompatibleBaseURL)
+                        for: .openAICompatible,
+                        isConfiguredServerLocal: isLocalServer
                     )
                 )
             } catch {
@@ -933,6 +936,20 @@ final class AppState {
         return context.postProcessingContext(
             style: settings.dictationWritingStyle(for: context.category),
             includeCapturedText: includeCapturedText
+        )
+    }
+
+    private func postProcessingContext(
+        for mode: TranscriptPostProcessingMode,
+        isConfiguredServerLocal: Bool = false
+    ) -> DictationPostProcessingContext? {
+        let support = mode.dictationContextSupport(
+            isConfiguredServerLocal: isConfiguredServerLocal
+        )
+        return postProcessingContext(
+            includeCapturedText: support.includesCapturedText(
+                remoteSharingEnabled: settings.shareDictationContextWithRemoteProviders
+            )
         )
     }
 

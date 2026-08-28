@@ -27,6 +27,47 @@ enum S1MiniStyling: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
+struct S1MiniAppStyling: Codable, Equatable, Sendable {
+    var email: S1MiniStyling
+    var workMessaging: S1MiniStyling
+    var personalMessaging: S1MiniStyling
+    var other: S1MiniStyling
+
+    static let recommended = S1MiniAppStyling(
+        email: .formal,
+        workMessaging: .semiFormal,
+        personalMessaging: .semiCasual,
+        other: .semiFormal
+    )
+
+    static func uniform(_ styling: S1MiniStyling) -> Self {
+        Self(
+            email: styling,
+            workMessaging: styling,
+            personalMessaging: styling,
+            other: styling
+        )
+    }
+
+    func styling(for category: DictationContextCategory) -> S1MiniStyling {
+        switch category {
+        case .email: return email
+        case .workMessaging: return workMessaging
+        case .personalMessaging: return personalMessaging
+        case .other: return other
+        }
+    }
+
+    mutating func set(_ styling: S1MiniStyling, for category: DictationContextCategory) {
+        switch category {
+        case .email: email = styling
+        case .workMessaging: workMessaging = styling
+        case .personalMessaging: personalMessaging = styling
+        case .other: other = styling
+        }
+    }
+}
+
 enum S1MiniStructure: String, CaseIterable, Codable, Identifiable, Sendable {
     case prose
     case lists

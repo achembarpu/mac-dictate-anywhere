@@ -377,6 +377,41 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     }
 }
 
+enum TranscriptCleanupFeature: Hashable {
+    case customPrompt
+    case customVocabulary
+    case dictationContext
+    case categoryWritingStyles
+    case s1MiniCategoryStyling
+    case appCategories
+    case remoteContextSharing
+    case s1MiniTrainedControls
+    case localFillerWordRemoval
+}
+
+enum DictationContextSupport: Equatable {
+    case none
+    case categoryOnlyOnDevice
+    case fullOnDevice
+    case fullLocalServer
+    case remoteCategoryWithOptionalText
+
+    var offersRemoteTextSharing: Bool {
+        self == .remoteCategoryWithOptionalText
+    }
+
+    func includesCapturedText(remoteSharingEnabled: Bool) -> Bool {
+        switch self {
+        case .fullOnDevice, .fullLocalServer:
+            return true
+        case .remoteCategoryWithOptionalText:
+            return remoteSharingEnabled
+        case .none, .categoryOnlyOnDevice:
+            return false
+        }
+    }
+}
+
 enum TranscriptPostProcessingMode: String, CaseIterable {
     case none = "none"
     case fluidAudioVocabulary = "fluidAudioVocabulary"
@@ -398,28 +433,76 @@ enum TranscriptPostProcessingMode: String, CaseIterable {
         }
     }
 
-    /// Modes that actually consume the dictation context snapshot (destination
-    /// category and writing style). `none` and `fluidAudioVocabulary` never
-    /// reach a language model, so context awareness has nothing to act on and
-    /// its settings are hidden — and the snapshot is never captured.
-    var usesDictationContext: Bool {
+    /// Settings that can materially affect this cleanup method. The Transcript
+    /// Cleanup screen renders shared controls from this list so selecting a
+    /// method cannot expose prompts, vocabulary, context, or writing controls
+    /// that its runtime path ignores.
+    var supportedFeatures: Set<TranscriptCleanupFeature> {
         switch self {
-        case .none, .fluidAudioVocabulary:
-            return false
-        case .appleIntelligence, .s1Mini, .ollama, .openRouter, .openAICompatible:
-            return true
+        case .none:
+            return [.localFillerWordRemoval]
+        case .fluidAudioVocabulary:
+            return [.customVocabulary, .localFillerWordRemoval]
+        case .appleIntelligence:
+            return [
+                .customPrompt,
+                .customVocabulary,
+                .dictationContext,
+                .categoryWritingStyles,
+                .appCategories,
+                .localFillerWordRemoval,
+            ]
+        case .s1Mini:
+            return [
+                .dictationContext,
+                .s1MiniCategoryStyling,
+                .appCategories,
+                .s1MiniTrainedControls,
+                .localFillerWordRemoval,
+            ]
+        case .ollama, .openRouter, .openAICompatible:
+            return [
+                .customPrompt,
+                .customVocabulary,
+                .dictationContext,
+                .categoryWritingStyles,
+                .appCategories,
+                .remoteContextSharing,
+                .localFillerWordRemoval,
+            ]
         }
+    }
+
+    /// Modes that materially use destination context. S1-mini consumes only
+    /// the locally selected category; the other model-backed modes can also
+    /// consume surrounding text. `none` and `fluidAudioVocabulary` have no
+    /// context-aware runtime path, so those settings stay hidden.
+    var usesDictationContext: Bool {
+        supportedFeatures.contains(.dictationContext)
     }
 
     /// Modes that can be pointed at a server off this Mac, so the "share
     /// surrounding text" opt-in is meaningful for them. Apple Intelligence and
     /// S1-mini always run on-device.
     var canSendContextOffDevice: Bool {
+        supportedFeatures.contains(.remoteContextSharing)
+    }
+
+    /// Resolves both the UI and runtime treatment of captured text. Ollama and
+    /// OpenAI-compatible endpoints can be either local or remote; a local
+    /// endpoint receives context without a meaningless remote-sharing toggle.
+    func dictationContextSupport(isConfiguredServerLocal: Bool = false) -> DictationContextSupport {
         switch self {
-        case .ollama, .openRouter, .openAICompatible:
-            return true
-        case .none, .fluidAudioVocabulary, .appleIntelligence, .s1Mini:
-            return false
+        case .none, .fluidAudioVocabulary:
+            return .none
+        case .appleIntelligence:
+            return .fullOnDevice
+        case .s1Mini:
+            return .categoryOnlyOnDevice
+        case .ollama, .openAICompatible:
+            return isConfiguredServerLocal ? .fullLocalServer : .remoteCategoryWithOptionalText
+        case .openRouter:
+            return .remoteCategoryWithOptionalText
         }
     }
 }
@@ -696,6 +779,7 @@ final class Settings {
         static let transcriptHistory = "transcriptHistory"
         static let transcriptPostProcessingMode = "transcriptPostProcessingMode"
         static let s1MiniStyling = "s1MiniStyling"
+        static let s1MiniAppStyling = "s1MiniAppStyling"
         static let s1MiniStructure = "s1MiniStructure"
         static let s1MiniContextSetting = "s1MiniContextSetting"
         static let ollamaBaseURL = "ollamaBaseURL"
@@ -964,6 +1048,18 @@ final class Settings {
         didSet {
             UserDefaults.standard.set(s1MiniStyling.rawValue, forKey: Keys.s1MiniStyling)
         }
+    }
+
+    var s1MiniAppStyling: S1MiniAppStyling {
+        didSet {
+            guard let data = try? JSONEncoder().encode(s1MiniAppStyling) else { return }
+            UserDefaults.standard.set(data, forKey: Keys.s1MiniAppStyling)
+        }
+    }
+
+    func s1MiniStyling(for category: DictationContextCategory?) -> S1MiniStyling {
+        guard dictationContextAwarenessEnabled, let category else { return s1MiniStyling }
+        return s1MiniAppStyling.styling(for: category)
     }
 
     var s1MiniStructure: S1MiniStructure {
@@ -1307,9 +1403,20 @@ final class Settings {
             defaults.set(migratedMode.rawValue, forKey: Keys.transcriptPostProcessingMode)
         }
         aiPostProcessingPrompt = defaults.string(forKey: Keys.aiPostProcessingPrompt) ?? ""
-        s1MiniStyling = S1MiniStyling(
+        let storedS1MiniStyling = S1MiniStyling(
             rawValue: defaults.string(forKey: Keys.s1MiniStyling) ?? ""
-        ) ?? .semiFormal
+        )
+        s1MiniStyling = storedS1MiniStyling ?? .semiFormal
+        if let data = defaults.data(forKey: Keys.s1MiniAppStyling),
+           let decoded = try? JSONDecoder().decode(S1MiniAppStyling.self, from: data) {
+            s1MiniAppStyling = decoded
+        } else if let storedS1MiniStyling {
+            // Preserve the single style chosen by users of the initial S1-mini
+            // release until they customize the new per-category controls.
+            s1MiniAppStyling = .uniform(storedS1MiniStyling)
+        } else {
+            s1MiniAppStyling = .recommended
+        }
         s1MiniStructure = S1MiniStructure(
             rawValue: defaults.string(forKey: Keys.s1MiniStructure) ?? ""
         ) ?? .prose

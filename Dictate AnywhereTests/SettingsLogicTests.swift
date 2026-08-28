@@ -14,6 +14,9 @@ final class SettingsLogicTests: XCTestCase {
     private var savedParakeetModelChoice: ParakeetModelChoice = .multilingual
     private var savedSelectedLanguage: SupportedLanguage = .english
     private var savedPendingVocabularyModeRestore = false
+    private var savedContextAwarenessEnabled = true
+    private var savedS1MiniStyling: S1MiniStyling = .semiFormal
+    private var savedS1MiniAppStyling = S1MiniAppStyling.recommended
 
     override func setUp() {
         super.setUp()
@@ -27,6 +30,9 @@ final class SettingsLogicTests: XCTestCase {
         savedParakeetModelChoice = settings.parakeetModelChoice
         savedSelectedLanguage = settings.selectedLanguage
         savedPendingVocabularyModeRestore = settings.pendingVocabularyModeRestore
+        savedContextAwarenessEnabled = settings.dictationContextAwarenessEnabled
+        savedS1MiniStyling = settings.s1MiniStyling
+        savedS1MiniAppStyling = settings.s1MiniAppStyling
     }
 
     override func tearDown() {
@@ -36,6 +42,9 @@ final class SettingsLogicTests: XCTestCase {
         settings.transcriptHistory = savedHistory
         settings.hotkeyBindings = savedBindings
         settings.pendingVocabularyModeRestore = savedPendingVocabularyModeRestore
+        settings.dictationContextAwarenessEnabled = savedContextAwarenessEnabled
+        settings.s1MiniStyling = savedS1MiniStyling
+        settings.s1MiniAppStyling = savedS1MiniAppStyling
         // Restore engine/model choice before post-processing mode: both
         // carry didSet coercions that can rewrite `transcriptPostProcessingMode`
         // (and `selectedLanguage`), so mode must be restored last to avoid
@@ -195,6 +204,25 @@ final class SettingsLogicTests: XCTestCase {
 
         settings.transcriptPostProcessingMode = .fluidAudioVocabulary
         XCTAssertTrue(settings.fluidAudioVocabularyEnabled)
+    }
+
+    func testS1MiniStylingUsesSupportedAppCategoryControlsWithFallback() {
+        let settings = Settings.shared
+        settings.s1MiniStyling = .casual
+        settings.s1MiniAppStyling = S1MiniAppStyling(
+            email: .formal,
+            workMessaging: .semiFormal,
+            personalMessaging: .semiCasual,
+            other: .semiFormal
+        )
+
+        settings.dictationContextAwarenessEnabled = true
+        XCTAssertEqual(settings.s1MiniStyling(for: .email), .formal)
+        XCTAssertEqual(settings.s1MiniStyling(for: .personalMessaging), .semiCasual)
+        XCTAssertEqual(settings.s1MiniStyling(for: nil), .casual)
+
+        settings.dictationContextAwarenessEnabled = false
+        XCTAssertEqual(settings.s1MiniStyling(for: .email), .casual)
     }
 
     /// Switching engines away from Parakeet while a vocabulary-incapable
