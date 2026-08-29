@@ -152,10 +152,7 @@ report_test_results() {
     return 1
   fi
   printf 'Tests: total=%s passed=%s skipped=%s failed=%s\n' \
-    "$(jq -r '.testsCount // 0' <<<"$summary")" \
-    "$(jq -r '.testsPassed // 0' <<<"$summary")" \
-    "$(jq -r '.testsSkipped // 0' <<<"$summary")" \
-    "$(jq -r '.testsFailed // 0' <<<"$summary")"
+    "$total" "$passed" "$skipped" "$failed"
 }
 
 check() {
