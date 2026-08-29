@@ -5,6 +5,7 @@
 	<key>ATSApplicationFontsPath</key>
 	<string>.</string>
 #if RELEASE
+	<!-- The URL slashes are encoded because Xcode's Info.plist C-preprocessor treats it as a comment when INFOPLIST_PREPROCESS=YES. -->
 	<key>SUFeedURL</key>
 	<string>https:&#x2F;&#x2F;raw.githubusercontent.com/hoomanaskari/mac-dictate-anywhere/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>

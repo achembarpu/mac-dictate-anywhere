@@ -1,6 +1,6 @@
 import XCTest
 import FluidAudio
-@testable import Dictate_Anywhere
+@testable import Dictate_Anywhere_Dev
 
 final class ModelAndModeTests: XCTestCase {
 

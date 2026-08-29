@@ -1,6 +1,6 @@
 import XCTest
 import SwiftUI
-@testable import Dictate_Anywhere
+@testable import Dictate_Anywhere_Dev
 
 final class DesignSystemTests: XCTestCase {
 

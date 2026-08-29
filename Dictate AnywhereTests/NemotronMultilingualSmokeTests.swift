@@ -1,7 +1,7 @@
 import XCTest
 import AVFoundation
 import FluidAudio
-@testable import Dictate_Anywhere
+@testable import Dictate_Anywhere_Dev
 
 final class NemotronMultilingualSmokeTests: XCTestCase {
     func testStreamsMandarinFixtureToChineseTranscript() async throws {

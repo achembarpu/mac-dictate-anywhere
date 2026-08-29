@@ -1,5 +1,5 @@
 import XCTest
-@testable import Dictate_Anywhere
+@testable import Dictate_Anywhere_Dev
 
 /// `ParakeetEngine.joinChunkTranscripts` joins transcripts of **disjoint**
 /// audio: `commitBufferedChunksIfNeeded` drops exactly one chunk per commit and

@@ -219,11 +219,10 @@ scripts/dev.sh build --configuration Release
 scripts/dev.sh build --release
 scripts/dev.sh launch
 scripts/dev.sh test
-scripts/dev.sh test --configuration Release
 scripts/dev.sh stop
 ```
 
-Use `--configuration Debug` or `--configuration Release` with `build` and `test`. The default is `Debug`, and `--release` is an alias for `--configuration Release`. Release validation uses signing-disabled flags for local, non-packaging checks. It does not package, notarize, update the appcast, or change production Release settings.
+Use `--configuration Debug` or `--configuration Release` with `build`. Tests run only with `Debug` because Release is not testable. The default is `Debug`, and `--release` is an alias for `--configuration Release`. Provisioning updates are disabled by default; pass `--allow-provisioning-updates` when you explicitly want Xcode to update signing assets. Release builds use the production signing identity and team. They do not package, notarize, update the appcast, or change production Release settings.
 
 Set the optional `DERIVED_DATA_PATH` environment variable to use another stable path. The default is `$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev`.
 

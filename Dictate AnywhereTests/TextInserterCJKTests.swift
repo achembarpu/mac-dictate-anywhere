@@ -1,5 +1,5 @@
 import XCTest
-@testable import Dictate_Anywhere
+@testable import Dictate_Anywhere_Dev
 
 final class TextInserterCJKTests: XCTestCase {
     func testNormalizedForInsertionNeverInventsPunctuation() {

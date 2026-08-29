@@ -1,6 +1,6 @@
 import XCTest
 import SwiftUI
-@testable import Dictate_Anywhere
+@testable import Dictate_Anywhere_Dev
 
 /// Smoke tests: every design-system component must render to a real image
 /// without crashing. Catches broken layouts, missing assets, and invalid styles.

@@ -9,7 +9,9 @@ APP_NAME="Dictate Anywhere Dev.app"
 DEFAULT_DERIVED_DATA_PATH="$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$DEFAULT_DERIVED_DATA_PATH}"
 SIGNING_CONFIG_PATH="${SIGNING_CONFIG_PATH:-$ROOT_DIR/Config/Signing.local.xcconfig}"
-RELEASE_SIGNING_ARGS=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
+ALLOW_PROVISIONING_UPDATES=0
+RESULT_BUNDLE_PATH="$DERIVED_DATA_PATH/Logs/Test/DictateAnywhere.xcresult"
+DEV_EXECUTABLE_NAME="Dictate Anywhere Dev"
 
 usage() {
   cat <<EOF
@@ -34,9 +36,11 @@ Build and test options:
   --configuration Debug|Release
           Select the build configuration (default: Debug)
   --release
-          Alias for --configuration Release
+           Alias for --configuration Release
+  --allow-provisioning-updates
+           Opt in to Xcode provisioning updates for build/test
 
-Release validation disables code signing and does not package or notarize the app.
+Release builds use the production signing identity and team. They do not package or notarize the app.
 EOF
 }
 
@@ -59,6 +63,10 @@ parse_configuration_options() {
         ;;
       --release)
         CONFIGURATION="Release"
+        shift
+        ;;
+      --allow-provisioning-updates)
+        ALLOW_PROVISIONING_UPDATES=1
         shift
         ;;
       --*)
@@ -98,19 +106,56 @@ configure_xcodebuild_args() {
     xcodebuild_args+=( -xcconfig "$SIGNING_CONFIG_PATH" )
   fi
 
-  if [[ "$CONFIGURATION" == "Release" ]]; then
-    xcodebuild_args+=( "${RELEASE_SIGNING_ARGS[@]}" )
+  if [[ "$ALLOW_PROVISIONING_UPDATES" == 1 ]]; then
+    xcodebuild_args+=( -allowProvisioningUpdates )
   fi
 }
 
 build() {
   printf 'Building %s (%s)\n' "$SCHEME" "$CONFIGURATION"
-  xcodebuild "${xcodebuild_args[@]}" -allowProvisioningUpdates build
+  xcodebuild "${xcodebuild_args[@]}" build
 }
 
 run_tests() {
+  [[ "$CONFIGURATION" == "Debug" ]] || fail "Tests require the Debug configuration because Release is not testable"
+  require_command jq
   printf 'Testing %s (%s)\n' "$SCHEME" "$CONFIGURATION"
-  xcodebuild "${xcodebuild_args[@]}" -allowProvisioningUpdates test
+  rm -rf "$RESULT_BUNDLE_PATH"
+  set +e
+  xcodebuild "${xcodebuild_args[@]}" -resultBundlePath "$RESULT_BUNDLE_PATH" test
+  local test_status=$?
+  set -e
+  local report_status=0
+  if report_test_results; then
+    :
+  else
+    report_status=$?
+    printf 'Warning: test result reporting failed (status %s); preserving xcodebuild test status %s.\n' \
+      "$report_status" "$test_status" >&2
+  fi
+  return "$test_status"
+}
+
+report_test_results() {
+  local summary
+  local total passed skipped failed
+  [[ -d "$RESULT_BUNDLE_PATH" ]] || return 0
+  if ! summary="$(xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE_PATH" --format json)"; then
+    printf 'Warning: could not read test results from %s.\n' "$RESULT_BUNDLE_PATH" >&2
+    return 1
+  fi
+  if ! total="$(jq -r '(.passedTests // 0) + (.skippedTests // 0) + (.failedTests // 0)' <<<"$summary")" || \
+     ! passed="$(jq -r '.passedTests // 0' <<<"$summary")" || \
+     ! skipped="$(jq -r '.skippedTests // 0' <<<"$summary")" || \
+     ! failed="$(jq -r '.failedTests // 0' <<<"$summary")"; then
+    printf 'Warning: could not parse test results from %s.\n' "$RESULT_BUNDLE_PATH" >&2
+    return 1
+  fi
+  printf 'Tests: total=%s passed=%s skipped=%s failed=%s\n' \
+    "$(jq -r '.testsCount // 0' <<<"$summary")" \
+    "$(jq -r '.testsPassed // 0' <<<"$summary")" \
+    "$(jq -r '.testsSkipped // 0' <<<"$summary")" \
+    "$(jq -r '.testsFailed // 0' <<<"$summary")"
 }
 
 check() {
@@ -121,18 +166,83 @@ check() {
 
 launch() {
   build
-  [[ -d "$APP_PATH" ]] || fail "Built app not found at: $APP_PATH"
+  local executable_path="$APP_PATH/Contents/MacOS/$DEV_EXECUTABLE_NAME"
+  [[ -x "$executable_path" ]] || fail "Built executable not found at: $executable_path"
+  stop
   printf 'Launching %s\n' "$APP_PATH"
-  open -n "$APP_PATH"
+  "$executable_path" >/dev/null 2>&1 &
+}
+
+process_owns_executable() {
+  local pid="$1"
+  local executable_path="$2"
+  local text_path
+  text_path="$(lsof -a -p "$pid" -d txt -Fn 2>/dev/null \
+    | awk 'substr($0, 1, 1) == "n" { print substr($0, 2); exit }')"
+  [[ "$text_path" == "$executable_path" ]]
+}
+
+development_pids() {
+  local executable_path="$APP_PATH/Contents/MacOS/$DEV_EXECUTABLE_NAME"
+  local pid
+  while read -r pid; do
+    if process_owns_executable "$pid" "$executable_path"; then
+      printf '%s\n' "$pid"
+    fi
+  done < <(pgrep -x "$DEV_EXECUTABLE_NAME" || true)
+}
+
+process_start_time() {
+  ps -p "$1" -o lstart= | awk '{$1=$1; print}'
+}
+
+process_is_owned() {
+  local pid="$1"
+  local expected_start_time="$2"
+  local executable_path="$APP_PATH/Contents/MacOS/$DEV_EXECUTABLE_NAME"
+  [[ "$(process_start_time "$pid")" == "$expected_start_time" ]] && \
+    process_owns_executable "$pid" "$executable_path"
 }
 
 stop() {
-  require_command pkill
-  if pkill -x "Dictate Anywhere Dev"; then
-    printf 'Stopped %s\n' "$APP_NAME"
-  else
+  local pids pid start_time
+  local -a owned_pids=()
+  local -a start_times=()
+  while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    owned_pids+=("$pid")
+    start_times+=("$(process_start_time "$pid")")
+  done < <(development_pids)
+
+  pids="${owned_pids[*]:-}"
+  if [[ -z "$pids" ]]; then
     printf '%s is not running\n' "$APP_NAME"
+    return 0
   fi
+
+  for pid in "${owned_pids[@]}"; do
+    kill -TERM "$pid"
+  done
+  for _ in {1..20}; do
+    [[ -z "$(development_pids)" ]] && { printf 'Stopped %s\n' "$APP_NAME"; return 0; }
+    sleep 0.25
+  done
+
+  for ((i = 0; i < ${#owned_pids[@]}; i++)); do
+    if process_is_owned "${owned_pids[$i]}" "${start_times[$i]}"; then
+      kill -KILL "${owned_pids[$i]}" 2>/dev/null || true
+    fi
+  done
+  [[ -z "$(development_pids)" ]] || fail "Could not stop the owned development process"
+  printf 'Stopped %s\n' "$APP_NAME"
+}
+
+validate_lifecycle_contract() {
+  [[ "$APP_NAME" == "Dictate Anywhere Dev.app" ]] || fail "Unexpected development app bundle name"
+  [[ "$DEV_EXECUTABLE_NAME" == "Dictate Anywhere Dev" ]] || fail "Unexpected development executable name"
+  command -v pgrep >/dev/null || fail "Missing required command: pgrep"
+  command -v lsof >/dev/null || fail "Missing required command: lsof"
+  printf 'Development lifecycle contract is valid.\n'
 }
 
 signing() {
@@ -194,6 +304,7 @@ signing() {
 
 command="${1:-help}"
 if [[ "$command" == "help" || "$command" == "-h" || "$command" == "--help" ]]; then
+  [[ "$#" -eq 1 ]] || fail "Usage: $(basename "$0") help"
   usage
   exit 0
 fi
@@ -207,6 +318,9 @@ case "$command" in
   build|test)
     parse_configuration_options "${@:2}"
     ;;
+  launch|check|stop)
+    [[ "$#" -eq 1 ]] || fail "Usage: $(basename "$0") $command"
+    ;;
   *)
     CONFIGURATION="Debug"
     ;;
@@ -215,14 +329,13 @@ esac
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME"
 configure_xcodebuild_args
 
-require_command xcodebuild
 validate_derived_data_path
 
 case "$command" in
-  build) build ;;
+  build) require_command xcodebuild; build ;;
   launch) launch ;;
-  test) run_tests ;;
-  check) check ;;
+  test) require_command xcodebuild; run_tests ;;
+  check) require_command xcodebuild; check; validate_lifecycle_contract ;;
   stop) stop ;;
   *) usage >&2; fail "Unknown command: $command" ;;
 esac
