@@ -118,7 +118,6 @@ build() {
 
 run_tests() {
   [[ "$CONFIGURATION" == "Debug" ]] || fail "Tests require the Debug configuration because Release is not testable"
-  require_command jq
   printf 'Testing %s (%s)\n' "$SCHEME" "$CONFIGURATION"
   rm -rf "$RESULT_BUNDLE_PATH"
   set +e
@@ -140,9 +139,13 @@ report_test_results() {
   local summary
   local total passed skipped failed
   [[ -d "$RESULT_BUNDLE_PATH" ]] || return 0
+  if ! command -v jq >/dev/null 2>&1; then
+    printf 'Warning: jq is unavailable; skipping custom test result summary.\n' >&2
+    return 0
+  fi
   if ! summary="$(xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE_PATH" --format json)"; then
-    printf 'Warning: could not read test results from %s.\n' "$RESULT_BUNDLE_PATH" >&2
-    return 1
+    printf 'Warning: xcresulttool test-results summary is unavailable; skipping custom test result summary.\n' >&2
+    return 0
   fi
   if ! total="$(jq -r '(.passedTests // 0) + (.skippedTests // 0) + (.failedTests // 0)' <<<"$summary")" || \
      ! passed="$(jq -r '.passedTests // 0' <<<"$summary")" || \
@@ -301,7 +304,7 @@ signing() {
 
 command="${1:-help}"
 if [[ "$command" == "help" || "$command" == "-h" || "$command" == "--help" ]]; then
-  [[ "$#" -eq 1 ]] || fail "Usage: $(basename "$0") help"
+  [[ "$#" -eq 0 || "$#" -eq 1 ]] || fail "Usage: $(basename "$0") help"
   usage
   exit 0
 fi
