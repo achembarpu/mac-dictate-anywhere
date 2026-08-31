@@ -102,6 +102,15 @@ validate_clean_path() {
     fail "The default DerivedData path is not in its expected location"
   [[ "$DEFAULT_DERIVED_DATA_PATH" != "/" && "$DEFAULT_DERIVED_DATA_PATH" != "$HOME" ]] || \
     fail "Refusing to recursively remove a broad path"
+
+  local canonical_home canonical_parent expected_parent
+  canonical_home="$(cd -P -- "$HOME" 2>/dev/null && pwd -P)" || \
+    fail "Could not resolve the home directory for clean"
+  expected_parent="$canonical_home/Library/Developer/Xcode/DerivedData"
+  canonical_parent="$(cd -P -- "$expected_parent" 2>/dev/null && pwd -P)" || \
+    fail "The default DerivedData parent must exist before clean"
+  [[ "$canonical_parent" == "$expected_parent" ]] || \
+    fail "Refusing to clean through a redirected DerivedData parent"
 }
 
 configure_xcodebuild_args() {
