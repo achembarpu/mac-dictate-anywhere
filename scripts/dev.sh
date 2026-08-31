@@ -170,7 +170,7 @@ launch() {
   [[ -x "$executable_path" ]] || fail "Built executable not found at: $executable_path"
   stop
   printf 'Launching %s\n' "$APP_PATH"
-  "$executable_path" >/dev/null 2>&1 &
+  open -n "$APP_PATH"
 }
 
 process_owns_executable() {
