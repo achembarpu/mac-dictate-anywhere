@@ -24,6 +24,7 @@ Commands:
   test [OPTIONS]
           Build and run the project tests
   check   Validate the Xcode project and Debug scheme
+  clean   Stop the app and remove project DerivedData
   stop    Stop the running canonical app
   signing [TEAM_ID]
            Create the local Debug signing configuration with a Team ID
@@ -318,7 +319,7 @@ case "$command" in
   build|test)
     parse_configuration_options "${@:2}"
     ;;
-  launch|check|stop)
+  launch|check|clean|stop)
     [[ "$#" -eq 1 ]] || fail "Usage: $(basename "$0") $command"
     ;;
   *)
@@ -336,6 +337,7 @@ case "$command" in
   launch) launch ;;
   test) require_command xcodebuild; run_tests ;;
   check) require_command xcodebuild; check; validate_lifecycle_contract ;;
+  clean) stop; rm -rf "$DERIVED_DATA_PATH"; printf 'Removed DerivedData: %s\n' "$DERIVED_DATA_PATH" ;;
   stop) stop ;;
   *) usage >&2; fail "Unknown command: $command" ;;
 esac

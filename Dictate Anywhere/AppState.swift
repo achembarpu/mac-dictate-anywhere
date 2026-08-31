@@ -502,6 +502,12 @@ final class AppState {
             status = .idle
         }
         guard status == .idle, !isTransitioning else { return }
+        if !permissions.micGranted {
+            guard await permissions.requestMic() else {
+                status = .error("Microphone access is required to dictate. Enable it in System Settings, then try again.")
+                return
+            }
+        }
         if settings.inputSourceAutoSwitchEnabled,
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
             // Backstop: the eager pre-warm usually already did this; going

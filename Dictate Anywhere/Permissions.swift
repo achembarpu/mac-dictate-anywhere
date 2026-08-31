@@ -54,6 +54,22 @@ final class Permissions {
 
     /// Requests microphone permission
     func requestMic() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            await MainActor.run {
+                self.micGranted = true
+            }
+            return true
+        case .denied, .restricted:
+            openMicrophoneSettings()
+            return false
+        case .notDetermined:
+            break
+        @unknown default:
+            openMicrophoneSettings()
+            return false
+        }
+
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         await MainActor.run {
             self.micGranted = granted
@@ -76,6 +92,13 @@ final class Permissions {
     /// Opens System Settings to Accessibility pane (fallback for manual add).
     func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Opens System Settings to the Microphone pane after a previous denial.
+    func openMicrophoneSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
             NSWorkspace.shared.open(url)
         }
     }
