@@ -95,6 +95,15 @@ validate_derived_data_path() {
   esac
 }
 
+validate_clean_path() {
+  [[ "$DERIVED_DATA_PATH" == "$DEFAULT_DERIVED_DATA_PATH" ]] || \
+    fail "clean only supports the script-owned default DerivedData path: $DEFAULT_DERIVED_DATA_PATH"
+  [[ "$DEFAULT_DERIVED_DATA_PATH" == "$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev" ]] || \
+    fail "The default DerivedData path is not in its expected location"
+  [[ "$DEFAULT_DERIVED_DATA_PATH" != "/" && "$DEFAULT_DERIVED_DATA_PATH" != "$HOME" ]] || \
+    fail "Refusing to recursively remove a broad path"
+}
+
 configure_xcodebuild_args() {
   xcodebuild_args=(
     -project "$PROJECT_PATH"
@@ -337,7 +346,7 @@ case "$command" in
   launch) launch ;;
   test) require_command xcodebuild; run_tests ;;
   check) require_command xcodebuild; check; validate_lifecycle_contract ;;
-  clean) stop; rm -rf "$DERIVED_DATA_PATH"; printf 'Removed DerivedData: %s\n' "$DERIVED_DATA_PATH" ;;
+  clean) validate_clean_path; stop; rm -rf -- "$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"; printf 'Removed DerivedData: %s\n' "$DEFAULT_DERIVED_DATA_PATH" ;;
   stop) stop ;;
   *) usage >&2; fail "Unknown command: $command" ;;
 esac
