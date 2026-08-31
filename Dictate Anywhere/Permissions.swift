@@ -31,10 +31,12 @@ final class Permissions {
 
     private let queue = DispatchQueue(label: "com.dictate-anywhere.permissions", qos: .userInitiated)
     private var pollingTimer: Timer?
+    private let statusProvider: @Sendable () -> (mic: Bool, accessibility: Bool)
 
     // MARK: - Initialization
 
-    init() {
+    init(statusProvider: @escaping @Sendable () -> (mic: Bool, accessibility: Bool) = Permissions.currentStatus) {
+        self.statusProvider = statusProvider
         queue.async { [weak self] in
             self?.checkSync()
         }
@@ -44,11 +46,19 @@ final class Permissions {
 
     /// Checks both permissions (async, off MainActor)
     func check() async {
-        await withCheckedContinuation { continuation in
+        let provider = statusProvider
+        let (mic, accessibility) = await withCheckedContinuation { continuation in
             queue.async { [weak self] in
-                self?.checkSync()
-                continuation.resume()
+                guard self != nil else {
+                    continuation.resume(returning: (false, false))
+                    return
+                }
+                continuation.resume(returning: provider())
             }
+        }
+        await MainActor.run {
+            self.micGranted = mic
+            self.accessibilityGranted = accessibility
         }
     }
 
@@ -104,10 +114,8 @@ final class Permissions {
     }
 
     /// Refreshes permission state (call periodically or after returning from Settings)
-    func refresh() {
-        queue.async { [weak self] in
-            self?.checkSync()
-        }
+    func refresh() async {
+        await check()
     }
 
     /// Starts polling accessibility permission every ~2.5 seconds.
@@ -116,8 +124,9 @@ final class Permissions {
         guard pollingTimer == nil else { return }
         pollingTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] timer in
             guard let self else { timer.invalidate(); return }
-            self.refresh()
-            if self.allGranted {
+            Task { [weak self] in
+                await self?.refresh()
+                guard let self, self.allGranted else { return }
                 self.stopPolling()
             }
         }
@@ -132,11 +141,17 @@ final class Permissions {
     // MARK: - Private
 
     private func checkSync() {
-        let mic = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-        let ax = AXIsProcessTrusted()
+        let (mic, ax) = statusProvider()
         DispatchQueue.main.async { [weak self] in
             self?.micGranted = mic
             self?.accessibilityGranted = ax
         }
+    }
+
+    private static func currentStatus() -> (mic: Bool, accessibility: Bool) {
+        (
+            AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+            AXIsProcessTrusted()
+        )
     }
 }
