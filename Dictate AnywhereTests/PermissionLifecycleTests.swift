@@ -19,15 +19,17 @@ final class PermissionLifecycleTests: XCTestCase {
             mode: .holdToRecord
         )
 
-        let startTask = Task { @MainActor in
-            await appState.startDictation(mode: .holdToRecord)
-        }
+        appState.hotkeyService.onKeyDown?(binding)
         await fulfillment(of: [permissionRequested], timeout: 1)
+        XCTAssertTrue(appState.isHoldToRecordKeyDown)
 
         appState.hotkeyService.onKeyUp?(binding)
-        await Task.yield()
+        for _ in 0..<100 where appState.isHoldToRecordKeyDown {
+            await Task.yield()
+        }
+        XCTAssertFalse(appState.isHoldToRecordKeyDown)
         await permissionResponse.resolve(granted: true)
-        await startTask.value
+        await Task.yield()
 
         XCTAssertTrue(appState.permissions.micGranted)
         XCTAssertEqual(appState.status, .idle)

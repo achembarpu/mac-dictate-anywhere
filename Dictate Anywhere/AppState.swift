@@ -51,7 +51,7 @@ final class AppState {
 
     // MARK: - Services
 
-    let permissions = Permissions()
+    let permissions: Permissions
     let settings = Settings.shared
     let hotkeyService = HotkeyService()
     let audioMonitor = AudioMonitor()
@@ -72,6 +72,8 @@ final class AppState {
 
     /// Set when a hold-to-record key-up arrives during a transition (race condition guard)
     private var pendingHoldRelease = false
+
+    private(set) var isHoldToRecordKeyDown = false
 
     /// True while prepareActiveEngine is running (suppresses transient "not ready" warnings)
     var isPreparingEngine = false
@@ -113,7 +115,11 @@ final class AppState {
 
     // MARK: - Initialization
 
-    init(microphonePermissionRequester: (@Sendable () async -> Bool)? = nil) {
+    init(
+        permissions: Permissions = Permissions(),
+        microphonePermissionRequester: (@Sendable () async -> Bool)? = nil
+    ) {
+        self.permissions = permissions
         self.microphonePermissionRequester = microphonePermissionRequester
         setupHotkeyCallbacks()
         setupPermissionCallbacks()
@@ -128,6 +134,7 @@ final class AppState {
                 guard let self else { return }
                 switch binding.mode {
                 case .holdToRecord:
+                    self.isHoldToRecordKeyDown = true
                     await self.startDictation(mode: binding.mode)
                 case .handsFreeToggle:
                     if self.status == .recording {
@@ -143,6 +150,7 @@ final class AppState {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard binding.mode == .holdToRecord else { return }
+                self.isHoldToRecordKeyDown = false
                 if self.status == .recording, !self.isTransitioning {
                     await self.stopDictation()
                 } else if self.isTransitioning {

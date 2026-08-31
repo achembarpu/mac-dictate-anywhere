@@ -8,13 +8,24 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let appState = AppState()
+    let appState: AppState
 #if !DEBUG
     let softwareUpdater = SoftwareUpdater()
 #endif
     private var statusItem: NSStatusItem?
     private var mainWindow: NSWindow?
+
+    override init() {
+        self.appState = AppState()
+        super.init()
+    }
+
+    init(appState: AppState) {
+        self.appState = appState
+        super.init()
+    }
 
     // MARK: - Lifecycle
 
