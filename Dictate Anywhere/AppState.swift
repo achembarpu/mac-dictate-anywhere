@@ -905,9 +905,19 @@ final class AppState {
               frontmost.processIdentifier != currentPID else {
             insertionTargetApp = nil
             sessionDictationContext = nil
+            overlay.beginSession(targetProcessIdentifier: nil)
             return
         }
         insertionTargetApp = frontmost
+
+        // The overlay follows the app the transcript will land in. Everything
+        // after this point is awaited — context capture here, then audio
+        // startup — and the user may bring another app forward while it runs,
+        // so the display must be pinned to this app before any of it. It also
+        // has to be pinned ahead of the guard below, which returns early for
+        // most post-processing settings.
+        overlay.beginSession(targetProcessIdentifier: frontmost.processIdentifier)
+
         // Only read the screen when a cleanup method exists that can use what
         // we read. `none` and FluidAudio Vocabulary never see the context.
         guard settings.dictationContextAwarenessEnabled,

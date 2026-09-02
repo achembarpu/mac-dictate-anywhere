@@ -20,17 +20,54 @@ final class OverlayWindow {
     private let canvasWidth: CGFloat = OverlayMetrics.size(320)
     private let canvasHeight: CGFloat = OverlayMetrics.size(200)
 
+    @ObservationIgnored private let screenSession: OverlayScreenSession
+
+    // MARK: - Init
+
+    init(screenResolver: OverlayScreenResolving = SystemOverlayScreenResolver()) {
+        screenSession = OverlayScreenSession(resolver: screenResolver)
+    }
+
     // MARK: - Public
 
-    func show(state: OverlayState) {
+    /// Whether the overlay is currently presented.
+    var isVisible: Bool {
+        model.isVisible
+    }
+
+    /// Starts a dictation, so the overlay chooses its display afresh.
+    ///
+    /// - Parameter targetProcessIdentifier: the app the transcript will be
+    ///   pasted into, captured before audio startup so the overlay follows it
+    ///   rather than whichever app is frontmost once the microphone is live.
+    func beginSession(targetProcessIdentifier: pid_t?) {
+        // Cancelling the scheduled hide is what keeps it from resetting the
+        // session that is about to be pinned — but the previous dictation's
+        // badge is still on screen, and on the previous display. Dismiss it
+        // here rather than leaving it up for the whole of this dictation's
+        // startup, which is longer than the hide would have taken.
         hideTask?.cancel()
         hideTask = nil
 
         if Thread.isMainThread {
-            showImpl(state: state)
+            beginSessionImpl(targetProcessIdentifier: targetProcessIdentifier)
         } else {
             DispatchQueue.main.async { [weak self] in
-                self?.showImpl(state: state)
+                self?.beginSessionImpl(targetProcessIdentifier: targetProcessIdentifier)
+            }
+        }
+    }
+
+    func show(state: OverlayState) {
+        let supersedesFinishingSession = hideTask != nil
+        hideTask?.cancel()
+        hideTask = nil
+
+        if Thread.isMainThread {
+            showImpl(state: state, startsNewSession: supersedesFinishingSession)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.showImpl(state: state, startsNewSession: supersedesFinishingSession)
             }
         }
     }
@@ -45,6 +82,7 @@ final class OverlayWindow {
                 self?.hideImpl()
             }
         } else {
+            hideTask = nil
             if Thread.isMainThread {
                 hideImpl()
             } else {
@@ -57,7 +95,11 @@ final class OverlayWindow {
 
     // MARK: - Private
 
-    private func showImpl(state: OverlayState) {
+    private func showImpl(state: OverlayState, startsNewSession: Bool) {
+        if startsNewSession {
+            screenSession.end()
+        }
+
         if window == nil {
             window = createWindow()
             let content = OverlayContent(model: model)
@@ -73,7 +115,22 @@ final class OverlayWindow {
         window?.orderFrontRegardless()
     }
 
+    private func beginSessionImpl(targetProcessIdentifier: pid_t?) {
+        dismissVisuals()
+        screenSession.begin(targetProcessIdentifier: targetProcessIdentifier)
+    }
+
     private func hideImpl() {
+        dismissVisuals()
+
+        // The next appearance is a new session and picks its display afresh.
+        screenSession.end()
+    }
+
+    /// Takes the overlay off screen without touching the screen session, so
+    /// dismissing a finished dictation cannot clear the display a newly begun
+    /// one has already pinned.
+    private func dismissVisuals() {
         model.isVisible = false
 
         // Allow fade-out animation to complete before removing window
@@ -106,12 +163,18 @@ final class OverlayWindow {
     }
 
     private func positionWindow() {
-        guard let screen = NSScreen.main, let win = window else { return }
+        guard let win = window, let visibleFrame = screenSession.visibleFrame() else { return }
 
-        let frame = screen.visibleFrame
-        let x = frame.origin.x + (frame.width - canvasWidth) / 2
-        let y = frame.origin.y + bottomMargin
+        let size = NSSize(width: canvasWidth, height: canvasHeight)
+        let origin = OverlayScreenPicker.overlayOrigin(
+            inVisibleFrame: visibleFrame,
+            size: size,
+            bottomMargin: bottomMargin
+        )
 
-        win.setFrame(NSRect(x: x, y: y, width: canvasWidth, height: canvasHeight), display: true, animate: false)
+        let frame = NSRect(origin: origin, size: size)
+        guard win.frame != frame else { return }
+
+        win.setFrame(frame, display: true, animate: false)
     }
 }
