@@ -35,8 +35,8 @@ final class Permissions {
 
     // MARK: - Initialization
 
-    init(statusProvider: @escaping @Sendable () -> (mic: Bool, accessibility: Bool) = Permissions.currentStatus) {
-        self.statusProvider = statusProvider
+    init(statusProvider: (@Sendable () -> (mic: Bool, accessibility: Bool))? = nil) {
+        self.statusProvider = statusProvider ?? Self.currentStatus
         queue.async { [weak self] in
             self?.checkSync()
         }
@@ -124,9 +124,10 @@ final class Permissions {
         guard pollingTimer == nil else { return }
         pollingTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] timer in
             guard let self else { timer.invalidate(); return }
-            Task { [weak self] in
-                await self?.refresh()
-                guard let self, self.allGranted else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.refresh()
+                guard self.allGranted else { return }
                 self.stopPolling()
             }
         }
@@ -148,7 +149,8 @@ final class Permissions {
         }
     }
 
-    private static func currentStatus() -> (mic: Bool, accessibility: Bool) {
+    /// Runs on the private background queue via `queue.async`, never on the main actor.
+    private nonisolated static func currentStatus() -> (mic: Bool, accessibility: Bool) {
         (
             AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
             AXIsProcessTrusted()

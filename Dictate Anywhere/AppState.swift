@@ -96,7 +96,7 @@ final class AppState {
     private var inputSourceApplyTask: Task<Void, Never>?
 
     /// Optional test hook for suspending the first microphone permission request.
-    private let microphonePermissionRequester: (@Sendable () async -> Bool)?
+    private let microphonePermissionRequester: (@MainActor @Sendable () async -> Bool)?
 
     // MARK: - Active Engine
 
@@ -116,10 +116,10 @@ final class AppState {
     // MARK: - Initialization
 
     init(
-        permissions: Permissions = Permissions(),
-        microphonePermissionRequester: (@Sendable () async -> Bool)? = nil
+        permissions: Permissions? = nil,
+        microphonePermissionRequester: (@MainActor @Sendable () async -> Bool)? = nil
     ) {
-        self.permissions = permissions
+        self.permissions = permissions ?? Permissions()
         self.microphonePermissionRequester = microphonePermissionRequester
         setupHotkeyCallbacks()
         setupPermissionCallbacks()
@@ -514,26 +514,21 @@ final class AppState {
             status = .idle
         }
         guard status == .idle, !isTransitioning else { return }
-        if let microphonePermissionRequester {
-            let granted = await microphonePermissionRequester()
+        if !permissions.micGranted {
+            let granted: Bool
+            if let microphonePermissionRequester {
+                granted = await microphonePermissionRequester()
+            } else {
+                granted = await permissions.requestMic()
+            }
+
             guard granted else {
                 status = .error("Microphone access is required to dictate. Enable it in System Settings, then try again.")
                 return
             }
-            // A permission prompt is not a recording gesture. Return after the
-            // first successful request so the user must press the hotkey again.
+
             permissions.micGranted = true
-            return
-        }
-        if !permissions.micGranted {
-            guard await permissions.requestMic() else {
-                status = .error("Microphone access is required to dictate. Enable it in System Settings, then try again.")
-                return
-            }
-            // A permission prompt is not a recording gesture. Return after the
-            // first successful request so the user must press the hotkey again.
-            permissions.micGranted = true
-            return
+            return // The permission gesture must never become a recording gesture.
         }
         if settings.inputSourceAutoSwitchEnabled,
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
