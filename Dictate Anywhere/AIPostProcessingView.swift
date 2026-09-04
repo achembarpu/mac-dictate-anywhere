@@ -85,12 +85,15 @@ struct AIPostProcessingView: View {
             // its status and any blocking action stay in the same viewport.
             selectedMethodContent(settings: settings)
 
-            // Context only reaches methods that run text through a model.
-            if settings.transcriptPostProcessingMode.usesDictationContext {
+            let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
+
+            if supportedFeatures.contains(.dictationContext) {
                 contextAwarenessContent(settings: settings)
             }
 
-            localFillerWordCleanupContent(settings: settings)
+            if supportedFeatures.contains(.localFillerWordRemoval) {
+                localFillerWordCleanupContent(settings: settings)
+            }
         }
         .task(id: providerTaskID(settings: settings)) {
             guard shouldAutoRefreshProviderAvailability else { return }
@@ -181,17 +184,19 @@ struct AIPostProcessingView: View {
         @Bindable var settings = settings
 
         let mode = settings.transcriptPostProcessingMode
+        let supportedFeatures = mode.supportedFeatures
+        let contextSupport = dictationContextSupport(for: mode, settings: settings)
 
         // What gets read.
         DSSection(overline: "Context Awareness") {
             DSStackedRow(
                 label: "Adapt to the current app and text field",
-                caption: "Reads a bounded snapshot around the cursor when dictation starts, classifies the destination, and applies its writing style. Password fields and excluded apps are never read.",
+                caption: contextAwarenessCaption(for: mode, support: contextSupport),
                 isOn: $settings.dictationContextAwarenessEnabled
             )
 
             if settings.dictationContextAwarenessEnabled {
-                if mode.canSendContextOffDevice {
+                if contextSupport.offersRemoteTextSharing {
                     DSDivider()
                     DSStackedRow(
                         label: "Share surrounding text with \(mode.displayName)",
@@ -200,15 +205,13 @@ struct AIPostProcessingView: View {
                     )
                 } else {
                     DSDivider()
-                    cardCaption(onDeviceContextCaption(for: mode))
+                    cardCaption(contextDeliveryCaption(for: mode, support: contextSupport))
                 }
             }
         }
 
         if settings.dictationContextAwarenessEnabled {
-            // S1-mini has its own trained Styling control. Other model-backed
-            // methods consume the app-specific writing styles configured here.
-            if mode != .s1Mini {
+            if supportedFeatures.contains(.categoryWritingStyles) {
                 DSSection(overline: "Writing Style") {
                     writingStyleRow(settings: settings, category: .email)
                     DSDivider()
@@ -222,40 +225,86 @@ struct AIPostProcessingView: View {
                 }
             }
 
-            // Which app counts as which destination.
-            DSSection(overline: "App Categories") {
-                if settings.dictationAppRules.isEmpty {
-                    cardCaption("Common email and messaging apps and sites are categorized automatically. Add an override only when an app should use another category or should not expose surrounding text.")
-                } else {
+            if supportedFeatures.contains(.s1MiniCategoryStyling) {
+                s1MiniAppStylingContent(settings: settings)
+            }
+
+            if supportedFeatures.contains(.appCategories) {
+                // Which app counts as which destination.
+                DSSection(overline: "App Categories") {
+                    cardCaption(appCategoriesCaption(for: mode))
+
+                    if !settings.dictationAppRules.isEmpty {
+                        DSDivider()
+                    }
                     ForEach(Array(settings.dictationAppRules.enumerated()), id: \.element.id) { index, rule in
                         appRuleRow(settings: settings, index: index, rule: rule)
                         if index < settings.dictationAppRules.count - 1 {
                             DSDivider()
                         }
                     }
-                }
-
-                if !settings.dictationAppRules.isEmpty {
-                    DSDivider()
-                }
-                cardPadded {
-                    Menu {
-                        let apps = availableRunningApps(settings: settings)
-                        if apps.isEmpty {
-                            Text("No other running apps")
-                        } else {
-                            ForEach(apps) { app in
-                                Button(app.name) {
-                                    addAppRule(app, settings: settings)
+                    if !settings.dictationAppRules.isEmpty {
+                        DSDivider()
+                    }
+                    cardPadded {
+                        Menu {
+                            let apps = availableRunningApps(settings: settings)
+                            if apps.isEmpty {
+                                Text("No other running apps")
+                            } else {
+                                ForEach(apps) { app in
+                                    Button(app.name) {
+                                        addAppRule(app, settings: settings)
+                                    }
                                 }
                             }
+                        } label: {
+                            Label("Add Running App", systemImage: "plus")
                         }
-                    } label: {
-                        Label("Add Running App", systemImage: "plus")
+                        .buttonStyle(.dsSecondary)
                     }
-                    .buttonStyle(.dsSecondary)
                 }
             }
+        }
+    }
+
+    private func dictationContextSupport(
+        for mode: TranscriptPostProcessingMode,
+        settings: Settings
+    ) -> DictationContextSupport {
+        let isConfiguredServerLocal: Bool
+        switch mode {
+        case .ollama:
+            isConfiguredServerLocal = OllamaPostProcessingService.isLocalServer(
+                baseURL: settings.ollamaBaseURL
+            )
+        case .openAICompatible:
+            isConfiguredServerLocal = OllamaPostProcessingService.isLocalServer(
+                baseURL: settings.openAICompatibleBaseURL
+            )
+        case .none, .fluidAudioVocabulary, .appleIntelligence, .s1Mini, .openRouter:
+            isConfiguredServerLocal = false
+        }
+        return mode.dictationContextSupport(
+            isConfiguredServerLocal: isConfiguredServerLocal
+        )
+    }
+
+    private func contextAwarenessCaption(
+        for mode: TranscriptPostProcessingMode,
+        support: DictationContextSupport
+    ) -> String {
+        switch support {
+        case .categoryOnlyOnDevice:
+            return "Detects the app category and cursor position locally. S1-mini receives only its trained email/general context value; surrounding text stays outside the model. Password fields and excluded apps are never read."
+        case .fullOnDevice:
+            return "Reads a bounded snapshot around the cursor, classifies the destination, and applies its writing style entirely on this Mac. Password fields and excluded apps are never read."
+        case .fullLocalServer:
+            return "Reads a bounded snapshot around the cursor and supplies it to the configured local server. Password fields and excluded apps are never read."
+        case .remoteCategoryWithOptionalText:
+            return "Classifies the destination and applies its writing style. Surrounding text is shared only when separately enabled below; password fields and excluded apps are never read."
+        case .none:
+            return "\(mode.displayName) does not use dictation context."
         }
     }
 
@@ -265,20 +314,33 @@ struct AIPostProcessingView: View {
         case .openRouter:
             return "Off by default. The destination category and writing style are always sent. The text around your cursor stays on this Mac unless you turn this on."
         case .ollama, .openAICompatible:
-            return "Off by default. The destination category and writing style are always sent. The text around your cursor stays on this Mac unless you turn this on — or unless the server URL points at localhost, which never leaves this Mac either way."
+            return "Off by default. The destination category and writing style are always sent. The text around your cursor stays on this Mac unless you turn this on."
         case .none, .fluidAudioVocabulary, .appleIntelligence, .s1Mini:
             return ""
         }
     }
 
-    /// Reassurance for the methods that can only ever run on this Mac.
-    private func onDeviceContextCaption(for mode: TranscriptPostProcessingMode) -> String {
-        switch mode {
-        case .s1Mini:
+    private func contextDeliveryCaption(
+        for mode: TranscriptPostProcessingMode,
+        support: DictationContextSupport
+    ) -> String {
+        switch support {
+        case .categoryOnlyOnDevice:
             return "S1-mini by Superwhisper receives only the destination category, so its Automatic context control can choose email or general formatting. The text around your cursor is never passed to the model, and nothing leaves this Mac."
-        case .appleIntelligence, .none, .fluidAudioVocabulary, .ollama, .openRouter, .openAICompatible:
+        case .fullOnDevice:
             return "Apple Intelligence runs on this Mac, so anything read around your cursor stays on this device."
+        case .fullLocalServer:
+            return "The configured \(mode.displayName) server is local, so surrounding text is supplied automatically and never leaves this Mac. The remote-sharing setting is hidden because it has no effect for this endpoint."
+        case .none, .remoteCategoryWithOptionalText:
+            return ""
         }
+    }
+
+    private func appCategoriesCaption(for mode: TranscriptPostProcessingMode) -> String {
+        if mode == .s1Mini {
+            return "Common email and messaging apps and sites are categorized automatically. Categories select only S1-mini's trained styling values, and its Automatic context maps email to Email and every other category to General. Add an override to recategorize an app or stop reading its field context."
+        }
+        return "Common email and messaging apps and sites are categorized automatically. Add an override only when an app should use another category or should not expose surrounding text."
     }
 
     private func writingStyleRow(
@@ -295,6 +357,65 @@ struct AIPostProcessingView: View {
                 title: \.displayName
             )
         }
+    }
+
+    @ViewBuilder
+    private func s1MiniAppStylingContent(settings: Settings) -> some View {
+        DSSection(overline: "S1-mini App Styling") {
+            s1MiniStylingRow(settings: settings, category: .email)
+            DSDivider()
+            s1MiniStylingRow(settings: settings, category: .workMessaging)
+            DSDivider()
+            s1MiniStylingRow(settings: settings, category: .personalMessaging)
+            DSDivider()
+            s1MiniStylingRow(settings: settings, category: .other)
+            DSDivider()
+            DSDetailRow(
+                label: "Fallback",
+                caption: "Used only when no destination app can be captured."
+            ) {
+                DSDropdown(
+                    selection: Binding(
+                        get: { settings.s1MiniStyling },
+                        set: { settings.s1MiniStyling = $0 }
+                    ),
+                    options: S1MiniStyling.allCases,
+                    title: \.displayName
+                )
+            }
+            DSDivider()
+            cardCaption("Every option shown here is one of S1-mini's trained Styling values. Dictate Anywhere selects the value locally from the destination category without changing the model prompt format.")
+        }
+    }
+
+    private func s1MiniStylingRow(
+        settings: Settings,
+        category: DictationContextCategory
+    ) -> some View {
+        DSDetailRow(
+            label: category.displayName,
+            caption: styleCaption(for: category)
+        ) {
+            DSDropdown(
+                selection: s1MiniStylingBinding(settings: settings, category: category),
+                options: S1MiniStyling.allCases,
+                title: \.displayName
+            )
+        }
+    }
+
+    private func s1MiniStylingBinding(
+        settings: Settings,
+        category: DictationContextCategory
+    ) -> Binding<S1MiniStyling> {
+        Binding(
+            get: { settings.s1MiniAppStyling.styling(for: category) },
+            set: { styling in
+                var appStyling = settings.s1MiniAppStyling
+                appStyling.set(styling, for: category)
+                settings.s1MiniAppStyling = appStyling
+            }
+        )
     }
 
     private func appRuleRow(settings: Settings, index: Int, rule: DictationAppRule) -> some View {
@@ -315,7 +436,7 @@ struct AIPostProcessingView: View {
                 title: \.displayName
             )
             Toggle(
-                "Read context",
+                "Read field context",
                 isOn: appRuleContextBinding(settings: settings, index: index)
             )
             .toggleStyle(.dsSwitch)
@@ -549,7 +670,7 @@ struct AIPostProcessingView: View {
                     icon: "exclamationmark.triangle"
                 )
             }
-        } else {
+        } else if settings.transcriptPostProcessingMode.supportedFeatures.contains(.customVocabulary) {
             vocabularySection(
                 settings: settings,
                 footer: "These terms are applied by FluidAudio's vocabulary rescoring on Parakeet TDT final transcripts only. Keep the list short and domain-specific for best precision."
@@ -566,23 +687,28 @@ struct AIPostProcessingView: View {
         switch availability {
         case .available:
             @Bindable var settings = settings
+            let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
 
-            DSSection(overline: "Prompt") {
-                cardPadded {
-                    SettingsMultilineTextArea(
-                        text: $settings.aiPostProcessingPrompt,
-                        placeholder: "Enter your prompt, e.g. \"Break into sentences, fix grammar, and remove filler words.\""
-                    )
-                    .labelsHidden()
+            if supportedFeatures.contains(.customPrompt) {
+                DSSection(overline: "Prompt") {
+                    cardPadded {
+                        SettingsMultilineTextArea(
+                            text: $settings.aiPostProcessingPrompt,
+                            placeholder: "Enter your prompt, e.g. \"Break into sentences, fix grammar, and remove filler words.\""
+                        )
+                        .labelsHidden()
+                    }
+                    DSDivider()
+                    cardCaption("This prompt tells Apple Intelligence how to transform your transcribed text. The transcript is appended after your prompt.")
                 }
-                DSDivider()
-                cardCaption("This prompt tells Apple Intelligence how to transform your transcribed text. The transcript is appended after your prompt.")
             }
 
-            vocabularySection(
-                settings: settings,
-                footer: "These terms are applied only by Apple Intelligence post-processing to preserve product names, names, and domain-specific wording."
-            )
+            if supportedFeatures.contains(.customVocabulary) {
+                vocabularySection(
+                    settings: settings,
+                    footer: "These terms are applied only by Apple Intelligence post-processing to preserve product names, names, and domain-specific wording."
+                )
+            }
 
         case .unavailable(.deviceNotEligible):
             DSSection(overline: "Apple Intelligence") {
@@ -715,41 +841,49 @@ struct AIPostProcessingView: View {
             }
         }
 
-        DSSection(overline: "Cleanup Controls") {
-            DSDetailRow(
-                label: "Styling",
-                caption: "Controls how casual or formal the normalized transcript should sound."
-            ) {
-                DSDropdown(
-                    selection: $settings.s1MiniStyling,
-                    options: S1MiniStyling.allCases,
-                    title: \.displayName
+        if settings.transcriptPostProcessingMode.supportedFeatures.contains(.s1MiniTrainedControls) {
+            DSSection(overline: "Cleanup Controls") {
+                if !settings.dictationContextAwarenessEnabled {
+                    DSDetailRow(
+                        label: "Styling",
+                        caption: "Controls how casual or formal the normalized transcript should sound."
+                    ) {
+                        DSDropdown(
+                            selection: $settings.s1MiniStyling,
+                            options: S1MiniStyling.allCases,
+                            title: \.displayName
+                        )
+                    }
+                    DSDivider()
+                }
+                DSDetailRow(
+                    label: "Structure",
+                    caption: "Choose prose paragraphs or a list-oriented result."
+                ) {
+                    DSDropdown(
+                        selection: $settings.s1MiniStructure,
+                        options: S1MiniStructure.allCases,
+                        title: \.displayName
+                    )
+                }
+                DSDivider()
+                DSDetailRow(
+                    label: "Context",
+                    caption: "Automatic uses email formatting for email destinations and general formatting elsewhere."
+                ) {
+                    DSDropdown(
+                        selection: $settings.s1MiniContextSetting,
+                        options: S1MiniContextSetting.allCases,
+                        title: \.displayName
+                    )
+                }
+                DSDivider()
+                cardCaption(
+                    settings.dictationContextAwarenessEnabled
+                        ? "Styling is selected by app category below. S1-mini uses only its fixed, trained controls—not an arbitrary prompt or custom vocabulary. Local filler-word removal still runs first."
+                        : "S1-mini uses only these fixed, trained controls—not an arbitrary prompt or custom vocabulary. Local filler-word removal still runs first."
                 )
             }
-            DSDivider()
-            DSDetailRow(
-                label: "Structure",
-                caption: "Choose prose paragraphs or a list-oriented result."
-            ) {
-                DSDropdown(
-                    selection: $settings.s1MiniStructure,
-                    options: S1MiniStructure.allCases,
-                    title: \.displayName
-                )
-            }
-            DSDivider()
-            DSDetailRow(
-                label: "Context",
-                caption: "Automatic uses email formatting for email destinations and general formatting elsewhere."
-            ) {
-                DSDropdown(
-                    selection: $settings.s1MiniContextSetting,
-                    options: S1MiniContextSetting.allCases,
-                    title: \.displayName
-                )
-            }
-            DSDivider()
-            cardCaption("S1-mini by Superwhisper uses these fixed, trained controls rather than an arbitrary prompt or custom vocabulary. Local filler-word removal still runs before them.")
         }
     }
 
@@ -898,25 +1032,30 @@ struct AIPostProcessingView: View {
             }
         }
 
-        DSSection(overline: "Prompt") {
-            cardPadded {
-                SettingsMultilineTextArea(
-                    text: Binding(
-                        get: { settings.ollamaPostProcessingPrompt },
-                        set: { settings.ollamaPostProcessingPrompt = $0 }
-                    ),
-                    placeholder: "Optional: add style or cleanup instructions for Ollama."
-                )
-                .labelsHidden()
+        let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
+        if supportedFeatures.contains(.customPrompt) {
+            DSSection(overline: "Prompt") {
+                cardPadded {
+                    SettingsMultilineTextArea(
+                        text: Binding(
+                            get: { settings.ollamaPostProcessingPrompt },
+                            set: { settings.ollamaPostProcessingPrompt = $0 }
+                        ),
+                        placeholder: "Optional: add style or cleanup instructions for Ollama."
+                    )
+                    .labelsHidden()
+                }
+                DSDivider()
+                cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for Ollama.")
             }
-            DSDivider()
-            cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for Ollama.")
         }
 
-        vocabularySection(
-            settings: settings,
-            footer: "These terms are sent to Ollama to preserve product names, names, and domain-specific wording during post-processing."
-        )
+        if supportedFeatures.contains(.customVocabulary) {
+            vocabularySection(
+                settings: settings,
+                footer: "These terms are sent to Ollama to preserve product names, names, and domain-specific wording during post-processing."
+            )
+        }
     }
 
     // MARK: - OpenRouter
@@ -992,25 +1131,30 @@ struct AIPostProcessingView: View {
             openRouterModelSearchSection(settings: settings, availability: availability)
         }
 
-        DSSection(overline: "Prompt") {
-            cardPadded {
-                SettingsMultilineTextArea(
-                    text: Binding(
-                        get: { settings.openRouterPostProcessingPrompt },
-                        set: { settings.openRouterPostProcessingPrompt = $0 }
-                    ),
-                    placeholder: "Optional: add style or cleanup instructions for OpenRouter."
-                )
-                .labelsHidden()
+        let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
+        if supportedFeatures.contains(.customPrompt) {
+            DSSection(overline: "Prompt") {
+                cardPadded {
+                    SettingsMultilineTextArea(
+                        text: Binding(
+                            get: { settings.openRouterPostProcessingPrompt },
+                            set: { settings.openRouterPostProcessingPrompt = $0 }
+                        ),
+                        placeholder: "Optional: add style or cleanup instructions for OpenRouter."
+                    )
+                    .labelsHidden()
+                }
+                DSDivider()
+                cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for OpenRouter.")
             }
-            DSDivider()
-            cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for OpenRouter.")
         }
 
-        vocabularySection(
-            settings: settings,
-            footer: "These terms are sent to OpenRouter to preserve product names, names, and domain-specific wording during post-processing."
-        )
+        if supportedFeatures.contains(.customVocabulary) {
+            vocabularySection(
+                settings: settings,
+                footer: "These terms are sent to OpenRouter to preserve product names, names, and domain-specific wording during post-processing."
+            )
+        }
     }
 
     // MARK: - OpenAI Compatible
@@ -1094,25 +1238,30 @@ struct AIPostProcessingView: View {
             cardCaption("Runs transcript cleanup through a local or self-hosted OpenAI-compatible chat completions server, such as LM Studio, llama.cpp, vLLM, or LocalAI. Use the base URL and model name reported by that server.")
         }
 
-        DSSection(overline: "Prompt") {
-            cardPadded {
-                SettingsMultilineTextArea(
-                    text: Binding(
-                        get: { settings.openAICompatiblePostProcessingPrompt },
-                        set: { settings.openAICompatiblePostProcessingPrompt = $0 }
-                    ),
-                    placeholder: "Optional: add style or cleanup instructions for this server."
-                )
-                .labelsHidden()
+        let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
+        if supportedFeatures.contains(.customPrompt) {
+            DSSection(overline: "Prompt") {
+                cardPadded {
+                    SettingsMultilineTextArea(
+                        text: Binding(
+                            get: { settings.openAICompatiblePostProcessingPrompt },
+                            set: { settings.openAICompatiblePostProcessingPrompt = $0 }
+                        ),
+                        placeholder: "Optional: add style or cleanup instructions for this server."
+                    )
+                    .labelsHidden()
+                }
+                DSDivider()
+                cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for this server.")
             }
-            DSDivider()
-            cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for this server.")
         }
 
-        vocabularySection(
-            settings: settings,
-            footer: "These terms are sent to the OpenAI-compatible server to preserve product names, names, and domain-specific wording during post-processing."
-        )
+        if supportedFeatures.contains(.customVocabulary) {
+            vocabularySection(
+                settings: settings,
+                footer: "These terms are sent to the OpenAI-compatible server to preserve product names, names, and domain-specific wording during post-processing."
+            )
+        }
     }
 
     // MARK: - Ollama install prompt

@@ -39,6 +39,32 @@ final class S1MiniPostProcessingTests: XCTestCase {
         )
     }
 
+    func testRecommendedAppStylingUsesOnlyTrainedValues() {
+        let styling = S1MiniAppStyling.recommended
+
+        XCTAssertEqual(styling.styling(for: .email), .formal)
+        XCTAssertEqual(styling.styling(for: .workMessaging), .semiFormal)
+        XCTAssertEqual(styling.styling(for: .personalMessaging), .semiCasual)
+        XCTAssertEqual(styling.styling(for: .other), .semiFormal)
+        XCTAssertTrue(
+            DictationContextCategory.allCases.allSatisfy {
+                S1MiniStyling.allCases.contains(styling.styling(for: $0))
+            }
+        )
+    }
+
+    func testAppStylingCanOverrideEachCategoryIndependently() {
+        var styling = S1MiniAppStyling.uniform(.semiFormal)
+
+        styling.set(.formal, for: .email)
+        styling.set(.casual, for: .personalMessaging)
+
+        XCTAssertEqual(styling.styling(for: .email), .formal)
+        XCTAssertEqual(styling.styling(for: .workMessaging), .semiFormal)
+        XCTAssertEqual(styling.styling(for: .personalMessaging), .casual)
+        XCTAssertEqual(styling.styling(for: .other), .semiFormal)
+    }
+
     func testPinnedModelMetadata() {
         XCTAssertEqual(S1MiniModelSpec.byteCount, 484_219_808)
         XCTAssertEqual(

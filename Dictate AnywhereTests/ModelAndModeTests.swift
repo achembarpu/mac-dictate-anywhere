@@ -226,6 +226,96 @@ final class ModelAndModeTests: XCTestCase {
         }
     }
 
+    func testPostProcessingModeFeatureVisibilityMatrix() {
+        XCTAssertEqual(
+            TranscriptPostProcessingMode.none.supportedFeatures,
+            [.localFillerWordRemoval]
+        )
+        XCTAssertEqual(
+            TranscriptPostProcessingMode.fluidAudioVocabulary.supportedFeatures,
+            [.customVocabulary, .localFillerWordRemoval]
+        )
+        XCTAssertEqual(
+            TranscriptPostProcessingMode.appleIntelligence.supportedFeatures,
+            [
+                .customPrompt,
+                .customVocabulary,
+                .dictationContext,
+                .categoryWritingStyles,
+                .appCategories,
+                .localFillerWordRemoval,
+            ]
+        )
+        XCTAssertEqual(
+            TranscriptPostProcessingMode.s1Mini.supportedFeatures,
+            [
+                .dictationContext,
+                .s1MiniCategoryStyling,
+                .appCategories,
+                .s1MiniTrainedControls,
+                .localFillerWordRemoval,
+            ]
+        )
+
+        let remoteModelFeatures: Set<TranscriptCleanupFeature> = [
+            .customPrompt,
+            .customVocabulary,
+            .dictationContext,
+            .categoryWritingStyles,
+            .appCategories,
+            .remoteContextSharing,
+            .localFillerWordRemoval,
+        ]
+        XCTAssertEqual(TranscriptPostProcessingMode.ollama.supportedFeatures, remoteModelFeatures)
+        XCTAssertEqual(TranscriptPostProcessingMode.openRouter.supportedFeatures, remoteModelFeatures)
+        XCTAssertEqual(TranscriptPostProcessingMode.openAICompatible.supportedFeatures, remoteModelFeatures)
+
+        for mode in TranscriptPostProcessingMode.allCases {
+            XCTAssertEqual(
+                mode.usesDictationContext,
+                mode.supportedFeatures.contains(.dictationContext)
+            )
+            XCTAssertEqual(
+                mode.canSendContextOffDevice,
+                mode.supportedFeatures.contains(.remoteContextSharing)
+            )
+            XCTAssertTrue(mode.supportedFeatures.contains(.localFillerWordRemoval))
+        }
+    }
+
+    func testPostProcessingContextSupportMatchesProviderTransport() {
+        XCTAssertEqual(TranscriptPostProcessingMode.none.dictationContextSupport(), .none)
+        XCTAssertEqual(TranscriptPostProcessingMode.fluidAudioVocabulary.dictationContextSupport(), .none)
+        XCTAssertEqual(TranscriptPostProcessingMode.s1Mini.dictationContextSupport(), .categoryOnlyOnDevice)
+        XCTAssertEqual(TranscriptPostProcessingMode.appleIntelligence.dictationContextSupport(), .fullOnDevice)
+        XCTAssertEqual(
+            TranscriptPostProcessingMode.ollama.dictationContextSupport(isConfiguredServerLocal: true),
+            .fullLocalServer
+        )
+        XCTAssertEqual(
+            TranscriptPostProcessingMode.openAICompatible.dictationContextSupport(isConfiguredServerLocal: false),
+            .remoteCategoryWithOptionalText
+        )
+        XCTAssertEqual(
+            TranscriptPostProcessingMode.openRouter.dictationContextSupport(isConfiguredServerLocal: true),
+            .remoteCategoryWithOptionalText
+        )
+
+        XCTAssertFalse(DictationContextSupport.categoryOnlyOnDevice.includesCapturedText(remoteSharingEnabled: true))
+        XCTAssertTrue(DictationContextSupport.fullOnDevice.includesCapturedText(remoteSharingEnabled: false))
+        XCTAssertTrue(DictationContextSupport.fullLocalServer.includesCapturedText(remoteSharingEnabled: false))
+        XCTAssertFalse(
+            DictationContextSupport.remoteCategoryWithOptionalText.includesCapturedText(
+                remoteSharingEnabled: false
+            )
+        )
+        XCTAssertTrue(
+            DictationContextSupport.remoteCategoryWithOptionalText.includesCapturedText(
+                remoteSharingEnabled: true
+            )
+        )
+    }
+
     // MARK: - AppAppearanceMode
 
     func testAppAppearanceModes() {

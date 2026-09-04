@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #endif
     private var statusItem: NSStatusItem?
     private var mainWindow: NSWindow?
+    private var customVocabularyMenuItem: NSMenuItem?
 
     override init() {
         self.appState = AppState()
@@ -87,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
+        menu.delegate = self
 
         let showItem = NSMenuItem(title: "Open Dictate Anywhere", action: #selector(showMainWindow), keyEquivalent: "")
         showItem.target = self
@@ -98,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let vocabItem = NSMenuItem(title: "Add Custom Vocabulary", action: #selector(showVocabularyPanel), keyEquivalent: "")
         vocabItem.target = self
+        customVocabularyMenuItem = vocabItem
         menu.addItem(vocabItem)
 
 #if !DEBUG
@@ -248,6 +251,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if let statusMenu = statusItem?.menu, menu === statusMenu {
+            customVocabularyMenuItem?.isHidden = !Settings.shared
+                .transcriptPostProcessingMode
+                .supportedFeatures
+                .contains(.customVocabulary)
+            return
+        }
+
         guard menu.title == "Microphone" else { return }
         menu.removeAllItems()
 
