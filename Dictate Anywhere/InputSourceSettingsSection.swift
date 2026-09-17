@@ -180,7 +180,7 @@ private struct InputSourceMappingRow: View {
     }
 
     private var engineOptions: [TranscriptionEngineChoice] {
-        AppleSpeechEngine.isSupported ? Array(TranscriptionEngineChoice.allCases) : [.parakeet]
+        AppleSpeechEngine.isSupported ? [.parakeet, .appleSpeech] : [.parakeet]
     }
 
     private func modelTitle(for model: ParakeetModelChoice) -> String {

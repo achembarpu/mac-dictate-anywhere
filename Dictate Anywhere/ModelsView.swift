@@ -21,7 +21,7 @@ struct ModelsView: View {
         DSPage {
             DSSectionHeader(
                 title: "Speech Model",
-                subtitle: "Everything runs on your Mac — your voice never leaves this device."
+                subtitle: pageSubtitle(settings: settings)
             )
 
             DSSection(overline: "Active Engine") {
@@ -119,7 +119,7 @@ struct ModelsView: View {
                 }
 
                 DSHint(text: selectedModel.speechModelFooter)
-            } else {
+            } else if settings.engineChoice == .appleSpeech {
                 DSSection(overline: "Apple Speech") {
                     DSInfoRow(label: "Type", value: "Latest on-device speech-to-text from Apple")
                     DSDivider()
@@ -140,7 +140,12 @@ struct ModelsView: View {
                     }
                 }
 
-                DSHint(text: "Apple Speech is available on supported Macs running macOS 26 or later. Audio and transcription stay on this Mac.")
+                DSHint(
+                    text:
+                        "Apple Speech is available on supported Macs running macOS 26 or later. Audio and transcription stay on this Mac."
+                )
+            } else if settings.engineChoice == .assemblyAI {
+                assemblyAIContent(settings: settings)
             }
         }
         .alert("Delete \(selectedModel.displayName)?", isPresented: $showDeleteConfirm) {
@@ -166,6 +171,197 @@ struct ModelsView: View {
             return "Apple Speech (Requires macOS 26)"
         }
         return choice.displayName
+    }
+
+    private func pageSubtitle(settings: Settings) -> String {
+        settings.engineChoice == .assemblyAI
+            ? "AssemblyAI processes audio in the cloud and returns text ready to paste."
+            : "Everything runs on your Mac — your voice never leaves this device."
+    }
+
+    @ViewBuilder
+    private func assemblyAIContent(settings: Settings) -> some View {
+        @Bindable var settings = settings
+
+        DSSection(overline: "AssemblyAI") {
+            DSDetailRow(
+                label: "API key",
+                caption:
+                    "Stored in macOS Keychain. You can also launch the app with ASSEMBLYAI_API_KEY set."
+            ) {
+                HStack(spacing: 8) {
+                    DSTextField(
+                        placeholder: "Paste AssemblyAI API key",
+                        text: $settings.assemblyAIAPIKey,
+                        isSecure: true
+                    )
+                    .frame(width: 280)
+                    if !settings.assemblyAIAPIKey.isEmpty {
+                        Button("Clear") { settings.assemblyAIAPIKey = "" }
+                            .buttonStyle(.dsSecondary)
+                    }
+                }
+            }
+            DSDivider()
+            DSInfoRow(label: "Status") {
+                if settings.resolvedAssemblyAIAPIKey.isEmpty {
+                    DSStatusPill(
+                        text: "API key required",
+                        dotColor: DS.Colors.textSecondary,
+                        textColor: DS.Colors.textSecondary,
+                        fill: DS.Colors.bgInset
+                    )
+                } else {
+                    DSStatusPill(text: "API key configured")
+                }
+            }
+            DSDivider()
+            DSDetailRow(
+                label: "Processing region",
+                caption:
+                    "Global chooses the lowest-latency region. US and EU keep audio and transcription processing in that data zone."
+            ) {
+                DSDropdown(
+                    selection: $settings.assemblyAIRegion,
+                    options: AssemblyAIRegion.allCases,
+                    title: \.displayName
+                )
+            }
+            DSDivider()
+            DSInfoRow(label: "Price", value: "$0.62 per hour of audio")
+        }
+
+        DSSection(overline: "Dictation") {
+            DSDetailRow(
+                label: "Language",
+                caption:
+                    "Choose the expected language. The API can also recognize code-switching, but this first version sends one language per request."
+            ) {
+                DSDropdown(
+                    selection: $settings.assemblyAILanguage,
+                    options: AssemblyAILanguage.allCases,
+                    title: \.displayName
+                )
+            }
+            DSDivider()
+            DSDetailRow(
+                label: "Live preview",
+                caption:
+                    "Uses an installed Apple Speech language on-device when available. The final pasted transcript always comes from AssemblyAI."
+            ) {
+                Text("Automatic")
+                    .font(DS.Fonts.ui(13.5))
+                    .foregroundStyle(DS.Colors.textSecondary)
+            }
+            DSDivider()
+            DSDetailRow(
+                label: "Output",
+                caption: settings.assemblyAIOutputMode == .polished
+                    ? "Removes filler, resolves clear self-corrections, and applies punctuation before pasting."
+                    : "Pastes the verbatim transcript; AssemblyAI still returns both versions."
+            ) {
+                DSDropdown(
+                    selection: $settings.assemblyAIOutputMode,
+                    options: AssemblyAIOutputMode.allCases,
+                    title: \.displayName
+                )
+            }
+        }
+
+        DSSection(overline: "Internal Prompts") {
+            DSDetailRow(
+                label: "Customize prompts",
+                caption: "Edit AssemblyAI recognition, cleanup, destination, writing-style, and field-context instructions."
+            ) {
+                Button("Customize…") {
+                    appState.selectedPage = .internalPrompts
+                }
+                .buttonStyle(.dsSecondary)
+            }
+        }
+
+        CustomVocabularySection(
+            terms: $settings.customVocabulary,
+            footer:
+                "Up to 100 names, product terms, and domain-specific phrases are sent as AssemblyAI keyterms. With remote context sharing enabled, destination terms are added for the current dictation only."
+        )
+
+        DSSection(overline: "Context Awareness") {
+            DSStackedRow(
+                label: "Adapt to the current app and text field",
+                caption:
+                    "Classifies the destination and sends that category to AssemblyAI. Password fields and excluded apps are never read.",
+                isOn: $settings.dictationContextAwarenessEnabled
+            )
+            if settings.dictationContextAwarenessEnabled {
+                DSDivider()
+                DSStackedRow(
+                    label: "Share app details and surrounding text with AssemblyAI",
+                    caption:
+                        "Off by default. App name, nearby text, and extracted terms stay on this Mac unless enabled and are never shared from password fields or excluded apps.",
+                    isOn: $settings.shareDictationContextWithRemoteProviders
+                )
+            }
+        }
+
+        if settings.dictationContextAwarenessEnabled,
+            settings.assemblyAIOutputMode == .polished
+        {
+            DSSection(overline: "Writing Style") {
+                assemblyAIWritingStyleRow(settings: settings, category: .email)
+                DSDivider()
+                assemblyAIWritingStyleRow(settings: settings, category: .workMessaging)
+                DSDivider()
+                assemblyAIWritingStyleRow(settings: settings, category: .personalMessaging)
+                DSDivider()
+                assemblyAIWritingStyleRow(settings: settings, category: .other)
+            }
+        }
+
+        DSHint(
+            text:
+                "AssemblyAI requires an internet connection and accepts recordings up to 120 seconds. Dictate Anywhere deletes its temporary local recovery copy after success; failed requests remain in History when that copy is available."
+        )
+    }
+
+    private func assemblyAIWritingStyleRow(
+        settings: Settings,
+        category: DictationContextCategory
+    ) -> some View {
+        DSDetailRow(label: category.displayName, caption: assemblyAIStyleCaption(for: category)) {
+            DSDropdown(
+                selection: assemblyAIWritingStyleBinding(settings: settings, category: category),
+                options: DictationWritingStyle.options(for: category),
+                title: \.displayName
+            )
+        }
+    }
+
+    private func assemblyAIWritingStyleBinding(
+        settings: Settings,
+        category: DictationContextCategory
+    ) -> Binding<DictationWritingStyle> {
+        Binding(
+            get: { settings.dictationWritingStyle(for: category) },
+            set: { value in
+                switch category {
+                case .email: settings.emailDictationWritingStyle = value
+                case .workMessaging: settings.workMessagingDictationWritingStyle = value
+                case .personalMessaging: settings.personalMessagingDictationWritingStyle = value
+                case .other: settings.otherDictationWritingStyle = value
+                }
+            }
+        )
+    }
+
+    private func assemblyAIStyleCaption(for category: DictationContextCategory) -> String {
+        switch category {
+        case .email: return "Used in mail apps and webmail."
+        case .workMessaging: return "Used in Slack, Teams, Discord, and similar work chat."
+        case .personalMessaging:
+            return "Used in Messages, WhatsApp, Telegram, and similar personal chat."
+        case .other: return "Used when no email or messaging category matches."
+        }
     }
 
     private var unsupportedAppleSpeechAlertTitle: String {

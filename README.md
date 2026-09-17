@@ -28,7 +28,7 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **Global Hotkey** - Press and hold Fn key (or custom shortcut) to dictate from anywhere
 - **Safer Cancellation** - Rebind or clear the cancel shortcut in Shortcuts. Optional one-second hold-to-cancel is enabled by default; a quick Escape tap keeps dictation running.
 - **Continue Cancelled Sessions** - Cancelled dictations are saved locally for 24 hours by default. Continue in History restores your words using the selected speech model and language, then restarts the microphone. Stop to insert one combined dictation into the original app, or copy it if that app is unavailable. Recover text saves words to History without recording or pasting.
-- **On-Device Processing** - All speech recognition runs locally using FluidAudio Parakeet, Nemotron, or SenseVoice models
+- **Local-First Speech Recognition** - FluidAudio and Apple Speech run on-device; AssemblyAI is available as an explicit cloud option
 - **26 Languages** - English, German, French, Spanish and 21 more European languages, plus Mandarin Chinese (Simplified) via the SenseVoice and Nemotron multilingual models (Nemotron multilingual requires Apple Silicon; SenseVoice also runs on Intel)
 - **Hands-Free Mode** - Tap to start, tap again to stop
 - **Live Preview** - See your transcription in real-time with animated waveform
@@ -38,6 +38,7 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **S1-mini by Superwhisper** - Download or delete a compact English transcript normalizer and run it fully on-device without a separate model server
 - **Ollama Integration** - Connect to a local or remote Ollama server, refresh installed models, and manage recommended local models from the app
 - **OpenRouter Integration** - Use hosted models through OpenRouter with model search, structured-output-aware selection, and secure API key storage
+- **AssemblyAI Dictation** - Optional cloud speech model with transcription, self-correction cleanup, keyterms, context, and output instructions in one request; installed Apple Speech assets provide an on-device live preview while recording
 - **Optional Transcript Cleanup** - Post-process the final transcript with S1-mini by Superwhisper, Apple Intelligence, Ollama, or OpenRouter for punctuation, grammar, formatting, and wording cleanup
 - **Safe Fallbacks** - If AI cleanup fails or returns unusable output, the original local transcript is pasted instead
 - **Menu Bar App** - Runs quietly in your menu bar
@@ -57,7 +58,7 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 
 ## Optional AI Transcript Cleanup
 
-Dictate Anywhere always transcribes audio locally with FluidAudio. Cleanup happens only after transcription, so your raw audio stays on your Mac even when you enable Ollama or OpenRouter. Context Awareness keeps surrounding text local by default; sharing it with a remote cleanup provider requires a separate opt-in.
+FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Mac even when a remote transcript-cleanup provider is enabled. AssemblyAI is a separate cloud speech-model choice: when selected, audio is sent directly to AssemblyAI for the final transcription. When compatible Apple Speech language assets are already installed, the same microphone samples also produce an on-device live preview; that preview is never pasted in place of AssemblyAI's result. Context Awareness keeps surrounding text local by default; sharing it with AssemblyAI or another remote provider requires a separate opt-in.
 
 | Provider | Runs Where | Best For | Benefits |
 |----------|------------|----------|----------|

@@ -110,6 +110,17 @@ final class InputSourceProfileResolverTests: XCTestCase {
         XCTAssertEqual(resolve(mapping: mapping(), currentEngine: .appleSpeech), .fullApply)
     }
 
+    func testAssemblyAISelectionIsNotOverriddenByLocalInputSourceProfiles() {
+        XCTAssertEqual(resolve(mapping: mapping(), currentEngine: .assemblyAI), .inactive)
+        XCTAssertEqual(
+            resolve(
+                mapping: mapping(engine: .appleSpeech, model: nil),
+                currentEngine: .assemblyAI
+            ),
+            .inactive
+        )
+    }
+
     // MARK: - Apple Speech installed-asset gate
 
     func testAppleSpeechMappingWithAssetNotInstalledResolvesToInactive() {

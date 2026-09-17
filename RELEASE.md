@@ -72,17 +72,9 @@ In Xcode, update:
 - `MARKETING_VERSION` to the new public version
 - `CURRENT_PROJECT_VERSION` to a higher build number
 
-### 2. Commit and tag
+### 2. Prepare and verify the candidate
 
-```bash
-VERSION="2.2.9"
-
-git add .
-git commit -m "Release v${VERSION}"
-git tag "v${VERSION}"
-git push
-git push origin "refs/tags/v${VERSION}"
-```
+Add release notes at `sparkle-releases/DictateAnywhere-<version>.md`, run the test suite, and review all changes included in the release. Do not expose a new appcast until its downloads are public.
 
 ### 3. Build, notarize, and generate release artifacts
 
@@ -112,7 +104,7 @@ It does all of this:
 ### 4. Verify the outputs before upload
 
 ```bash
-VERSION="2.2.9"
+VERSION="2.11.0"
 
 spctl -a -vv "dist/Dictate Anywhere.app"
 xcrun stapler validate "dist/DictateAnywhere-${VERSION}.dmg"
@@ -123,25 +115,31 @@ Expected results:
 - the app is accepted as `Notarized Developer ID`
 - the DMG has a stapled ticket
 
-### 5. Commit the updated appcast
+### 5. Commit and tag the verified artifacts and source
+
+After all artifact checks pass, review the staged source, release notes, and generated appcast. Do not commit DMG, ZIP, or delta binaries. Then commit and tag the release locally:
 
 ```bash
-git add appcast.xml sparkle-releases "sparkle-releases/DictateAnywhere-${VERSION}.md"
-git commit -m "Update appcast for v${VERSION}"
-git push
+VERSION="2.11.0"
+
+git commit -m "Release v${VERSION}"
+git tag "v${VERSION}"
+git push origin "refs/tags/v${VERSION}"
 ```
 
-### 6. Upload the release assets to the GitHub draft release
+### 6. Publish and verify the release assets
+
+Create the GitHub release from the tag with the notarized DMG, Sparkle ZIP, and every delta referenced by the new appcast item. Use the versioned release notes. Verify that the release is public and each referenced asset is reachable and matches the local artifact.
+
+### 7. Expose the update feed
+
+Only after asset verification succeeds, push `main`:
 
 ```bash
-gh release upload "v${VERSION}" \
-  "dist/DictateAnywhere-${VERSION}.zip" \
-  "dist/DictateAnywhere-${VERSION}.dmg"
+git push origin main
 ```
 
-### 7. Publish the draft release
-
-Open the draft release on GitHub and publish it after confirming the `.zip` and `.dmg` are attached.
+Verify the public appcast against the local file, including version/build, download links, Sparkle signatures, and deltas. Verify tag and main agree with the intended source commit.
 
 The appcast is served from:
 

@@ -139,6 +139,24 @@ final class InputSourceMappingTests: XCTestCase {
         XCTAssertEqual(mapping?.language, .german)
     }
 
+    func testAddMappingWhileAssemblyAIIsSelectedCreatesALocalProfile() {
+        let settings = Settings.shared
+        settings.inputSourceMappings = []
+        settings.engineChoice = .assemblyAI
+        settings.parakeetModelChoice = .nemotronMultilingual
+
+        let mapping = settings.addInputSourceMapping(
+            inputSourceID: "com.apple.keylayout.German",
+            displayName: "German",
+            derivedLanguage: .german,
+            isModelDownloaded: { _ in true }
+        )
+
+        XCTAssertEqual(mapping?.engine, .parakeet)
+        XCTAssertEqual(mapping?.parakeetModel, .nemotronMultilingual)
+        XCTAssertEqual(mapping?.language, .german)
+    }
+
     func testAddMappingFallsBackToCurrentModelAndCoercesLanguage() {
         let settings = Settings.shared
         settings.inputSourceMappings = []

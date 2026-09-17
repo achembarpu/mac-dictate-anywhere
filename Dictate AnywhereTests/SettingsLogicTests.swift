@@ -17,6 +17,8 @@ final class SettingsLogicTests: XCTestCase {
     private var savedContextAwarenessEnabled = true
     private var savedS1MiniStyling: S1MiniStyling = .semiFormal
     private var savedS1MiniAppStyling = S1MiniAppStyling.recommended
+    private var savedAssemblyAIPromptOverrides: [String: String] = [:]
+    private var savedAssemblyAIInstruction = ""
 
     override func setUp() {
         super.setUp()
@@ -33,6 +35,8 @@ final class SettingsLogicTests: XCTestCase {
         savedContextAwarenessEnabled = settings.dictationContextAwarenessEnabled
         savedS1MiniStyling = settings.s1MiniStyling
         savedS1MiniAppStyling = settings.s1MiniAppStyling
+        savedAssemblyAIPromptOverrides = settings.assemblyAIPromptOverrides
+        savedAssemblyAIInstruction = settings.assemblyAIInstruction
     }
 
     override func tearDown() {
@@ -45,6 +49,13 @@ final class SettingsLogicTests: XCTestCase {
         settings.dictationContextAwarenessEnabled = savedContextAwarenessEnabled
         settings.s1MiniStyling = savedS1MiniStyling
         settings.s1MiniAppStyling = savedS1MiniAppStyling
+        settings.resetAllAssemblyAIPrompts()
+        for (rawPrompt, value) in savedAssemblyAIPromptOverrides {
+            if let prompt = AssemblyAIInternalPrompt(rawValue: rawPrompt) {
+                settings.setAssemblyAIPrompt(value, for: prompt)
+            }
+        }
+        settings.assemblyAIInstruction = savedAssemblyAIInstruction
         // Restore engine/model choice before post-processing mode: both
         // carry didSet coercions that can rewrite `transcriptPostProcessingMode`
         // (and `selectedLanguage`), so mode must be restored last to avoid
@@ -110,6 +121,27 @@ final class SettingsLogicTests: XCTestCase {
 
     func testDefaultFillerWords() {
         XCTAssertEqual(Settings.defaultFillerWords, ["um", "uh", "erm", "er", "hmm", "嗯", "呃"])
+    }
+
+    func testAssemblyAIPromptsCanResetIndividuallyAndTogether() {
+        let settings = Settings.shared
+        settings.resetAllAssemblyAIPrompts()
+
+        settings.setAssemblyAIPrompt("Use short email paragraphs.", for: .email)
+        settings.setAssemblyAIPrompt("Use a warm voice.", for: .casual)
+        settings.assemblyAIInstruction = "Keep product names unchanged."
+
+        XCTAssertEqual(settings.assemblyAIPrompt(.email), "Use short email paragraphs.")
+        XCTAssertTrue(settings.isAssemblyAIPromptCustomized(.email))
+
+        settings.resetAssemblyAIPrompt(.email)
+        XCTAssertEqual(settings.assemblyAIPrompt(.email), AssemblyAIInternalPrompt.email.defaultValue)
+        XCTAssertFalse(settings.isAssemblyAIPromptCustomized(.email))
+        XCTAssertTrue(settings.isAssemblyAIPromptCustomized(.casual))
+
+        settings.resetAllAssemblyAIPrompts()
+        XCTAssertEqual(settings.assemblyAIPrompt(.casual), AssemblyAIInternalPrompt.casual.defaultValue)
+        XCTAssertEqual(settings.assemblyAIInstruction, "")
     }
 
     // MARK: - Transcript history

@@ -58,3 +58,60 @@ struct VocabularyChip: View {
         .clipShape(Capsule())
     }
 }
+
+/// Shared design-system section for every provider that accepts custom terms.
+/// Keeping the editing behavior here prevents cloud and local model pages from
+/// drifting into subtly different vocabulary controls.
+struct CustomVocabularySection: View {
+    @Binding var terms: [String]
+    let footer: String
+    @State private var pendingTerm = ""
+
+    var body: some View {
+        DSSection(overline: "Custom Vocabulary") {
+            VStack(alignment: .leading, spacing: 10) {
+                if !terms.isEmpty {
+                    FlowLayout(spacing: 6) {
+                        ForEach(terms, id: \.self) { term in
+                            DSChip(text: term) {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    terms.removeAll { $0 == term }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    DSTextField(placeholder: "Add word or phrase…", text: $pendingTerm)
+                        .frame(width: 260)
+                        .onSubmit { addTerms() }
+
+                    Button("Add") { addTerms() }
+                        .buttonStyle(.dsSecondary)
+                        .disabled(pendingTerm.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 12)
+            .padding(.horizontal, DS.Spacing.rowHorizontal)
+
+            DSDivider()
+            Text(footer)
+                .font(DS.Fonts.ui(12.5))
+                .lineSpacing(12.5 * 0.5 - 3)
+                .foregroundStyle(DS.Colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
+                .padding(.horizontal, DS.Spacing.rowHorizontal)
+        }
+    }
+
+    private func addTerms() {
+        let additions = VocabularyInputParser.terms(from: pendingTerm, existingTerms: terms)
+        guard !additions.isEmpty else { return }
+        terms.append(contentsOf: additions)
+        pendingTerm = ""
+    }
+}

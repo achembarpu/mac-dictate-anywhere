@@ -197,10 +197,11 @@ final class ModelAndModeTests: XCTestCase {
     func testEngineDisplayName() {
         XCTAssertEqual(TranscriptionEngineChoice.parakeet.displayName, "FluidAudio")
         XCTAssertEqual(TranscriptionEngineChoice.appleSpeech.displayName, "Apple Speech")
+        XCTAssertEqual(TranscriptionEngineChoice.assemblyAI.displayName, "AssemblyAI")
     }
 
     func testEngineChoicesHaveMetadataAndStableRawValues() {
-        XCTAssertEqual(TranscriptionEngineChoice.allCases, [.parakeet, .appleSpeech])
+        XCTAssertEqual(TranscriptionEngineChoice.allCases, [.parakeet, .appleSpeech, .assemblyAI])
         for choice in TranscriptionEngineChoice.allCases {
             XCTAssertFalse(choice.displayName.isEmpty)
             XCTAssertFalse(choice.detail.isEmpty)
@@ -360,13 +361,34 @@ final class ModelAndModeTests: XCTestCase {
         XCTAssertEqual(AppleSpeechEngine.locale(for: .chinese).identifier, "zh-CN")
     }
 
+    func testAppleSpeechPreviewMapsAssemblyAILanguageCodesToLocales() {
+        XCTAssertEqual(AppleSpeechEngine.locale(forLanguageCode: "zh").identifier, "zh-CN")
+        XCTAssertEqual(AppleSpeechEngine.locale(forLanguageCode: "yue").identifier, "yue-HK")
+        XCTAssertEqual(
+            AppleSpeechEngine.locale(forLanguageCode: "ja").language.languageCode?.identifier,
+            "ja"
+        )
+    }
+
     // MARK: - Sidebar pages (design conformance)
 
     func testSidebarPageOrderAndTitlesMatchDesign() {
         XCTAssertEqual(
             SidebarPage.allCases.map(\.title),
-            ["Speech Model", "General", "Shortcuts", "Text & Overlay", "Transcript Cleanup", "History", "About"]
+            [
+                "Speech Model", "General", "Shortcuts", "Text & Overlay",
+                "Transcript Cleanup", "Internal Prompts", "History", "About",
+            ]
         )
+    }
+
+    func testProviderSpecificSidebarPagesFollowEngineCapabilities() {
+        XCTAssertTrue(SidebarPage.internalPrompts.isVisible(for: .assemblyAI))
+        XCTAssertFalse(SidebarPage.internalPrompts.isVisible(for: .appleSpeech))
+        XCTAssertFalse(SidebarPage.internalPrompts.isVisible(for: .parakeet))
+        XCTAssertFalse(SidebarPage.aiPostProcessing.isVisible(for: .assemblyAI))
+        XCTAssertTrue(SidebarPage.aiPostProcessing.isVisible(for: .appleSpeech))
+        XCTAssertTrue(SidebarPage.aiPostProcessing.isVisible(for: .parakeet))
     }
 
     func testSidebarPageIconsAreValidSFSymbols() {

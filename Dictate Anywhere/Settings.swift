@@ -78,14 +78,20 @@ enum AppAppearanceMode: String, CaseIterable {
 
 // MARK: - Transcription Engine Choice
 
+nonisolated enum TranscriptionEngineCapability: Hashable, Sendable {
+    case internalPromptCustomization
+}
+
 enum TranscriptionEngineChoice: String, CaseIterable, Codable {
     case parakeet = "parakeet"
     case appleSpeech = "appleSpeech"
+    case assemblyAI = "assemblyAI"
 
     nonisolated var displayName: String {
         switch self {
         case .parakeet: return "FluidAudio"
         case .appleSpeech: return "Apple Speech"
+        case .assemblyAI: return "AssemblyAI"
         }
     }
 
@@ -95,6 +101,127 @@ enum TranscriptionEngineChoice: String, CaseIterable, Codable {
             return "Downloadable on-device speech models powered by FluidAudio."
         case .appleSpeech:
             return "Apple's latest on-device speech-to-text model, managed by macOS."
+        case .assemblyAI:
+            return "Cloud dictation with transcription and cleanup in one request."
+        }
+    }
+
+    nonisolated var capabilities: Set<TranscriptionEngineCapability> {
+        switch self {
+        case .assemblyAI: return [.internalPromptCustomization]
+        case .parakeet, .appleSpeech: return []
+        }
+    }
+
+    nonisolated var supportsInternalPromptCustomization: Bool {
+        capabilities.contains(.internalPromptCustomization)
+    }
+}
+
+enum AssemblyAIRegion: String, CaseIterable, Codable {
+    case global
+    case unitedStates = "us"
+    case europeanUnion = "eu"
+
+    var displayName: String {
+        switch self {
+        case .global: return "Global (Lowest Latency)"
+        case .unitedStates: return "United States"
+        case .europeanUnion: return "European Union"
+        }
+    }
+
+    var baseURL: URL {
+        switch self {
+        case .global: return URL(string: "https://dictation.assemblyai.com")!
+        case .unitedStates: return URL(string: "https://dictation.us.assemblyai.com")!
+        case .europeanUnion: return URL(string: "https://dictation.eu.assemblyai.com")!
+        }
+    }
+}
+
+enum AssemblyAIOutputMode: String, CaseIterable, Codable {
+    case polished
+    case verbatim
+
+    var displayName: String {
+        switch self {
+        case .polished: return "Polished"
+        case .verbatim: return "Verbatim"
+        }
+    }
+}
+
+enum AssemblyAILanguage: String, CaseIterable, Codable, Identifiable {
+    case english = "en"
+    case spanish = "es"
+    case german = "de"
+    case french = "fr"
+    case italian = "it"
+    case portuguese = "pt"
+    case turkish = "tr"
+    case dutch = "nl"
+    case swedish = "sv"
+    case norwegian = "no"
+    case norwegianNynorsk = "nn"
+    case danish = "da"
+    case finnish = "fi"
+    case hindi = "hi"
+    case marathi = "mr"
+    case vietnamese = "vi"
+    case arabic = "ar"
+    case hebrew = "he"
+    case urdu = "ur"
+    case persian = "fa"
+    case japanese = "ja"
+    case mandarin = "zh"
+    case cantonese = "yue"
+    case korean = "ko"
+    case catalan = "ca"
+    case galician = "gl"
+    case russian = "ru"
+    case romanian = "ro"
+    case estonian = "et"
+    case afrikaans = "af"
+    case zulu = "zu"
+    case xhosa = "xh"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .english: return "English"
+        case .spanish: return "Spanish"
+        case .german: return "German"
+        case .french: return "French"
+        case .italian: return "Italian"
+        case .portuguese: return "Portuguese"
+        case .turkish: return "Turkish"
+        case .dutch: return "Dutch"
+        case .swedish: return "Swedish"
+        case .norwegian: return "Norwegian"
+        case .norwegianNynorsk: return "Norwegian Nynorsk"
+        case .danish: return "Danish"
+        case .finnish: return "Finnish"
+        case .hindi: return "Hindi"
+        case .marathi: return "Marathi"
+        case .vietnamese: return "Vietnamese"
+        case .arabic: return "Arabic"
+        case .hebrew: return "Hebrew"
+        case .urdu: return "Urdu"
+        case .persian: return "Persian"
+        case .japanese: return "Japanese"
+        case .mandarin: return "Mandarin"
+        case .cantonese: return "Cantonese"
+        case .korean: return "Korean"
+        case .catalan: return "Catalan"
+        case .galician: return "Galician"
+        case .russian: return "Russian"
+        case .romanian: return "Romanian"
+        case .estonian: return "Estonian"
+        case .afrikaans: return "Afrikaans"
+        case .zulu: return "Zulu"
+        case .xhosa: return "Xhosa"
         }
     }
 }
@@ -757,6 +884,7 @@ final class Settings {
     private nonisolated static let functionKeyCodes: Set<UInt16> = [63, 179]
     private nonisolated static let openRouterAPIKeyKeychainAccount = "openrouter-api-key"
     private nonisolated static let openAICompatibleAPIKeyKeychainAccount = "openai-compatible-api-key"
+    private nonisolated static let assemblyAIAPIKeyKeychainAccount = "assemblyai-api-key"
 
     /// Background queue for sound playback
     private let soundQueue = DispatchQueue(label: "com.dictate-anywhere.sounds", qos: .userInteractive)
@@ -777,6 +905,11 @@ final class Settings {
         static let parakeetModelChoice = "parakeetModelChoice"
         static let selectedLanguage = "selectedLanguage"
         static let appleSpeechLanguage = "appleSpeechLanguage"
+        static let assemblyAIRegion = "assemblyAIRegion"
+        static let assemblyAILanguage = "assemblyAILanguage"
+        static let assemblyAIOutputMode = "assemblyAIOutputMode"
+        static let assemblyAIInstruction = "assemblyAIInstruction"
+        static let assemblyAIPromptOverrides = "assemblyAIPromptOverrides"
         static let isFillerWordRemovalEnabled = "isFillerWordRemovalEnabled"
         static let fillerWordsToRemove = "fillerWordsToRemove"
         static let boostMicrophoneVolumeEnabled = "boostMicrophoneVolumeEnabled"
@@ -916,6 +1049,74 @@ final class Settings {
         }
     }
 
+    var assemblyAIAPIKey: String {
+        didSet { Self.storeAssemblyAIAPIKey(assemblyAIAPIKey) }
+    }
+
+    var assemblyAIRegion: AssemblyAIRegion {
+        didSet { UserDefaults.standard.set(assemblyAIRegion.rawValue, forKey: Keys.assemblyAIRegion) }
+    }
+
+    var assemblyAILanguage: AssemblyAILanguage {
+        didSet {
+            UserDefaults.standard.set(assemblyAILanguage.rawValue, forKey: Keys.assemblyAILanguage)
+        }
+    }
+
+    var assemblyAIOutputMode: AssemblyAIOutputMode {
+        didSet {
+            UserDefaults.standard.set(assemblyAIOutputMode.rawValue, forKey: Keys.assemblyAIOutputMode)
+        }
+    }
+
+    var assemblyAIInstruction: String {
+        didSet { UserDefaults.standard.set(assemblyAIInstruction, forKey: Keys.assemblyAIInstruction) }
+    }
+
+    private(set) var assemblyAIPromptOverrides: [String: String] {
+        didSet {
+            guard let data = try? JSONEncoder().encode(assemblyAIPromptOverrides) else { return }
+            UserDefaults.standard.set(data, forKey: Keys.assemblyAIPromptOverrides)
+        }
+    }
+
+    func assemblyAIPrompt(_ prompt: AssemblyAIInternalPrompt) -> String {
+        prompt.value(in: assemblyAIPromptOverrides)
+    }
+
+    func setAssemblyAIPrompt(_ value: String, for prompt: AssemblyAIInternalPrompt) {
+        var overrides = assemblyAIPromptOverrides
+        let boundedValue = String(value.prefix(4_000))
+        if boundedValue == prompt.defaultValue {
+            overrides.removeValue(forKey: prompt.rawValue)
+        } else {
+            overrides[prompt.rawValue] = boundedValue
+        }
+        assemblyAIPromptOverrides = overrides
+    }
+
+    func isAssemblyAIPromptCustomized(_ prompt: AssemblyAIInternalPrompt) -> Bool {
+        assemblyAIPromptOverrides[prompt.rawValue] != nil
+    }
+
+    func resetAssemblyAIPrompt(_ prompt: AssemblyAIInternalPrompt) {
+        var overrides = assemblyAIPromptOverrides
+        overrides.removeValue(forKey: prompt.rawValue)
+        assemblyAIPromptOverrides = overrides
+    }
+
+    func resetAllAssemblyAIPrompts() {
+        assemblyAIPromptOverrides = [:]
+        assemblyAIInstruction = ""
+    }
+
+    var resolvedAssemblyAIAPIKey: String {
+        let stored = assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !stored.isEmpty { return stored }
+        return ProcessInfo.processInfo.environment["ASSEMBLYAI_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     // MARK: - Input Source Auto-Switch
 
     var inputSourceMappings: [InputSourceMapping] {
@@ -952,7 +1153,9 @@ final class Settings {
         guard let raw = try? JSONDecoder().decode([RawInputSourceMapping].self, from: data) else { return [] }
         return raw.compactMap { entry in
             guard let engine = TranscriptionEngineChoice(rawValue: entry.engine),
-                  var language = SupportedLanguage(rawValue: entry.language) else { return nil }
+                var language = SupportedLanguage(rawValue: entry.language)
+            else { return nil }
+            guard engine != .assemblyAI else { return nil }
             var model: ParakeetModelChoice?
             if let rawModel = entry.parakeetModel {
                 guard let parsed = ParakeetModelChoice(rawValue: rawModel) else { return nil }
@@ -1383,6 +1586,25 @@ final class Settings {
         selectedLanguage = SupportedLanguage(rawValue: langCode) ?? .english
         let appleLangCode = defaults.string(forKey: Keys.appleSpeechLanguage) ?? "en"
         appleSpeechLanguage = SupportedLanguage(rawValue: appleLangCode) ?? .english
+        assemblyAIAPIKey = Self.storedAssemblyAIAPIKey()
+        assemblyAIRegion =
+            AssemblyAIRegion(
+                rawValue: defaults.string(forKey: Keys.assemblyAIRegion) ?? ""
+            ) ?? .global
+        assemblyAILanguage =
+            AssemblyAILanguage(
+                rawValue: defaults.string(forKey: Keys.assemblyAILanguage) ?? ""
+            ) ?? .english
+        assemblyAIOutputMode =
+            AssemblyAIOutputMode(
+                rawValue: defaults.string(forKey: Keys.assemblyAIOutputMode) ?? ""
+            ) ?? .polished
+        assemblyAIInstruction = defaults.string(forKey: Keys.assemblyAIInstruction) ?? ""
+        let storedAssemblyAIPromptOverrides = defaults.data(forKey: Keys.assemblyAIPromptOverrides)
+            .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+        assemblyAIPromptOverrides = AssemblyAIInternalPrompt.sanitizedOverrides(
+            storedAssemblyAIPromptOverrides
+        )
 
         // Input source auto-switching
         if let mappingData = defaults.data(forKey: Keys.inputSourceMappings) {
@@ -1622,7 +1844,10 @@ final class Settings {
         isModelDownloaded: (ParakeetModelChoice) -> Bool
     ) -> InputSourceMapping? {
         guard !inputSourceMappings.contains(where: { $0.inputSourceID == inputSourceID }) else { return nil }
-        let engine = engineChoice
+        // Input-source mappings are local speech profiles. AssemblyAI owns its
+        // language selection on the Speech Model page and is intentionally not
+        // added to this local auto-switch matrix.
+        let engine = engineChoice == .assemblyAI ? .parakeet : engineChoice
         var language = derivedLanguage ?? (engine == .appleSpeech ? appleSpeechLanguage : selectedLanguage)
         var model: ParakeetModelChoice?
         if engine == .parakeet {
@@ -1668,6 +1893,12 @@ final class Settings {
             let model = updated.parakeetModel ?? parakeetModelChoice
             updated.parakeetModel = model
             if !model.supportsLanguage(updated.language) {
+                updated.language = .english
+            }
+        case .assemblyAI:
+            updated.engine = .parakeet
+            updated.parakeetModel = parakeetModelChoice
+            if !parakeetModelChoice.supportsLanguage(updated.language) {
                 updated.language = .english
             }
         }
@@ -2058,6 +2289,25 @@ final class Settings {
 
     private nonisolated static var openRouterAPIKeyKeychainService: String {
         (Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere") + ".openrouter"
+    }
+
+    private nonisolated static var assemblyAIAPIKeyKeychainService: String {
+        (Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere") + ".assemblyai"
+    }
+
+    private nonisolated static func storedAssemblyAIAPIKey() -> String {
+        KeychainSecretStore.read(
+            service: assemblyAIAPIKeyKeychainService,
+            account: assemblyAIAPIKeyKeychainAccount
+        )
+    }
+
+    private nonisolated static func storeAssemblyAIAPIKey(_ value: String) {
+        KeychainSecretStore.write(
+            value,
+            service: assemblyAIAPIKeyKeychainService,
+            account: assemblyAIAPIKeyKeychainAccount
+        )
     }
 
     private nonisolated static func storedOpenRouterAPIKey() -> String {

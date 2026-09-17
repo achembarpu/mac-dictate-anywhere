@@ -12,7 +12,7 @@ import CoreMedia
 import Speech
 import os
 
-private protocol AppleSpeechSessionProtocol: AnyObject, Sendable {
+protocol AppleSpeechSessionProtocol: AnyObject, Sendable {
     func start() async throws
     func append(samples: [Float])
     func finish() async -> String
@@ -117,7 +117,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
         do {
             try await Self.requestAuthorizationIfNeeded()
             let session = try await AppleSpeechSession(
-                language: language,
+                requestedLocale: Self.locale(for: language),
                 contextualVocabulary: vocabulary,
                 onTranscript: { [weak self] text in
                     self?.setTranscript(text)
@@ -178,7 +178,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
                 timeout: audioCaptureStartupTimeout,
                 queue: audioCaptureSetupQueue,
                 cancellation: startupCancellation
-            ) {
+            ) { [self, session] in
                 try makeAudioCaptureController(
                     deviceID: deviceID,
                     usesExplicitMicrophoneSelection: usesExplicitMicrophoneSelection
@@ -238,7 +238,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
     func transcribeRecording(at url: URL) async throws -> String {
         guard #available(macOS 26.0, *), Self.isSupported else { throw TranscriptionError.appleSpeechUnavailable }
         let session = try await AppleSpeechSession(
-            language: Settings.shared.appleSpeechLanguage,
+            requestedLocale: Self.locale(for: Settings.shared.appleSpeechLanguage),
             contextualVocabulary: appleContextualVocabulary(), onTranscript: { _ in }
         )
         return try await session.transcribeFile(at: url)
@@ -318,18 +318,23 @@ final class AppleSpeechEngine: TranscriptionEngine {
     }
 
     static func locale(for language: SupportedLanguage) -> Locale {
+        locale(forLanguageCode: language.rawValue)
+    }
+
+    static func locale(forLanguageCode languageCode: String) -> Locale {
         // SpeechTranscriber distinguishes zh-CN/zh-TW/zh-HK; our single
         // Chinese case is Simplified, so pin the region explicitly.
-        if language == .chinese { return Locale(identifier: "zh-CN") }
+        if languageCode == "zh" { return Locale(identifier: "zh-CN") }
+        if languageCode == "yue" { return Locale(identifier: "yue-HK") }
         let current = Locale.current
-        if current.language.languageCode?.identifier == language.rawValue {
+        if current.language.languageCode?.identifier == languageCode {
             return current
         }
-        return Locale(identifier: language.rawValue)
+        return Locale(identifier: languageCode)
     }
 
     @available(macOS 26.0, *)
-    private static func requestAuthorizationIfNeeded() async throws {
+    static func requestAuthorizationIfNeeded() async throws {
         let status: SFSpeechRecognizerAuthorizationStatus
         switch SFSpeechRecognizer.authorizationStatus() {
         case .notDetermined:
@@ -346,10 +351,35 @@ final class AppleSpeechEngine: TranscriptionEngine {
             throw TranscriptionError.speechRecognitionPermissionDenied
         }
     }
+
+    static func makeInstalledLivePreviewSession(
+        languageCode: String,
+        contextualVocabulary: [String],
+        onTranscript: @escaping @Sendable (String) -> Void
+    ) async throws -> (any AppleSpeechSessionProtocol)? {
+        guard #available(macOS 26.0, *), Self.isSupported else { return nil }
+        let requestedLocale = locale(forLanguageCode: languageCode)
+        guard let supportedLocale = await SpeechTranscriber.supportedLocale(
+            equivalentTo: requestedLocale
+        ) else { return nil }
+
+        let installedIdentifiers = Set(
+            await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) }
+        )
+        guard installedIdentifiers.contains(supportedLocale.identifier(.bcp47)) else { return nil }
+
+        try await requestAuthorizationIfNeeded()
+        return try await AppleSpeechSession(
+            requestedLocale: supportedLocale,
+            contextualVocabulary: contextualVocabulary,
+            allowsAssetInstallation: false,
+            onTranscript: onTranscript
+        )
+    }
 }
 
 @available(macOS 26.0, *)
-private final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol {
+final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol {
     private let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
     private let analyzerFormat: AVAudioFormat
@@ -361,18 +391,22 @@ private final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionP
     private var resultTask: Task<String, Error>?
 
     init(
-        language: SupportedLanguage,
+        requestedLocale: Locale,
         contextualVocabulary: [String],
+        allowsAssetInstallation: Bool = true,
         onTranscript: @escaping @Sendable (String) -> Void
     ) async throws {
         guard let locale = await SpeechTranscriber.supportedLocale(
-            equivalentTo: AppleSpeechEngine.locale(for: language)
+            equivalentTo: requestedLocale
         ) else {
             throw TranscriptionError.appleSpeechLanguageUnsupported
         }
 
         let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
         if let installationRequest = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+            guard allowsAssetInstallation else {
+                throw TranscriptionError.appleSpeechLanguageUnsupported
+            }
             try await installationRequest.downloadAndInstall()
         }
 

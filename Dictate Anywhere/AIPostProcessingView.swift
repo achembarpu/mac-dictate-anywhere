@@ -12,7 +12,6 @@ import AppKit
 struct AIPostProcessingView: View {
     @Environment(AppState.self) private var appState
     @State private var newFillerWord = ""
-    @State private var newVocabularyTerm = ""
     @State private var ollamaAvailability: OllamaPostProcessingService.Availability?
     @State private var ollamaCLIAvailability = OllamaPostProcessingService.cliAvailability()
     @State private var ollamaPendingDeletionModel: String?
@@ -1482,44 +1481,7 @@ struct AIPostProcessingView: View {
     @ViewBuilder
     private func vocabularySection(settings: Settings, footer: String) -> some View {
         @Bindable var settings = settings
-
-        DSSection(overline: "Custom Vocabulary") {
-            cardPadded {
-                if !settings.customVocabulary.isEmpty {
-                    FlowLayout(spacing: 6) {
-                        ForEach(settings.customVocabulary, id: \.self) { term in
-                            DSChip(text: term) {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    settings.customVocabulary.removeAll { $0 == term }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    DSTextField(placeholder: "Add word or phrase…", text: $newVocabularyTerm)
-                        .frame(width: 260)
-                        .onSubmit { addVocabularyTerm() }
-
-                    Button("Add") { addVocabularyTerm() }
-                        .buttonStyle(.dsSecondary)
-                        .disabled(newVocabularyTerm.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-            DSDivider()
-            cardCaption(footer)
-        }
-    }
-
-    private func addVocabularyTerm() {
-        let terms = VocabularyInputParser.terms(
-            from: newVocabularyTerm,
-            existingTerms: appState.settings.customVocabulary
-        )
-        guard !terms.isEmpty else { return }
-        appState.settings.customVocabulary.append(contentsOf: terms)
-        newVocabularyTerm = ""
+        CustomVocabularySection(terms: $settings.customVocabulary, footer: footer)
     }
 
     // MARK: - OpenRouter helpers

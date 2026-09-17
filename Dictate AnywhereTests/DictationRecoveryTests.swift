@@ -153,6 +153,27 @@ final class DictationRecoveryTests: XCTestCase {
         }
     }
 
+    func testCloudFailureRecoveryRemainsAvailableWithCancellationPreservationDisabled() async throws {
+        let previous = Settings.shared.preserveCancelledSessions
+        let sound = Settings.shared.soundEffectsEnabled
+        defer { Settings.shared.preserveCancelledSessions = previous; Settings.shared.soundEffectsEnabled = sound }
+        Settings.shared.preserveCancelledSessions = false
+        Settings.shared.soundEffectsEnabled = false
+        let engine = RecoveryTestEngine()
+        engine.lastTranscriptionError = "Synthetic provider failure"
+        let app = AppState(recoveryStore: store, engine: engine)
+        // Exercise the cloud capture policy without making a provider request.
+        app.prepareSessionRecovery(for: app.assemblyAIEngine)
+        app.assemblyAIEngine.recoveryCapture?.append([0.5, 0.25])
+        app.status = .recording
+        await app.stopDictation()
+        XCTAssertEqual(store.entries.count, 1)
+        XCTAssertTrue(store.entries.first?.hasAudio == true)
+        XCTAssertNil(store.entries.first?.completedTranscript)
+        XCTAssertEqual(app.status, .idle)
+        app.assemblyAIEngine.recoveryCapture = nil
+    }
+
     func testCancelDuringProcessingNeverDeliversLateResultAndKeepsRecovery() async throws {
         let previousHistory = Settings.shared.transcriptHistory
         let previousPreserve = Settings.shared.preserveCancelledSessions
@@ -195,6 +216,7 @@ private final class RecoveryTestEngine: TranscriptionEngine {
     var isReady = true
     var currentTranscript = ""
     var audioSamples: [Float] = []
+    var lastTranscriptionError: String?
     var didRecover = false
     var recoveryFails = false
     var didCancel = false

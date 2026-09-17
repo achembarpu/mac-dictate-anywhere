@@ -239,9 +239,26 @@ final class DictationContextTests: XCTestCase {
         XCTAssertTrue(
             TextInserter.shouldUseContextualInsertion(
                 context: context,
-                targetBundleIdentifier: "com.example.target"
+                targetProcessIdentifier: 42
             )
         )
+    }
+
+    func testPreparationUsesRetainedTargetWhenFrontmostIdentityIsStale() {
+        let output = TextInserter().preparedTextForInsertion(
+            "Tangerines.",
+            targetBundleIdentifier: "com.example.stale-frontmost-app",
+            targetProcessIdentifier: 42,
+            context: makeContext(
+                category: .other,
+                before: "I need to buy some groceries: apples, bananas,",
+                after: " oranges, and some sourdough starter."
+            ),
+            style: .formal,
+            knownTerms: []
+        )
+
+        XCTAssertEqual(output, " tangerines,")
     }
 
     func testInsertionInsideExistingSentenceDoesNotAddPeriod() {
@@ -262,6 +279,466 @@ final class DictationContextTests: XCTestCase {
         )
 
         XCTAssertEqual(output, "green")
+    }
+
+    func testReportedGroceryListInsertionUsesMidSentenceCasingAndPunctuation() {
+        let output = TextInserter.contextualizedForInsertion(
+            "Flowers.",
+            context: makeContext(
+                category: .other,
+                before: "Here's a list of groceries that I need to buy. I need apples,",
+                after: " bananas, oranges, and some sourdough starter."
+            ),
+            style: .formal
+        )
+
+        XCTAssertEqual(output, " flowers,")
+        XCTAssertEqual(
+            "Here's a list of groceries that I need to buy. I need apples," + output
+                + " bananas, oranges, and some sourdough starter.",
+            "Here's a list of groceries that I need to buy. I need apples, flowers, bananas, oranges, and some sourdough starter."
+        )
+    }
+
+    func testCommaBeforeOrdinaryClauseDoesNotInventAnotherComma() {
+        let output = TextInserter.contextualizedForInsertion(
+            "Dear.",
+            context: makeContext(category: .other, before: "Hello,", after: " my friend."),
+            style: .formal
+        )
+
+        XCTAssertEqual(output, " dear")
+    }
+
+    func testPartialAccessibilitySnapshotRecoversTextAfterCursorFromFullValue() {
+        let value = "Here's a list of groceries that I need to buy. I need apples, bananas, oranges, and some sourdough starter."
+        let cursorLocation = (value as NSString).range(of: "apples,").upperBound
+        let before = (value as NSString).substring(to: cursorLocation)
+
+        let snapshot = DictationContextCapture.resolvedSurroundingText(
+            before: before,
+            selected: "",
+            after: nil,
+            fullValue: value,
+            selectedRange: CFRange(location: cursorLocation, length: 0)
+        )
+
+        XCTAssertEqual(snapshot?.before, before)
+        XCTAssertEqual(snapshot?.selected, "")
+        XCTAssertEqual(snapshot?.after, " bananas, oranges, and some sourdough starter.")
+        XCTAssertTrue(snapshot?.after.isEmpty == false)
+    }
+
+    func testEmptySelectionDoesNotTurnFailedSurroundingReadsIntoEmptyField() {
+        XCTAssertNil(DictationContextCapture.resolvedSurroundingText(
+            before: nil, selected: "", after: nil, fullValue: nil,
+            selectedRange: CFRange(location: 60, length: 0)
+        ))
+        XCTAssertNil(DictationContextCapture.resolvedSurroundingText(
+            before: "apples, oranges,", selected: "", after: nil, fullValue: nil,
+            selectedRange: CFRange(location: 16, length: 0)
+        ))
+    }
+
+    func testInvalidOrStaleAccessibilityRangesAreNotClampedIntoValidSnapshots() {
+        for range in [CFRange(location: -1, length: 0), CFRange(location: 2, length: -1),
+                      CFRange(location: Int.max, length: 1), CFRange(location: 100, length: 0)] {
+            XCTAssertNil(DictationContextCapture.resolvedSurroundingText(
+                before: nil, selected: "", after: nil, fullValue: "apples",
+                selectedRange: range
+            ))
+        }
+    }
+
+    func testActualEmptyFieldRemainsAValidSnapshot() {
+        let snapshot = DictationContextCapture.resolvedSurroundingText(
+            before: "", selected: "", after: "", fullValue: nil,
+            selectedRange: CFRange(location: 0, length: 0)
+        )
+        XCTAssertEqual(snapshot?.before, "")
+        XCTAssertEqual(snapshot?.after, "")
+    }
+
+    func testRecoveredGroceryCursorFormatsAssemblyAIOutput() {
+        let before = "I need to buy some groceries: apples, bananas, oranges, "
+        let after = "and some sourdough starter."
+        let snapshot = DictationContextCapture.resolvedSurroundingText(
+            before: nil, selected: "", after: nil, fullValue: before + after,
+            selectedRange: CFRange(location: before.utf16.count, length: 0)
+        )
+        let context = makeContext(category: .other, before: snapshot?.before, after: snapshot?.after)
+        let output = TextInserter().preparedTextForInsertion(
+            "Tangerines.", targetBundleIdentifier: "com.openai.codex", targetProcessIdentifier: 42,
+            context: context, style: .formal, knownTerms: []
+        )
+        XCTAssertTrue(context.continuesExistingSentence)
+        XCTAssertEqual(output, "tangerines ")
+        XCTAssertTrue(AssemblyAIEngine.llmInstruction(
+            customInstruction: "", context: context, shareSurroundingText: false, style: .formal
+        ).contains("Do not add terminal sentence punctuation"))
+    }
+
+    func testMidSentenceInsertionWithinBulletUsesFragmentFormatting() {
+        let output = TextInserter.contextualizedForInsertion(
+            "Tangerines.",
+            context: makeContext(category: .other, before: "- apples, oranges, ", after: "and bananas"),
+            style: .formal
+        )
+        XCTAssertEqual(output, "tangerines ")
+    }
+
+    func testNewListItemIsNotMisclassifiedAsMidSentence() {
+        let context = makeContext(category: .other, before: "- apples\n- ", after: "")
+        XCTAssertFalse(context.continuesExistingSentence)
+    }
+
+    func testNativeBulletInsertionMatchesCapitalizedNeighborsWithoutExtraSpace() {
+        let context = makeContext(
+            category: .other,
+            before: "I need to buy:\n• Apples\n• Bananas\n•",
+            after: "\n• Oranges\n• Flowers"
+        )
+        XCTAssertFalse(context.continuesExistingSentence)
+        for transcript in ["Strawberries.", "strawberries.", " strawberries "] {
+            XCTAssertEqual(TextInserter.contextualizedForInsertion(
+                transcript, context: context, style: .formal
+            ), "Strawberries")
+        }
+    }
+
+    func testMarkdownAndNumberedListInsertionKeepsExistingIndentation() {
+        for marker in ["- ", "* ", "+ ", "1. ", "2) ", "  •\t"] {
+            let context = makeContext(
+                category: .other, before: "\(marker)Apples\n\(marker)Bananas\n\(marker)",
+                after: "\n\(marker)Oranges"
+            )
+            XCTAssertFalse(context.continuesExistingSentence)
+            XCTAssertEqual(TextInserter.contextualizedForInsertion(
+                "strawberries.", context: context, style: .formal
+            ), "Strawberries", marker)
+        }
+    }
+
+    func testListInsertionRecognizesUnicodeParagraphBoundaries() {
+        for separator in ["\r\n", "\u{2028}", "\u{2029}"] {
+            let context = makeContext(
+                category: .other, before: "• Apples\(separator)• Bananas\(separator)•",
+                after: "\(separator)• Oranges"
+            )
+            XCTAssertEqual(TextInserter.contextualizedForInsertion(
+                "strawberries.", context: context, style: .formal
+            ), "Strawberries")
+        }
+    }
+
+    func testLowercaseListKeepsItsExistingStyle() {
+        let context = makeContext(category: .other, before: "- apples\n- bananas\n- ", after: "\n- oranges")
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "Strawberries.", context: context, style: .formal
+        ), "strawberries")
+    }
+
+    func testPunctuatedListKeepsItsPeriod() {
+        let context = makeContext(category: .other, before: "- Buy apples.\n- ", after: "\n- Buy oranges.")
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "Buy strawberries.", context: context, style: .formal
+        ), "Buy strawberries.")
+    }
+
+    func testListFormattingDoesNotChangeMixedCaseBrand() {
+        let context = makeContext(category: .other, before: "• MacBook\n•", after: "\n• AirPods")
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "iPhone.", context: context, style: .formal
+        ), "iPhone")
+    }
+
+    func testInsertionWithinListItemStillUsesMidSentenceSpacingAndCasing() {
+        let context = makeContext(category: .other, before: "• Buy", after: " apples\n• Oranges")
+        XCTAssertTrue(context.continuesExistingSentence)
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "Fresh.", context: context, style: .formal
+        ), " fresh")
+    }
+
+    func testListRulesReachAssemblyAIWithoutSharingListContents() {
+        let context = makeContext(category: .other, before: "• Apples\n•", after: "\n• Oranges")
+        let provider = context.postProcessingContext(style: .formal, includeCapturedText: false)
+        XCTAssertEqual(provider.cursorPlacement, .listItemStart)
+        XCTAssertNil(provider.textBeforeCursor)
+        XCTAssertNil(provider.textAfterCursor)
+        XCTAssertTrue(provider.instructions.contains("start an ordinary word with uppercase"))
+        let prompt = AssemblyAIEngine.llmInstruction(
+            customInstruction: "", context: context, shareSurroundingText: false, style: .formal
+        )
+        XCTAssertTrue(prompt.contains("start an ordinary word with uppercase"))
+        XCTAssertTrue(prompt.contains("Do not add a final period to this item"))
+        XCTAssertFalse(prompt.contains("The insertion is inside an existing sentence"))
+        XCTAssertFalse(prompt.contains("Apples"))
+    }
+
+    func testLastListItemMatchesItsPreviousSibling() {
+        let context = makeContext(category: .other, before: "• Apples\n•", after: "")
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "strawberries.", context: context, style: .formal
+        ), "Strawberries")
+        let sentences = makeContext(category: .other, before: "• Buy apples.\n•", after: "")
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "buy strawberries.", context: sentences, style: .casual
+        ), "Buy strawberries.")
+    }
+
+    func testConflictingNeighborStylesDoNotForceLowercase() {
+        let context = makeContext(category: .other, before: "• Apples\n•", after: "\n• oranges")
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "Strawberries.", context: context, style: .formal
+        ), "Strawberries")
+    }
+
+    func testParentListDoesNotSupplyNestedItemStyle() {
+        let context = makeContext(category: .other, before: "• groceries\n  •", after: "\n• flowers")
+        XCTAssertNil(context.listItemInsertion?.capitalization)
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "Strawberries", context: context, style: .formal
+        ), "Strawberries")
+    }
+
+    func testListStylePreservesAbbreviationsAndMultipleSentences() {
+        let context = makeContext(category: .other, before: "• Apples\n•", after: "\n• Oranges")
+        for text in ["U.S.", "Buy strawberries. Make sure they are fresh."] {
+            XCTAssertEqual(TextInserter.contextualizedForInsertion(
+                text, context: context, style: .formal
+            ), text)
+        }
+    }
+
+    func testConfirmedListConventionAppliesToEveryProviderPathAndPhraseLength() throws {
+        let phrases = [
+            ("strawberries.", "Strawberries"),
+            ("Sourdough starter.", "Sourdough starter"),
+            ("Fresh sourdough starter from the local bakery.", "Fresh sourdough starter from the local bakery"),
+            ("A large bag of fresh vegetables from the local market for the family dinner that we are planning to cook together on Sunday.",
+             "A large bag of fresh vegetables from the local market for the family dinner that we are planning to cook together on Sunday"),
+            ("2.5 kilograms of flour.", "2.5 kilograms of flour"),
+            ("“Fresh bread.”", "“Fresh bread”"),
+            ("iPhone charger.", "iPhone charger"),
+            ("U.S.", "U.S."),
+            ("Bread...", "Bread..."),
+            ("Really fresh bread!", "Really fresh bread!"),
+            ("Buy bread. Check that it is fresh.", "Buy bread. Check that it is fresh."),
+            ("Acme Inc.", "Acme Inc.")
+        ]
+        var structural = makeContext(category: .other, before: "ApplesBananas", after: "OrangesFlowers")
+        structural.capturedListItemInsertion = try XCTUnwrap(DictationListInsertion.emptyStructuralItem(
+            itemText: "", previousItemText: "Bananas", nextItemText: "Oranges"
+        ))
+        let literal = makeContext(category: .other, before: "- Apples\n- Bananas\n- ", after: "\n- Oranges")
+        for context in [structural, literal] {
+            for (input, expected) in phrases {
+                // Test raw text, polished text, and a polished plan with wrong
+                // boundary spaces through the production insertion entry point.
+                for mode in 0..<3 {
+                    let plan = mode == 2 ? ModelInsertionPlan(text: input, spaceBefore: true, spaceAfter: true) : nil
+                    XCTAssertEqual(TextInserter().preparedTextForInsertion(
+                        input, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+                        context: context, style: .formal, knownTerms: ["Acme Inc."],
+                        modelInsertionPlan: plan, preserveModelFormatting: mode > 0
+                    ), expected, "mode=\(mode), input=\(input)")
+                }
+            }
+        }
+    }
+
+    func testModelListPlanRespectsLowercasePunctuatedAndUncertainNeighbors() {
+        for (before, after, input, expected) in [
+            ("- apples\n- ", "\n- oranges", "Sourdough starter.", "sourdough starter"),
+            ("- Buy apples.\n- ", "\n- Buy oranges.", "Buy sourdough starter.", "Buy sourdough starter."),
+            ("- Apples\n- ", "\n- Buy oranges.", "Sourdough starter.", "Sourdough starter."),
+            ("- ", "", "Sourdough starter.", "Sourdough starter.")
+        ] {
+            XCTAssertEqual(TextInserter().preparedTextForInsertion(
+                input, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+                context: makeContext(category: .other, before: before, after: after),
+                style: .formal, knownTerms: [],
+                modelInsertionPlan: ModelInsertionPlan(text: input, spaceBefore: true, spaceAfter: true),
+                preserveModelFormatting: true
+            ), expected)
+        }
+    }
+
+    func testEnumeratedItemsUseCapturedPlainTextMarkers() {
+        for (before, after, expected) in [
+            ("- Apples\n- ", "\n- Oranges", "Tangerines\n- Blueberries"),
+            ("  * Apples\n  * ", "", "Tangerines\n  * Blueberries"),
+            ("8) Apples\n9) ", "", "Tangerines\n10) Blueberries"),
+            ("1. Apples\n2. ", "", "Tangerines\n3. Blueberries")
+        ] {
+            let text = "tangerines.\nblueberries."
+            XCTAssertEqual(TextInserter().preparedTextForInsertion(
+                text, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+                context: makeContext(category: .other, before: before, after: after),
+                style: .original, knownTerms: [],
+                modelInsertionPlan: ModelInsertionPlan(text: text, spaceBefore: true, spaceAfter: true),
+                preserveModelFormatting: true
+            ), expected)
+        }
+    }
+
+    func testEnumeratedRichListItemsKeepNativeMarkersAndFormatEveryItem() throws {
+        var context = makeContext(category: .other, before: "ApplesBananas", after: "OrangesFlowers")
+        context.capturedListItemInsertion = try XCTUnwrap(DictationListInsertion.emptyStructuralItem(
+            itemText: "", previousItemText: "Bananas", nextItemText: "Oranges"
+        ))
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "tangerines.\nblueberries.\nsourdough starter.", context: context, style: .original,
+            preserveModelFormatting: true
+        ), "Tangerines\nBlueberries\nSourdough starter")
+    }
+
+    func testEnumeratedInlineItemsUseCommasAndPreserveNames() {
+        let context = makeContext(category: .other, before: "Guests: Alex,", after: " Jordan, and Sam.")
+        let text = "Sarah.\nTaylor."
+        XCTAssertEqual(TextInserter().preparedTextForInsertion(
+            text, targetBundleIdentifier: nil, targetProcessIdentifier: 42, context: context,
+            style: .original, knownTerms: ["Sarah", "Taylor"],
+            modelInsertionPlan: ModelInsertionPlan(text: text, spaceBefore: false, spaceAfter: true),
+            preserveModelFormatting: true
+        ), " Sarah, Taylor,")
+    }
+
+    func testEnumeratedInlineItemsCanAppendAtEndOfSeries() throws {
+        let plan = try XCTUnwrap(ModelInsertionPlan.decode(
+            #"{"items":["Tangerines", "Blueberries"],"space_before":false,"space_after":false}"#
+        ))
+        XCTAssertEqual(TextInserter().preparedTextForInsertion(
+            plan.text, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+            context: makeContext(category: .other, before: "Fruit: apples, bananas,", after: ""),
+            style: .original, knownTerms: [], modelInsertionPlan: plan, preserveModelFormatting: true
+        ), " tangerines, blueberries")
+    }
+
+    func testEnumeratedItemsMatchConsistentlyPunctuatedNeighbors() {
+        let context = makeContext(category: .other, before: "- Buy apples.\n- ", after: "\n- Buy oranges.")
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "Buy tangerines\nBuy blueberries.\nReally fresh fruit!", context: context,
+            style: .original, preserveModelFormatting: true
+        ), "Buy tangerines.\n- Buy blueberries.\n- Really fresh fruit!")
+    }
+
+    func testListConventionIsNotBorrowedFromAnotherProcess() {
+        let input = "Sourdough starter."
+        XCTAssertEqual(TextInserter().preparedTextForInsertion(
+            input, targetBundleIdentifier: nil, targetProcessIdentifier: 99,
+            context: makeContext(category: .other, before: "- Apples\n- ", after: "\n- Oranges"),
+            style: .formal, knownTerms: [],
+            modelInsertionPlan: ModelInsertionPlan(text: input, spaceBefore: false, spaceAfter: false),
+            preserveModelFormatting: true
+        ), input)
+    }
+
+    func testStructuralListOverridesFlattenedTextWithNoBulletOrLineBreaks() throws {
+        // Some rich editors expose the entire list as concatenated plain text.
+        // Cursor list ancestry, not that string's last letter, sets the boundary.
+        let list = try XCTUnwrap(DictationListInsertion.emptyStructuralItem(
+            itemText: "\n", previousItemText: "• Bananas\n\n", nextItemText: "• Oranges"
+        ))
+        var context = makeContext(category: .other, before: "ApplesBananas", after: "OrangesFlowers")
+        context.capturedListItemInsertion = list
+        XCTAssertFalse(context.continuesExistingSentence)
+        XCTAssertEqual(context.cursorPlacement, .listItemStart)
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "strawberries.", context: context, style: .formal
+        ), "Strawberries")
+        XCTAssertNotNil(context.postProcessingContext(style: .formal, includeCapturedText: false).listItemInsertion)
+    }
+
+    func testStructuralListMatchesMarkerFreeNeighborText() throws {
+        let list = try XCTUnwrap(DictationListInsertion.emptyStructuralItem(
+            itemText: "", previousItemText: "Bananas", nextItemText: "Oranges"
+        ))
+        XCTAssertEqual(list.capitalization, .uppercase)
+        XCTAssertTrue(list.omitsFinalPeriod)
+        XCTAssertTrue(list.isEmptyStructuralItem)
+    }
+
+    func testNonemptyStructuralItemDoesNotBecomeAnEmptyListBoundary() {
+        for text in ["Bananas", "• Buy apples", "\nSomething\n", "• \nBuy apples"] {
+            XCTAssertNil(DictationListInsertion.emptyStructuralItem(
+                itemText: text, previousItemText: "Bananas", nextItemText: "Oranges"
+            ))
+        }
+    }
+
+    func testBlankProseIsNotGuessedToBeAList() {
+        let context = makeContext(category: .other, before: "Paragraph one\n\n", after: "\nParagraph two")
+        XCTAssertNil(context.listItemInsertion)
+    }
+
+    func testModelListPlanSurvivesIncorrectMidSentenceHeuristic() throws {
+        let context = makeContext(category: .other, before: "ApplesBananas", after: "OrangesFlowers")
+        XCTAssertTrue(context.continuesExistingSentence)
+        let plan = try XCTUnwrap(ModelInsertionPlan.decode(#"{"text":"Strawberries","space_before":false,"space_after":false}"#))
+        XCTAssertEqual(TextInserter().preparedTextForInsertion(
+            plan.text, targetBundleIdentifier: "com.example.editor", targetProcessIdentifier: 42,
+            context: context, style: .formal, knownTerms: [],
+            modelInsertionPlan: plan, preserveModelFormatting: true
+        ), "Strawberries")
+    }
+
+    func testModelSentencePlanPreservesNecessaryBoundarySpaces() throws {
+        let plan = try XCTUnwrap(ModelInsertionPlan.decode(#"{"text":"tangerines,","space_before":true,"space_after":false}"#))
+        XCTAssertEqual(TextInserter().preparedTextForInsertion(
+            plan.text, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+            context: makeContext(category: .other, before: "apples,", after: " and oranges"),
+            style: .formal, knownTerms: [], modelInsertionPlan: plan, preserveModelFormatting: true
+        ), " tangerines,")
+    }
+
+    func testStandaloneModelPlanIsCorrectedAtCapturedInlineCommaBoundary() throws {
+        let plan = try XCTUnwrap(ModelInsertionPlan.decode(#"{"text":"Tangerines.","space_before":false,"space_after":false}"#))
+        let before = "I need to buy some groceries: apples, bananas,"
+        let after = " oranges, and some sourdough starter."
+        let insertion = TextInserter().preparedTextForInsertion(
+            plan.text, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+            context: makeContext(category: .other, before: before, after: after),
+            style: .original, knownTerms: [], modelInsertionPlan: plan, preserveModelFormatting: true
+        )
+        XCTAssertEqual(before + insertion + after,
+            "I need to buy some groceries: apples, bananas, tangerines, oranges, and some sourdough starter.")
+    }
+
+    func testCommaOnPreviousListLineDoesNotOverrideModelListPlan() throws {
+        let plan = try XCTUnwrap(ModelInsertionPlan.decode(#"{"text":"Strawberries","space_before":false,"space_after":false}"#))
+        for (before, after) in [("Apples, bananas,\n", "\nOranges"), ("Apples, bananas,", "\nOranges")] {
+            XCTAssertEqual(TextInserter().preparedTextForInsertion(
+                plan.text, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+                context: makeContext(category: .other, before: before, after: after),
+                style: .original, knownTerms: [], modelInsertionPlan: plan, preserveModelFormatting: true
+            ), "Strawberries")
+        }
+    }
+
+    func testRecoveredInlineContextCorrectsPolishedTextWithoutModelPlan() {
+        XCTAssertEqual(TextInserter().preparedTextForInsertion(
+            "Tangerines.", targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+            context: makeContext(category: .other, before: "apples, bananas,", after: " oranges, and bread."),
+            style: .original, knownTerms: [], preserveModelFormatting: true
+        ), " tangerines,")
+    }
+
+    func testInlineModelCorrectionPreservesKnownProperName() throws {
+        let plan = try XCTUnwrap(ModelInsertionPlan.decode(#"{"text":"Sarah.","space_before":false,"space_after":false}"#))
+        XCTAssertEqual(TextInserter().preparedTextForInsertion(
+            plan.text, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
+            context: makeContext(category: .other, before: "Guests: Alex,", after: " Jordan, and Sam."),
+            style: .original, knownTerms: ["Sarah"], modelInsertionPlan: plan, preserveModelFormatting: true
+        ), " Sarah,")
+    }
+
+    func testPlainPolishedResponseIsNotLowercasedByInsertionCode() {
+        XCTAssertEqual(TextInserter.contextualizedForInsertion(
+            "Strawberries", context: makeContext(category: .other, before: "Bananas", after: "Oranges"),
+            style: .formal, preserveModelFormatting: true
+        ), " Strawberries ")
     }
 
     func testMidSentenceInsertionPreservesVisibleProperNoun() {

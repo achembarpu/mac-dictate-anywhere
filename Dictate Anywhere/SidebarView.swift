@@ -17,7 +17,7 @@ struct SidebarView: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 20)
 
-            ForEach(SidebarPage.allCases) { page in
+            ForEach(visiblePages) { page in
                 DSNavItem(
                     title: page.title,
                     systemImage: page.icon,
@@ -50,6 +50,10 @@ struct SidebarView: View {
 
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    private var visiblePages: [SidebarPage] {
+        SidebarPage.allCases.filter { $0.isVisible(for: appState.settings.engineChoice) }
     }
 
     private var statusText: String {

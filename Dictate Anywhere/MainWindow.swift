@@ -13,6 +13,7 @@ enum SidebarPage: String, CaseIterable, Identifiable {
     case shortcuts
     case textOverlay
     case aiPostProcessing
+    case internalPrompts
     case history
     case about
 
@@ -25,6 +26,7 @@ enum SidebarPage: String, CaseIterable, Identifiable {
         case .shortcuts: return "Shortcuts"
         case .textOverlay: return "Text & Overlay"
         case .aiPostProcessing: return "Transcript Cleanup"
+        case .internalPrompts: return "Internal Prompts"
         case .history: return "History"
         case .about: return "About"
         }
@@ -37,8 +39,20 @@ enum SidebarPage: String, CaseIterable, Identifiable {
         case .shortcuts: return "command"
         case .textOverlay: return "textformat"
         case .aiPostProcessing: return "wand.and.stars"
+        case .internalPrompts: return "text.bubble"
         case .history: return "clock.arrow.circlepath"
         case .about: return "info.circle"
+        }
+    }
+
+    func isVisible(for engine: TranscriptionEngineChoice) -> Bool {
+        switch self {
+        case .aiPostProcessing:
+            return engine != .assemblyAI
+        case .internalPrompts:
+            return engine.supportsInternalPromptCustomization
+        default:
+            return true
         }
     }
 }
@@ -103,9 +117,7 @@ struct MainWindow: View {
 
                 if !appState.activeEngine.isReady && !appState.isPreparingEngine {
                     WarningBanner(
-                        message: appState.settings.engineChoice == .appleSpeech
-                            ? "Apple Speech needs to finish its on-device setup before you can dictate."
-                            : "A speech model is required to start dictating. Download one now.",
+                        message: modelSetupMessage,
                         buttonTitle: "Set Up"
                     ) {
                         appState.selectedPage = .models
@@ -132,6 +144,17 @@ struct MainWindow: View {
         )
     }
 
+    private var modelSetupMessage: String {
+        switch appState.settings.engineChoice {
+        case .appleSpeech:
+            return "Apple Speech needs to finish its on-device setup before you can dictate."
+        case .assemblyAI:
+            return "Add an AssemblyAI API key before you can dictate."
+        case .parakeet:
+            return "A speech model is required to start dictating. Download one now."
+        }
+    }
+
     @ViewBuilder
     private var detailView: some View {
         switch appState.selectedPage {
@@ -145,6 +168,8 @@ struct MainWindow: View {
             TextOverlayView()
         case .aiPostProcessing:
             AIPostProcessingView()
+        case .internalPrompts:
+            InternalPromptsView()
         case .history:
             TranscriptHistoryView()
         case .about:

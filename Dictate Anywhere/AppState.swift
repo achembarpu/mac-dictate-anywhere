@@ -63,10 +63,12 @@ final class AppState {
     let audioDeviceManager = AudioDeviceManager()
     let parakeetEngine = ParakeetEngine()
     let appleSpeechEngine = AppleSpeechEngine()
+    let assemblyAIEngine = AssemblyAIEngine()
     let s1MiniModelManager = S1MiniModelManager()
     let inputSourceMonitor = InputSourceMonitor()
     let recoveryStore: DictationRecoveryStore
     private var recoveryCapture: RecoveryAudioCapture?
+    private var preserveSessionOnCancellation = false
     private var completedRecognitionTranscript: String?
     private var processingTask: Task<Void, Never>?
     private var processingOperationID: UUID?
@@ -136,6 +138,8 @@ final class AppState {
             return parakeetEngine
         case .appleSpeech:
             return AppleSpeechEngine.isSupported ? appleSpeechEngine : parakeetEngine
+        case .assemblyAI:
+            return assemblyAIEngine
         }
     }
 
@@ -270,6 +274,7 @@ final class AppState {
         completedRecognitionTranscript = nil
         engine.recoveryCapture = nil
         engine.setSessionContextualVocabulary([])
+        engine.setSessionDictationContext(nil)
         clearEndOfUtteranceHandler(for: engine)
         sessionEngine = nil
         sessionHotkeyMode = nil
@@ -299,7 +304,8 @@ final class AppState {
         await refreshAppleSpeechAssetState()
         guard !isShuttingDown else { return }
         inputSourceMonitor.startMonitoring()
-        if settings.inputSourceAutoSwitchEnabled,
+        if settings.engineChoice != .assemblyAI,
+           settings.inputSourceAutoSwitchEnabled,
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
             await enqueueInputSourceProfileApply(for: inputSourceID).value
         }
@@ -356,6 +362,8 @@ final class AppState {
                let fallback = appleSpeechSupportedLanguages.first {
                 settings.appleSpeechLanguage = fallback
             }
+            settings.legacyAppleSpeechMigrationPending = false
+        case .assemblyAI:
             settings.legacyAppleSpeechMigrationPending = false
         }
 
@@ -417,6 +425,9 @@ final class AppState {
         enginePreparationError = nil
         settings.engineChoice = choice
         settings.userHasChosenEngine = true
+        if !selectedPage.isVisible(for: choice) {
+            selectedPage = .models
+        }
         await prepareActiveEngine()
     }
 
@@ -459,6 +470,7 @@ final class AppState {
 
     func applyInputSourceProfile(for inputSourceID: String, showLoadingOverlay: Bool = false) async {
         guard !isShuttingDown else { return }
+        guard settings.engineChoice != .assemblyAI else { return }
         // Looked up (and, for Apple Speech, awaited) before the idle guard so
         // no suspension point lands between the guard and the settings
         // writes below — an in-flight recording-start guard check must never
@@ -517,6 +529,8 @@ final class AppState {
                 if showLoadingOverlay { overlay.show(state: .preparingModel(name: "Apple Speech")) }
                 await handleAppleSpeechLanguageChange(language)
                 if showLoadingOverlay { overlay.hide(afterDelay: 0) }
+            case .assemblyAI:
+                return
             }
             settings.restoreVocabularyModeAfterAutoSwitchIfPending()
 
@@ -551,6 +565,8 @@ final class AppState {
                 settings.appleSpeechLanguage = mapping.language
                 await appleSpeechEngine.invalidatePreparedSession()
                 await handleEngineSelectionChange(.appleSpeech)
+            case .assemblyAI:
+                break
             }
             if showLoadingOverlay { overlay.hide(afterDelay: 0) }
         }
@@ -648,7 +664,8 @@ final class AppState {
             return // The permission gesture must never become a recording gesture.
         }
         guard !isShuttingDown else { return }
-        if settings.inputSourceAutoSwitchEnabled,
+        if settings.engineChoice != .assemblyAI,
+           settings.inputSourceAutoSwitchEnabled,
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
             // Backstop: the eager pre-warm usually already did this; going
             // through the queue serializes against an apply still in flight.
@@ -688,6 +705,13 @@ final class AppState {
                 status = .idle
                 return
             }
+        case .assemblyAI:
+            guard engine.isReady else {
+                logger.warning("startDictation: AssemblyAI API key is missing")
+                status = .error("Add an AssemblyAI API key in Speech Model settings before dictating.")
+                status = .idle
+                return
+            }
         }
         guard !isShuttingDown else { return }
         await captureInsertionTargetAppAndContext()
@@ -698,6 +722,7 @@ final class AppState {
     private func beginRecording(engine: TranscriptionEngine, mode: HotkeyMode?) async {
         guard !isShuttingDown else { return }
         engine.setSessionContextualVocabulary(sessionDictationContext?.lexicalHints ?? [])
+        engine.setSessionDictationContext(sessionDictationContext)
 
         isTransitioning = true
         pendingHoldRelease = false
@@ -714,6 +739,7 @@ final class AppState {
             await discardSessionRecovery()
             clearEndOfUtteranceHandler(for: engine)
             engine.setSessionContextualVocabulary([])
+            engine.setSessionDictationContext(nil)
             sessionEngine = nil
             sessionHotkeyMode = nil
             activeRecordingStartupID = nil
@@ -814,6 +840,7 @@ final class AppState {
             insertionTargetApp = nil
             sessionDictationContext = nil
             engine.setSessionContextualVocabulary([])
+            engine.setSessionDictationContext(nil)
             volumeController.restoreMicrophoneVolume()
             if settings.muteSystemAudioDuringRecordingEnabled {
                 volumeController.restoreAfterRecording()
@@ -874,6 +901,14 @@ final class AppState {
 
         // Get final transcript
         let newTranscript = await engine.stopRecording()
+        let usesAssemblyAI = engine === assemblyAIEngine
+        let modelInsertionPlan = usesAssemblyAI && transcriptPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? assemblyAIEngine.lastInsertionPlan : nil
+        let preserveModelFormatting = usesAssemblyAI && assemblyAIEngine.lastResultWasPolished
+        if let error = engine.lastTranscriptionError {
+            await handleTranscriptionFailure(error, engine: engine)
+            return
+        }
         let transcript = CancelledDictation.joining(transcriptPrefix, newTranscript)
         // A cancelled decoder may return no new result. The restored prefix
         // alone must not mark the newest audio as already fully transcribed.
@@ -881,13 +916,21 @@ final class AppState {
             ? nil : transcript
         guard !Task.isCancelled else { return }
         engine.setSessionContextualVocabulary([])
+        engine.setSessionDictationContext(nil)
         clearEndOfUtteranceHandler(for: engine)
         sessionHotkeyMode = nil
 
-        // Apply filler word removal
-        let cleaned = settings.removeFillerWords(from: transcript).trimmingCharacters(in: .whitespacesAndNewlines)
-        let liveFallback = settings.removeFillerWords(from: currentTranscript).trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalText = liveFallback.count > cleaned.count ? liveFallback : cleaned
+        // AssemblyAI already returns the user-selected polished or verbatim
+        // result. Local engines retain the existing filler/live-preview path.
+        let finalText: String
+        if usesAssemblyAI {
+            finalText = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            let cleaned = settings.removeFillerWords(from: transcript).trimmingCharacters(in: .whitespacesAndNewlines)
+            let liveFallback = settings.removeFillerWords(from: currentTranscript).trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            finalText = liveFallback.count > cleaned.count ? liveFallback : cleaned
+        }
 
         guard !finalText.isEmpty else {
             currentTranscript = ""
@@ -917,9 +960,10 @@ final class AppState {
         // Transcript post-processing
         var processedText = finalText
         logger.info(
-            "postProcessing: mode=\(self.settings.transcriptPostProcessingMode.rawValue, privacy: .public), speechModel=\(self.settings.parakeetModelChoice.rawValue, privacy: .public), inputChars=\(finalText.count, privacy: .public)"
+            "postProcessing: mode=\(self.settings.transcriptPostProcessingMode.rawValue, privacy: .public), speechEngine=\(self.settings.engineChoice.rawValue, privacy: .public), inputChars=\(finalText.count, privacy: .public)"
         )
-        switch settings.transcriptPostProcessingMode {
+        let postProcessingMode = usesAssemblyAI ? TranscriptPostProcessingMode.none : settings.transcriptPostProcessingMode
+        switch postProcessingMode {
         case .none:
             break
         case .fluidAudioVocabulary:
@@ -1030,8 +1074,8 @@ final class AppState {
         }
 
         guard !Task.isCancelled else { return }
-        if settings.transcriptPostProcessingMode != .none,
-           settings.transcriptPostProcessingMode != .fluidAudioVocabulary {
+        if postProcessingMode != .none,
+           postProcessingMode != .fluidAudioVocabulary {
             processedText = normalizePostProcessedTranscript(processedText)
         }
         logger.info(
@@ -1050,7 +1094,8 @@ final class AppState {
         // Insert text
         NotificationCenter.default.post(name: .dismissMenusForPaste, object: nil)
         await reactivateInsertionTargetIfNeeded()
-        let insertionStyle = sessionDictationContext.map { settings.dictationWritingStyle(for: $0.category) }
+        let insertionContext = await insertionContextForDelivery()
+        let insertionStyle = insertionContext.map { settings.dictationWritingStyle(for: $0.category) }
         let result: TextInsertionResult
         if let transcriptDeliveryOverride {
             result = await transcriptDeliveryOverride(processedText)
@@ -1061,8 +1106,12 @@ final class AppState {
                 && insertionTargetApp?.isTerminated == false
                 && NSWorkspace.shared.frontmostApplication?.processIdentifier == insertionTargetApp?.processIdentifier)
             result = await textInserter.insertText(
-                processedText, context: sessionDictationContext, style: insertionStyle,
-                knownTerms: settings.customVocabulary, pasteAutomatically: canPaste
+                processedText, context: insertionContext, style: insertionStyle,
+                knownTerms: settings.customVocabulary,
+                targetProcessIdentifier: insertionTargetApp?.processIdentifier,
+                pasteAutomatically: canPaste,
+                modelInsertionPlan: modelInsertionPlan,
+                preserveModelFormatting: preserveModelFormatting
             )
         }
         insertionTargetApp = nil
@@ -1091,6 +1140,50 @@ final class AppState {
         status = .idle
     }
 
+    private func handleTranscriptionFailure(_ message: String, engine: TranscriptionEngine) async {
+        var presentedMessage = message
+        if let capture = recoveryCapture {
+            do {
+                let saved = try await recoveryStore.preserve(
+                    capture,
+                    preview: currentTranscript,
+                    completedTranscript: nil,
+                    transcriptPrefix: transcriptPrefix.isEmpty ? nil : transcriptPrefix,
+                    previousDuration: previousRecordingDuration,
+                    targetBundleIdentifier: insertionTargetApp?.bundleIdentifier
+                        ?? continuationTargetBundleIdentifier
+                )
+                if saved?.hasAudio == true {
+                    presentedMessage += " The recording is available in History."
+                }
+            } catch {
+                recoveryStore.errorMessage =
+                    "\(message) The recovery copy could not be saved: \(error.localizedDescription)"
+            }
+        }
+        finishContinuation(removingSource: false)
+        recoveryCapture = nil
+        completedRecognitionTranscript = nil
+        engine.recoveryCapture = nil
+        engine.setSessionContextualVocabulary([])
+        engine.setSessionDictationContext(nil)
+        clearEndOfUtteranceHandler(for: engine)
+        sessionEngine = nil
+        sessionHotkeyMode = nil
+        insertionTargetApp = nil
+        sessionDictationContext = nil
+        currentTranscript = ""
+
+        volumeController.restoreMicrophoneVolume()
+        if settings.muteSystemAudioDuringRecordingEnabled {
+            try? await Task.sleep(for: .milliseconds(200))
+            volumeController.restoreAfterRecording()
+        }
+        overlay.hide(afterDelay: 0)
+        recoveryStore.errorMessage = recoveryStore.errorMessage ?? presentedMessage
+        status = .idle
+    }
+
     func cancelDictation() async {
         guard canCancelDictation else { return }
 
@@ -1113,7 +1206,7 @@ final class AppState {
         processingOperationID = nil
         processingTask = nil
         await engine.cancel()
-        if let capture = recoveryCapture {
+        if let capture = recoveryCapture, preserveSessionOnCancellation {
             do {
                 let saved = try await recoveryStore.preserve(
                     capture, preview: preview, completedTranscript: completedRecognitionTranscript,
@@ -1124,11 +1217,16 @@ final class AppState {
                 finishContinuation(removingSource: saved != nil && saved?.captureError == nil)
             } catch { recoveryStore.errorMessage = "The recovery copy could not be saved: \(error.localizedDescription)" }
         }
+        if let capture = recoveryCapture, !preserveSessionOnCancellation {
+            do { try await recoveryStore.discard(capture) }
+            catch { recoveryStore.errorMessage = error.localizedDescription }
+        }
         finishContinuation(removingSource: false)
         recoveryCapture = nil
         engine.recoveryCapture = nil
         completedRecognitionTranscript = nil
         engine.setSessionContextualVocabulary([])
+        engine.setSessionDictationContext(nil)
         clearEndOfUtteranceHandler(for: engine)
         sessionEngine = nil
         sessionHotkeyMode = nil
@@ -1177,9 +1275,13 @@ final class AppState {
     func prepareSessionRecovery(for engine: TranscriptionEngine) {
         // Continuing explicitly opts into retaining this existing session,
         // even if preservation has since been disabled for new dictations.
-        if settings.preserveCancelledSessions || continuingEntryID != nil {
-            do { recoveryCapture = try recoveryStore.beginCapture() }
-            catch { recoveryStore.errorMessage = "Audio recovery is unavailable for this recording: \(error.localizedDescription)" }
+        preserveSessionOnCancellation = settings.preserveCancelledSessions || continuingEntryID != nil
+        if preserveSessionOnCancellation || engine === assemblyAIEngine
+        {
+            do { recoveryCapture = try recoveryStore.beginCapture() } catch {
+                recoveryStore.errorMessage =
+                    "Audio recovery is unavailable for this recording: \(error.localizedDescription)"
+            }
         }
         engine.recoveryCapture = recoveryCapture
     }
@@ -1311,10 +1413,11 @@ final class AppState {
         // most post-processing settings.
         overlay.beginSession(targetProcessIdentifier: frontmost.processIdentifier)
 
-        // Only read the screen when a cleanup method exists that can use what
-        // we read. `none` and FluidAudio Vocabulary never see the context.
-        guard settings.dictationContextAwarenessEnabled,
-              settings.transcriptPostProcessingMode.usesDictationContext else {
+        // Only read the screen when the active speech or cleanup model can use
+        // what we read. Local `none` and FluidAudio Vocabulary never see it.
+        let activeModelUsesContext = settings.engineChoice == .assemblyAI
+            || settings.transcriptPostProcessingMode.usesDictationContext
+        guard settings.dictationContextAwarenessEnabled, activeModelUsesContext else {
             sessionDictationContext = nil
             return
         }
@@ -1361,6 +1464,42 @@ final class AppState {
         if app.activate() {
             try? await Task.sleep(for: .milliseconds(120))
         }
+    }
+
+    /// A target can transiently omit its selected-text range while dictation
+    /// starts. Retry only missing snapshots after the original app is active;
+    /// successful start-of-session snapshots remain the source of truth.
+    private func insertionContextForDelivery() async -> DictationContext? {
+        guard let captured = sessionDictationContext,
+              !captured.hasTextPositionSnapshot,
+              !captured.isSecureField,
+              !captured.isContextExcluded,
+              let target = insertionTargetApp,
+              !target.isTerminated else {
+            return sessionDictationContext
+        }
+
+        let processIdentifier = target.processIdentifier
+        let bundleIdentifier = target.bundleIdentifier
+        let appName = target.localizedName ?? bundleIdentifier ?? captured.appName
+        let rules = settings.dictationAppRules
+        let refreshed = await Task.detached(priority: .userInitiated) {
+            DictationContextCapture.capture(
+                processIdentifier: processIdentifier,
+                bundleIdentifier: bundleIdentifier,
+                appName: appName,
+                rules: rules
+            )
+        }.value
+
+        guard refreshed.hasTextPositionSnapshot else {
+            logger.warning(
+                "textInsertion: target context has no cursor snapshot; using non-contextual insertion"
+            )
+            return captured
+        }
+        logger.info("textInsertion: recovered cursor snapshot after target reactivation")
+        return refreshed
     }
 
     private func startAudioLevelPolling(engine: TranscriptionEngine) {

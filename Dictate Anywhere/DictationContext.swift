@@ -7,6 +7,7 @@
 
 import AppKit
 import Foundation
+import os
 
 enum DictationContextCategory: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
     case email
@@ -84,6 +85,7 @@ enum DictationCursorPlacement: String, Equatable, Sendable {
     case endOfText = "end_of_text"
     case betweenSentences = "between_sentences"
     case midSentence = "mid_sentence"
+    case listItemStart = "list_item_start"
     case replacingSelection = "replacing_selection"
 }
 
@@ -164,6 +166,8 @@ struct DictationContext: Equatable, Sendable {
     let textAfterCursor: String?
     let isSecureField: Bool
     let isContextExcluded: Bool
+    var capturedListItemInsertion: DictationListInsertion? = nil
+    var richTextContext: String? = nil
 
     var hasSurroundingText: Bool {
         [textBeforeCursor, selectedText, textAfterCursor]
@@ -175,10 +179,14 @@ struct DictationContext: Equatable, Sendable {
         textBeforeCursor != nil || selectedText != nil || textAfterCursor != nil
     }
 
+    var listItemInsertion: DictationListInsertion? {
+        capturedListItemInsertion ?? DictationListInsertion.infer(before: textBeforeCursor, after: textAfterCursor)
+    }
+
     /// True only when the retained cursor snapshot shows following or selected
     /// text and the nearest text on the left does not end a sentence/paragraph.
     var continuesExistingSentence: Bool {
-        guard let before = textBeforeCursor,
+        guard listItemInsertion == nil, let before = textBeforeCursor,
               !(textAfterCursor ?? "").isEmpty || !(selectedText ?? "").isEmpty,
               let lastNonWhitespaceIndex = before.lastIndex(where: { !$0.isWhitespace }) else {
             return false
@@ -195,6 +203,7 @@ struct DictationContext: Equatable, Sendable {
 
     var cursorPlacement: DictationCursorPlacement {
         if !(selectedText ?? "").isEmpty { return .replacingSelection }
+        if listItemInsertion != nil { return .listItemStart }
 
         let hasBefore = !(textBeforeCursor ?? "").isEmpty
         let hasAfter = !(textAfterCursor ?? "").isEmpty
@@ -232,7 +241,8 @@ struct DictationContext: Equatable, Sendable {
             fieldPurpose: fieldPurpose,
             textBeforeCursor: mayIncludeCapturedText ? textBeforeCursor : nil,
             selectedText: mayIncludeCapturedText ? selectedText : nil,
-            textAfterCursor: mayIncludeCapturedText ? textAfterCursor : nil
+            textAfterCursor: mayIncludeCapturedText ? textAfterCursor : nil,
+            listItemInsertion: isSecureField || isContextExcluded ? nil : listItemInsertion
         )
     }
 
@@ -286,6 +296,7 @@ struct DictationPostProcessingContext: Equatable, Sendable {
     let textBeforeCursor: String?
     let selectedText: String?
     let textAfterCursor: String?
+    var listItemInsertion: DictationListInsertion? = nil
 
     var instructions: String {
         var lines = [
@@ -301,36 +312,8 @@ struct DictationPostProcessingContext: Equatable, Sendable {
             "- Output only the cleaned transcript being inserted. Never repeat surrounding text."
         ]
 
-        if continuesExistingSentence {
-            lines.append(contentsOf: [
-                "- The insertion is inside an existing sentence. Start an ordinary leading word with lowercase, but preserve proper nouns, names, acronyms, and known terms.",
-                "- Do not add terminal sentence punctuation to this insertion. Let punctuation already adjacent to the cursor delimit it."
-            ])
-        }
-
-        if fieldPurpose == .searchQuery {
-            lines.append(contentsOf: [
-                "- The destination is a search or query field. Return concise query text, not sentence prose.",
-                "- Do not add a final period to the query. Preserve periods that are part of a term, number, filename, domain, or abbreviation.",
-                "- Do not force sentence capitalization. Preserve proper nouns, names, acronyms, and known terms."
-            ])
-        }
-
-        switch category {
-        case .email:
-            lines.append(contentsOf: [
-                "EMAIL LAYOUT:",
-                "- If the dictated text contains a greeting, put the greeting on its own line, followed by a blank line before the body.",
-                "- Split a multi-sentence or multi-topic email body into short, natural paragraphs. Do not force paragraph breaks into a short single-sentence email.",
-                "- If the dictated text contains a sign-off or signature, put a blank line before the sign-off and place the signature name on its own line when present.",
-                "- Never invent a greeting, sign-off, or signature. Never repeat one already present in the surrounding email.",
-                "- Preserve explicit paragraph, new-line, list, and email-layout intent from the dictation."
-            ])
-        case .workMessaging, .personalMessaging:
-            lines.append("- Keep a short message as one natural block unless the dictation clearly requests paragraphs or a list.")
-        case .other:
-            break
-        }
+        lines.append(contentsOf: insertionBoundaryInstructionLines)
+        lines.append(contentsOf: destinationInstructionLines)
 
         return lines.joined(separator: "\n")
     }
@@ -365,6 +348,45 @@ struct DictationPostProcessingContext: Equatable, Sendable {
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    private var insertionBoundaryInstructionLines: [String] {
+        var lines: [String] = []
+        if let listItemInsertion { lines.append(listItemInsertion.instructions) }
+        if continuesExistingSentence {
+            lines.append(contentsOf: [
+                "- The insertion is inside an existing sentence. Start an ordinary leading word with lowercase, but preserve proper nouns, names, acronyms, and known terms.",
+                "- Do not add terminal sentence punctuation to this insertion. Let punctuation already adjacent to the cursor delimit it."
+            ])
+        }
+        if fieldPurpose == .searchQuery {
+            lines.append(contentsOf: [
+                "- The destination is a search or query field. Return concise query text, not sentence prose.",
+                "- Do not add a final period to the query. Preserve periods that are part of a term, number, filename, domain, or abbreviation.",
+                "- Do not force sentence capitalization. Preserve proper nouns, names, acronyms, and known terms."
+            ])
+        }
+        return lines
+    }
+
+    private var destinationInstructionLines: [String] {
+        switch category {
+        case .email:
+            return [
+                "EMAIL LAYOUT:",
+                "- If the dictated text contains a greeting, put the greeting on its own line, followed by a blank line before the body.",
+                "- Split a multi-sentence or multi-topic email body into short, natural paragraphs. Do not force paragraph breaks into a short single-sentence email.",
+                "- If the dictated text contains a sign-off or signature, put a blank line before the sign-off and place the signature name on its own line when present.",
+                "- Never invent a greeting, sign-off, or signature. Never repeat one already present in the surrounding email.",
+                "- Preserve explicit paragraph, new-line, list, and email-layout intent from the dictation."
+            ]
+        case .workMessaging, .personalMessaging:
+            return [
+                "- Keep a short message as one natural block unless the dictation clearly requests paragraphs or a list."
+            ]
+        case .other:
+            return []
+        }
     }
 }
 
@@ -456,6 +478,10 @@ enum DictationContextClassifier {
 }
 
 enum DictationContextCapture {
+    private nonisolated static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
+        category: "DictationContext"
+    )
     private nonisolated static let maximumSurroundingCharacters = 600
     private nonisolated static let maximumMetadataCharacters = 300
 
@@ -482,9 +508,26 @@ enum DictationContextCapture {
         }
 
         let application = AXUIElementCreateApplication(processIdentifier)
+        // A cold editor can need longer to publish its accessibility tree than
+        // subsequent text reads. Keep the first app lookup bounded, but do not
+        // mistake its lazy initialization for a missing focused control.
+        AXUIElementSetMessagingTimeout(application, 1.0)
+        var focusedElement = focusedTextElement(in: application, processIdentifier: processIdentifier)
         AXUIElementSetMessagingTimeout(application, 0.25)
+        if focusedElement == nil, requestWebAccessibility(in: application) {
+            // Chromium debounces AXEnhancedUserInterface activation for two
+            // seconds. Poll focus within a bounded startup window; repeatedly
+            // setting the flag would restart that debounce. Once activated,
+            // subsequent captures take the normal fast path above.
+            let deadline = ProcessInfo.processInfo.systemUptime + 2.75
+            repeat {
+                Thread.sleep(forTimeInterval: 0.1)
+                focusedElement = focusedTextElement(in: application, processIdentifier: processIdentifier, logFailure: false)
+            } while focusedElement == nil && ProcessInfo.processInfo.systemUptime < deadline
+        }
 
-        guard let focusedElement = elementAttribute(kAXFocusedUIElementAttribute, from: application) else {
+        guard let focusedElement else {
+            logger.info("contextCapture: no focused control for target pid=\(processIdentifier)")
             let classification = DictationContextClassifier.classification(
                 bundleIdentifier: bundleIdentifier,
                 documentURL: nil,
@@ -552,8 +595,17 @@ enum DictationContextCapture {
             )
         }
 
-        let selectedRange = selectedTextRange(in: focusedElement)
-        let textSnapshot = selectedRange.flatMap { surroundingText(in: focusedElement, selectedRange: $0) }
+        let selectedRange = DictationFocusResolver.isTextInput(role: role)
+            ? selectedTextRange(in: focusedElement) : nil
+        let markerSnapshot = DictationFocusResolver.isTextInput(role: role)
+            ? DictationTextMarkerCapture.capture(in: focusedElement) : nil
+        let textSnapshot = markerSnapshot ?? selectedRange.flatMap { surroundingText(in: focusedElement, selectedRange: $0) }
+        let listInsertion = selectedRange.flatMap {
+            DictationRichListCapture.capture(in: focusedElement, selectedRange: $0)
+        }
+        let richText = markerSnapshot.map { $0.before + $0.selected + $0.after }
+            ?? selectedRange.flatMap { richTextContext(in: focusedElement, selectedRange: $0) }
+        logger.info("contextCapture: target pid=\(processIdentifier) role=\(role ?? "unknown", privacy: .public) range=\(selectedRange != nil) snapshot=\(textSnapshot != nil) structuralList=\(listInsertion != nil) richLayout=\(richText != nil) markers=\(markerSnapshot != nil)")
 
         return DictationContext(
             processIdentifier: processIdentifier,
@@ -569,8 +621,109 @@ enum DictationContextCapture {
             selectedText: textSnapshot?.selected,
             textAfterCursor: textSnapshot?.after,
             isSecureField: false,
-            isContextExcluded: false
+            isContextExcluded: false,
+            capturedListItemInsertion: listInsertion,
+            richTextContext: richText
         )
+    }
+
+    /// Chromium can expose native window controls while its web accessibility
+    /// tree is disabled. These are the assistive-client activation attributes
+    /// supported by Electron and Chromium; unsupported native apps ignore them.
+    /// Called only after app exclusions and only when normal focus lookup fails.
+    private nonisolated static func requestWebAccessibility(in application: AXUIElement) -> Bool {
+        let manual = AXUIElementSetAttributeValue(application, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        if manual == .success {
+            logger.info("contextCapture: requested Electron web accessibility")
+            return true
+        }
+        let enhanced = AXUIElementSetAttributeValue(application, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        logger.info("contextCapture: web accessibility activation manualStatus=\(manual.rawValue) enhancedStatus=\(enhanced.rawValue)")
+        // Keep web accessibility available for this assistive client. Turning
+        // it off here can disrupt other clients and the next dictation.
+        // Chromium handles this legacy attribute, then delegates to AppKit,
+        // which can report notImplemented even though activation was queued.
+        // The bounded focus retry, rather than the setter alone, verifies it.
+        return enhanced == .success || enhanced == .notImplemented
+    }
+
+    /// Supplementary layout reference only: attributed text can contain rendered
+    /// bullets that aren't counted in plain-text cursor offsets. Never slice it
+    /// at the plain cursor index or use it to move the selection.
+    private nonisolated static func richTextContext(in element: AXUIElement, selectedRange: CFRange) -> String? {
+        guard selectedRange.location >= 0,
+              let count = integerAttribute(kAXNumberOfCharactersAttribute, from: element),
+              selectedRange.location <= count else { return nil }
+        let start = max(0, selectedRange.location - 300)
+        var range = CFRange(location: start, length: min(count - start, 600))
+        guard range.length > 0, let rangeValue = AXValueCreate(.cfRange, &range) else { return nil }
+        var value: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element, kAXAttributedStringForRangeParameterizedAttribute as CFString, rangeValue, &value
+        ) == .success, let attributed = value as? NSAttributedString else { return nil }
+        return String(attributed.string.prefix(1_200))
+    }
+
+    nonisolated static func focusedTextElement(
+        in application: AXUIElement,
+        processIdentifier: pid_t,
+        logFailure: Bool = true
+    ) -> AXUIElement? {
+        var applicationStatus: Int32 = 0
+        var systemStatus: Int32 = 0
+        var windowStatus: Int32 = 0
+        var visitedNodes = 0
+        func focusAttribute(_ attribute: String, from element: AXUIElement, status: inout Int32) -> AXUIElement? {
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+            status = result.rawValue
+            guard result == .success, let value,
+                  CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+            return unsafeBitCast(value, to: AXUIElement.self)
+        }
+        let resolved = DictationFocusResolver.resolve(
+            targetPID: processIdentifier,
+            applicationFocus: { focusAttribute(kAXFocusedUIElementAttribute, from: application, status: &applicationStatus) },
+            systemFocus: {
+                let system = AXUIElementCreateSystemWide()
+                return AccessibilityMessagingTimeout.withTimeout(
+                    0.25, apply: { _ = AXUIElementSetMessagingTimeout(system, $0) }
+                ) {
+                    focusAttribute(kAXFocusedUIElementAttribute, from: system, status: &systemStatus)
+                }
+            },
+            focusedWindow: {
+                guard let window = focusAttribute(kAXFocusedWindowAttribute, from: application, status: &windowStatus) else { return nil }
+                AXUIElementSetMessagingTimeout(window, 0.05)
+                return elementAttribute(kAXFocusedUIElementAttribute, from: window) ?? window
+            },
+            processIdentifier: { element in
+                var pid: pid_t = 0
+                return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+            },
+            role: { element in
+                visitedNodes += 1
+                AXUIElementSetMessagingTimeout(element, 0.05)
+                return stringAttribute(kAXRoleAttribute, from: element)
+            },
+            isFocused: { element in
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(element, kAXFocusedAttribute as CFString, &value) == .success
+                else { return false }
+                return (value as? NSNumber)?.boolValue == true
+            },
+            children: { element in
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success
+                else { return [] }
+                return value as? [AXUIElement] ?? []
+            }
+        )
+        if let resolved { AXUIElementSetMessagingTimeout(resolved, 0.25) }
+        else if logFailure {
+            logger.info("focusResolution: trusted=\(AXIsProcessTrusted()) applicationStatus=\(applicationStatus) systemStatus=\(systemStatus) windowStatus=\(windowStatus) visitedNodes=\(visitedNodes)")
+        }
+        return resolved
     }
 
     private nonisolated static func emptyContext(
@@ -602,34 +755,75 @@ enum DictationContextCapture {
         in element: AXUIElement,
         selectedRange: CFRange
     ) -> (before: String, selected: String, after: String)? {
-        guard selectedRange.location != kCFNotFound else { return nil }
+        guard selectedRange.location >= 0, selectedRange.length >= 0,
+              selectedRange.location <= Int.max - selectedRange.length else { return nil }
         let beforeLocation = max(0, selectedRange.location - maximumSurroundingCharacters)
         let beforeLength = selectedRange.location - beforeLocation
         let selectedLength = max(0, min(selectedRange.length, maximumSurroundingCharacters))
         let afterLocation = selectedRange.location + max(0, selectedRange.length)
-
-        let before = stringForRange(in: element, location: beforeLocation, length: beforeLength)
-        let selected = stringForRange(in: element, location: selectedRange.location, length: selectedLength)
-        let after = stringForRange(
-            in: element,
-            location: afterLocation,
-            length: maximumSurroundingCharacters
+        let characterCount = integerAttribute(kAXNumberOfCharactersAttribute, from: element)
+        let availableAfterLength = characterCount.flatMap { count in
+            count >= afterLocation ? count - afterLocation : nil
+        }
+        let afterLength = min(
+            maximumSurroundingCharacters,
+            availableAfterLength ?? maximumSurroundingCharacters
         )
 
-        if before != nil || selected != nil || after != nil {
-            return (before ?? "", selected ?? "", after ?? "")
+        let before = beforeLength == 0
+            ? ""
+            : stringForRange(in: element, location: beforeLocation, length: beforeLength)
+        let selected = selectedLength == 0
+            ? ""
+            : stringForRange(in: element, location: selectedRange.location, length: selectedLength)
+        let after = afterLength == 0
+            ? ""
+            : stringForRange(in: element, location: afterLocation, length: afterLength)
+        let needsFallback = before == nil || selected == nil || after == nil
+        let fullValue = needsFallback ? stringAttribute(kAXValueAttribute, from: element) : nil
+
+        return resolvedSurroundingText(
+            before: before,
+            selected: selected,
+            after: after,
+            fullValue: fullValue,
+            selectedRange: selectedRange
+        )
+    }
+
+    nonisolated static func resolvedSurroundingText(
+        before: String?,
+        selected: String?,
+        after: String?,
+        fullValue: String?,
+        selectedRange: CFRange
+    ) -> (before: String, selected: String, after: String)? {
+        guard selectedRange.location >= 0, selectedRange.length >= 0,
+              selectedRange.location <= Int.max - selectedRange.length else { return nil }
+
+        guard let fullValue else {
+            // An empty selection is not proof that surrounding text is empty.
+            // Keep failed reads unavailable so delivery can retry capture.
+            guard let before, let selected, let after else { return nil }
+            return (before, selected, after)
         }
 
-        guard let value = stringAttribute(kAXValueAttribute, from: element) else { return nil }
-        let nsValue = value as NSString
-        let location = min(max(0, selectedRange.location), nsValue.length)
-        let selectionEnd = min(location + max(0, selectedRange.length), nsValue.length)
+        let nsValue = fullValue as NSString
+        let location = selectedRange.location
+        let selectionEnd = location + selectedRange.length
+        guard selectionEnd <= nsValue.length else { return nil }
         let fallbackBeforeLocation = max(0, location - maximumSurroundingCharacters)
         let fallbackAfterEnd = min(nsValue.length, selectionEnd + maximumSurroundingCharacters)
         return (
-            nsValue.substring(with: NSRange(location: fallbackBeforeLocation, length: location - fallbackBeforeLocation)),
-            nsValue.substring(with: NSRange(location: location, length: selectionEnd - location)),
-            nsValue.substring(with: NSRange(location: selectionEnd, length: fallbackAfterEnd - selectionEnd))
+            before ?? nsValue.substring(
+                with: NSRange(location: fallbackBeforeLocation, length: location - fallbackBeforeLocation)
+            ),
+            selected ?? nsValue.substring(
+                with: NSRange(location: location, length: selectionEnd - location)
+            ),
+            after ?? nsValue.substring(
+                with: NSRange(location: selectionEnd, length: fallbackAfterEnd - selectionEnd)
+            )
         )
     }
 
@@ -705,6 +899,16 @@ enum DictationContextCapture {
         if let string = value as? String { return string }
         if let url = value as? URL { return url.absoluteString }
         return nil
+    }
+
+    private nonisolated static func integerAttribute(
+        _ attribute: String,
+        from element: AXUIElement
+    ) -> Int? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+              let number = value as? NSNumber else { return nil }
+        return number.intValue
     }
 
     private nonisolated static func elementAttribute(

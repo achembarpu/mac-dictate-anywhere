@@ -546,7 +546,7 @@ enum AIPostProcessingService {
         let charCount = input.unicodeScalars.count
         let maxTokens = min(768, max(96, charCount / 2))
         return GenerationOptions(
-            sampling: .greedy,
+            samplingMode: .greedy,
             temperature: 0,
             maximumResponseTokens: maxTokens
         )

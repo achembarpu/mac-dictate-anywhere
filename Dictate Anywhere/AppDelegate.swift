@@ -290,10 +290,12 @@ extension AppDelegate: NSMenuDelegate {
         if let statusMenu = statusItem?.menu, menu === statusMenu {
             stopDictationMenuItem?.isHidden = !appState.canStopDictation
             cancelDictationMenuItem?.isHidden = !appState.canCancelDictation
-            customVocabularyMenuItem?.isHidden = !Settings.shared
-                .transcriptPostProcessingMode
-                .supportedFeatures
-                .contains(.customVocabulary)
+            customVocabularyMenuItem?.isHidden =
+                Settings.shared.engineChoice != .assemblyAI
+                && !Settings.shared
+                    .transcriptPostProcessingMode
+                    .supportedFeatures
+                    .contains(.customVocabulary)
             return
         }
 

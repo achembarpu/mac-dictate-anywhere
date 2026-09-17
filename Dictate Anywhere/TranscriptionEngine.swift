@@ -221,10 +221,18 @@ protocol TranscriptionEngine: AnyObject {
     /// Session-scoped local recognition hints. Engines that do not support
     /// contextual vocabulary safely ignore this value.
     func setSessionContextualVocabulary(_ terms: [String])
+    /// Session-scoped destination context. Cloud engines may use the category
+    /// and, only with explicit permission, bounded surrounding text.
+    func setSessionDictationContext(_ context: DictationContext?)
+    /// A terminal recognition failure from the most recent stop. AppState uses
+    /// this to preserve recovery audio rather than discard it as silence.
+    var lastTranscriptionError: String? { get }
 }
 
 extension TranscriptionEngine {
     func setSessionContextualVocabulary(_ terms: [String]) {}
+    func setSessionDictationContext(_ context: DictationContext?) {}
+    var lastTranscriptionError: String? { nil }
 }
 
 // MARK: - Shared Audio Helpers
@@ -920,7 +928,7 @@ final class ParakeetEngine: TranscriptionEngine {
         logger.info("startRecording: dispatching to engineQueue for audio engine setup")
         let captureController = try await startAudioCaptureOffMainActor(
             timeout: 5, queue: engineQueue, cancellation: startupCancellation
-        ) {
+        ) { [self] in
             try makeAudioCaptureController(
                 deviceID: deviceID,
                 usesExplicitMicrophoneSelection: usesExplicitMicrophoneSelection

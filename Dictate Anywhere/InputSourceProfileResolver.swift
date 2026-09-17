@@ -34,8 +34,13 @@ enum InputSourceProfileResolver {
         isAppleSpeechAssetInstalled: (SupportedLanguage) -> Bool
     ) -> InputSourceProfileResolution {
         guard enabled, let mapping else { return .none }
+        // AssemblyAI owns its language configuration on the Speech Model page;
+        // local keyboard/input-source profiles must not replace it invisibly.
+        guard currentEngine != .assemblyAI else { return .inactive }
 
         switch mapping.engine {
+        case .assemblyAI:
+            return .inactive
         case .appleSpeech:
             guard appleSpeechSupported else { return .inactive }
             guard isAppleSpeechAssetInstalled(mapping.language) else { return .inactive }
@@ -67,6 +72,8 @@ enum InputSourceMappingAvailability {
         isModelOnDisk: (ParakeetModelChoice) -> Bool
     ) -> String? {
         switch mapping.engine {
+        case .assemblyAI:
+            return "AssemblyAI language is configured directly under Speech Model."
         case .appleSpeech:
             guard appleSpeechSupported else {
                 return "Apple Speech isn't available on this Mac."

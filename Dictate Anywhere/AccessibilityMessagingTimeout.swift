@@ -20,7 +20,7 @@ enum AccessibilityMessagingTimeout {
     ///
     /// The restore runs on every exit path, so neither a thrown error nor an
     /// early return can leak the shortened timeout into unrelated work.
-    static func withTimeout<T>(
+    nonisolated static func withTimeout<T>(
         _ seconds: Float,
         apply: (Float) -> Void,
         during body: () throws -> T

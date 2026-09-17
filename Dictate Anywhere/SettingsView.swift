@@ -37,47 +37,51 @@ struct SettingsView: View {
                 }
             }
 
-            DSSection(overline: "Language") {
-                if settings.engineChoice == .appleSpeech {
-                    DSDetailRow(
-                        label: "Transcription language",
-                        caption: "Apple Speech downloads and uses the matching on-device language model."
-                    ) {
-                        DSDropdown(
-                            selection: Binding(
-                                get: { settings.appleSpeechLanguage },
-                                set: { language in
-                                    Task { await appState.handleAppleSpeechLanguageChange(language) }
-                                }
-                            ),
-                            options: appState.appleSpeechSupportedLanguages.isEmpty
-                                ? [settings.appleSpeechLanguage]
-                                : appState.appleSpeechSupportedLanguages,
-                            title: \.displayWithFlag
-                        )
-                    }
-                } else {
-                    DSDetailRow(
-                        label: "Transcription language",
-                        caption: parakeetModelChoice.languageSettingsFooter
-                    ) {
-                        if let fixedLabel = parakeetModelChoice.fixedLanguageLabel {
-                            Text(fixedLabel)
-                                .font(DS.Fonts.ui(13.5))
-                                .foregroundStyle(DS.Colors.textSecondary)
-                        } else {
+            if settings.engineChoice != .assemblyAI {
+                DSSection(overline: "Language") {
+                    if settings.engineChoice == .appleSpeech {
+                        DSDetailRow(
+                            label: "Transcription language",
+                            caption: "Apple Speech downloads and uses the matching on-device language model."
+                        ) {
                             DSDropdown(
-                                selection: $settings.selectedLanguage,
-                                options: parakeetModelChoice.selectableLanguages
-                                    ?? Array(SupportedLanguage.allCases),
+                                selection: Binding(
+                                    get: { settings.appleSpeechLanguage },
+                                    set: { language in
+                                        Task { await appState.handleAppleSpeechLanguageChange(language) }
+                                    }
+                                ),
+                                options: appState.appleSpeechSupportedLanguages.isEmpty
+                                    ? [settings.appleSpeechLanguage]
+                                    : appState.appleSpeechSupportedLanguages,
                                 title: \.displayWithFlag
                             )
+                        }
+                    } else if settings.engineChoice == .parakeet {
+                        DSDetailRow(
+                            label: "Transcription language",
+                            caption: parakeetModelChoice.languageSettingsFooter
+                        ) {
+                            if let fixedLabel = parakeetModelChoice.fixedLanguageLabel {
+                                Text(fixedLabel)
+                                    .font(DS.Fonts.ui(13.5))
+                                    .foregroundStyle(DS.Colors.textSecondary)
+                            } else {
+                                DSDropdown(
+                                    selection: $settings.selectedLanguage,
+                                    options: parakeetModelChoice.selectableLanguages
+                                        ?? Array(SupportedLanguage.allCases),
+                                    title: \.displayWithFlag
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            InputSourceSettingsSection()
+            if settings.engineChoice != .assemblyAI {
+                InputSourceSettingsSection()
+            }
 
             DSSection(overline: "Audio") {
                 DSInfoRow(label: "Microphone") {
