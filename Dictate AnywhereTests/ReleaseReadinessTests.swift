@@ -31,7 +31,7 @@ final class ReleaseReadinessTests: XCTestCase {
         let before = "1. Apples\n2. "
         let after = "\n3. Oranges"
         let context = makeContext(before: before, after: after)
-        let plan = try XCTUnwrap(ModelInsertionPlan.decode(#"{"items":["Tangerines","Blueberries"],"space_before":false,"space_after":false}"#))
+        let plan = try XCTUnwrap(ModelInsertionPlan.decode(#"{"items":["Tangerines","Blueberries"],"space_before":false,"space_after":false}"#, allowsEnumeratedItems: true))
         let insertion = TextInserter().preparedTextForInsertion(plan.text,
             targetBundleIdentifier: nil, targetProcessIdentifier: 123, context: context,
             style: .original, knownTerms: [], modelInsertionPlan: plan, preserveModelFormatting: true)

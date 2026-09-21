@@ -210,7 +210,8 @@ final class TextInserter {
             if let context,
                context.processIdentifier == targetProcessIdentifier,
                !context.isSecureField, !context.isContextExcluded,
-               context.listItemInsertion != nil || Self.hasInlineCommaBoundary(context) {
+               context.listItemInsertion != nil || Self.hasInlineCommaBoundary(context)
+                || (!plan.text.contains(where: \.isNewline) && Self.standaloneLineConvention(context) != nil) {
                 // The provider can return standalone punctuation/spacing even
                 // with explicit instructions. Confirmed list or comma boundaries
                 // supply the local formatting contract for every provider path.
@@ -258,6 +259,20 @@ final class TextInserter {
         return !leadingWhitespace.contains(where: \.isNewline)
     }
 
+    /// A single insertion between consecutive nonempty lines can match their
+    /// case/punctuation without declaring the field a list or splitting prose.
+    private static func standaloneLineConvention(_ context: DictationContext) -> DictationListInsertion? {
+        guard !context.isSecureField, !context.isContextExcluded,
+              context.fieldPurpose != .searchQuery, context.selectedText?.isEmpty != false,
+              let before = context.textBeforeCursor, let after = context.textAfterCursor,
+              before.last?.isNewline == true, after.first?.isNewline == true else { return nil }
+        let previous = String(before.dropLast()).components(separatedBy: .newlines).last ?? ""
+        let next = String(after.dropFirst()).components(separatedBy: .newlines).first ?? ""
+        let neighbors = [previous, next].map { $0.trimmingCharacters(in: .whitespaces) }
+        guard neighbors.allSatisfy({ !$0.isEmpty }) else { return nil }
+        return DictationListInsertion.matchingNeighbors(neighbors, needsSpaceAfterMarker: false)
+    }
+
     static func shouldUseContextualInsertion(
         context: DictationContext,
         targetProcessIdentifier: pid_t?
@@ -277,7 +292,8 @@ final class TextInserter {
     ) -> String {
         var body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return "" }
-        let listInsertion = context.fieldPurpose == .searchQuery ? nil : context.listItemInsertion
+        let listInsertion = context.fieldPurpose == .searchQuery ? nil
+            : context.listItemInsertion ?? (body.contains(where: \.isNewline) ? nil : standaloneLineConvention(context))
 
         if let list = listInsertion {
             // The model chooses semantic item boundaries. Apply the same local

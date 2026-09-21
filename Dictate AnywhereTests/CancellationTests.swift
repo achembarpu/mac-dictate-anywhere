@@ -4,6 +4,15 @@ import CoreGraphics
 
 @MainActor
 final class CancellationTests: XCTestCase {
+    private func plainEscape(keyDown: Bool) -> CGEvent {
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: keyDown)!
+        // Synthetic events otherwise inherit the machine's current modifiers,
+        // making plain-Escape tests depend on the user's keyboard state.
+        event.flags = []
+        event.setIntegerValueField(.keyboardEventAutorepeat, value: 0)
+        return event
+    }
+
     private var binding: HotkeyBinding {
         HotkeyBinding(id: UUID(), keyCode: 7, modifiersRawValue: HotkeyModifiers([.command, .shift]).rawValue,
                       displayName: "⌘⇧X", mode: .handsFreeToggle)
@@ -128,9 +137,9 @@ final class CancellationTests: XCTestCase {
         var cancelled = false
         service.onCancelProgress = { progress = $0 }
         service.onCancel = { cancelled = true }
-        XCTAssertFalse(service.handleEvent(type: .keyDown, event: CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true)!))
+        XCTAssertFalse(service.handleEvent(type: .keyDown, event: plainEscape(keyDown: true)))
         XCTAssertNotNil(progress)
-        XCTAssertFalse(service.handleEvent(type: .keyUp, event: CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: false)!))
+        XCTAssertFalse(service.handleEvent(type: .keyUp, event: plainEscape(keyDown: false)))
         XCTAssertNil(progress)
         XCTAssertFalse(cancelled)
     }
@@ -157,7 +166,7 @@ final class CancellationTests: XCTestCase {
         let cancelled = expectation(description: "held cancellation")
         cancelled.assertForOverFulfill = true
         service.onCancel = { cancelled.fulfill() }
-        _ = service.handleEvent(type: .keyDown, event: CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true)!)
+        _ = service.handleEvent(type: .keyDown, event: plainEscape(keyDown: true))
         await fulfillment(of: [cancelled], timeout: 2)
         service.isCancellationEnabled = false
         service.stopMonitoring()

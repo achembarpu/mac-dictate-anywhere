@@ -27,7 +27,10 @@ struct TranscriptHistoryView: View {
     ) -> [TranscriptHistoryEntry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return entries }
-        return entries.filter { $0.text.localizedCaseInsensitiveContains(query) }
+        return entries.filter {
+            $0.text.localizedCaseInsensitiveContains(query)
+                || $0.rawText?.localizedCaseInsensitiveContains(query) == true
+        }
     }
 
     var body: some View {
@@ -191,6 +194,23 @@ private struct TranscriptHistoryRow: View {
                     .textSelection(.enabled)
                     .lineLimit(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if let rawText = entry.rawText {
+                    DisclosureGroup("Raw transcript") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(rawText)
+                                .font(DS.Fonts.ui(13))
+                                .foregroundStyle(DS.Colors.textSecondary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            DSInsetButton(title: "Copy raw", systemImage: "doc.on.doc") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(rawText, forType: .string)
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
+                    .font(DS.Fonts.ui(12, .medium))
+                }
             }
 
             HStack(spacing: 6) {

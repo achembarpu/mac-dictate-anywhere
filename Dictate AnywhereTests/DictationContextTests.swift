@@ -607,13 +607,32 @@ final class DictationContextTests: XCTestCase {
 
     func testEnumeratedInlineItemsCanAppendAtEndOfSeries() throws {
         let plan = try XCTUnwrap(ModelInsertionPlan.decode(
-            #"{"items":["Tangerines", "Blueberries"],"space_before":false,"space_after":false}"#
+            #"{"items":["Tangerines", "Blueberries"],"space_before":false,"space_after":false}"#,
+            allowsEnumeratedItems: true
         ))
         XCTAssertEqual(TextInserter().preparedTextForInsertion(
             plan.text, targetBundleIdentifier: nil, targetProcessIdentifier: 42,
             context: makeContext(category: .other, before: "Fruit: apples, bananas,", after: ""),
             style: .original, knownTerms: [], modelInsertionPlan: plan, preserveModelFormatting: true
         ), " tangerines, blueberries")
+    }
+
+    func testSingleUnmarkedLineMatchesNeighborsWithoutSplittingProse() {
+        let text = "Strawberries."
+        let plan = ModelInsertionPlan(text: text, spaceBefore: false, spaceAfter: false)
+        for (before, after, expected) in [
+            ("Apples\nBananas\n", "\nOranges\nFlowers", "Strawberries"),
+            ("apples\nbananas\n", "\noranges\nflowers", "strawberries"),
+            ("Apples.\nBananas.\n", "\nOranges.\nFlowers.", "Strawberries."),
+            ("Heading\n\n", "\n\nNext heading", "Strawberries."),
+            ("", "", "Strawberries.")
+        ] {
+            let context = makeContext(category: .other, before: before, after: after)
+            XCTAssertFalse(AssemblyAIEngine.allowsEnumeratedItems(context: context))
+            XCTAssertEqual(TextInserter().preparedTextForInsertion(text, targetBundleIdentifier: nil,
+                targetProcessIdentifier: 42, context: context, style: .original, knownTerms: [],
+                modelInsertionPlan: plan, preserveModelFormatting: true), expected)
+        }
     }
 
     func testEnumeratedItemsMatchConsistentlyPunctuatedNeighbors() {

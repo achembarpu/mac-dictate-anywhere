@@ -141,6 +141,57 @@ final class AssemblyAIEngineTests: XCTestCase {
         ))
     }
 
+    func testProseRejectsFragmentedRotationPlanAndUsesRawSentences() {
+        let raw = "Snapping for rotation in this app is reversed. For everything else, I have to hold down Shift to snap. For rotation, I have to hold down Shift to stop snapping."
+        let response = AssemblyAIDictationResponse(text: raw,
+            llmResponse: #"{"items":["snapping","for rotation","in this app","is reversed","everything else","I have to hold down Shift to snap","the rotation","is reversed","I have to hold down Shift to release the snap or stop snapping"],"space_before":false,"space_after":false}"#,
+            llmError: nil, requestTimeMilliseconds: nil)
+        let context = makeContext(before: "", after: "")
+        let allowsItems = AssemblyAIEngine.allowsEnumeratedItems(context: context)
+        XCTAssertFalse(allowsItems)
+        XCTAssertNil(ModelInsertionPlan.decode(response.llmResponse!, allowsEnumeratedItems: allowsItems))
+        let text = AssemblyAIEngine.finalText(from: response, outputMode: .polished,
+            requiresInsertionPlan: true, allowsEnumeratedItems: allowsItems)
+        XCTAssertEqual(text, raw)
+        let insertion = TextInserter().preparedTextForInsertion(text, targetBundleIdentifier: context.bundleIdentifier,
+            targetProcessIdentifier: context.processIdentifier, context: context, style: .original, knownTerms: [])
+        XCTAssertEqual(insertion, raw)
+    }
+
+    func testProsePromptUsesTextAndOnlyAppliesLowercasingInsideSentence() {
+        for context in [makeContext(before: "", after: ""), makeContext(before: "Previous sentence. ", after: "")] {
+            let prompt = AssemblyAIEngine.llmInstruction(customInstruction: "", context: context,
+                shareSurroundingText: true, style: .original)
+            XCTAssertTrue(prompt.contains("ACTIVE DESTINATION: PROSE"))
+            XCTAssertTrue(prompt.contains(#"{"text":"#))
+            XCTAssertFalse(prompt.contains(#"{"items":"#))
+            XCTAssertFalse(prompt.contains("MID-SENTENCE:"))
+        }
+        let prompt = AssemblyAIEngine.llmInstruction(customInstruction: "", context: makeContext(before: "This is ", after: " today."),
+            shareSurroundingText: true, style: .original)
+        XCTAssertTrue(prompt.contains("MID-SENTENCE:"))
+    }
+
+    func testOnlyListAndInlineSeriesAllowItems() {
+        XCTAssertTrue(AssemblyAIEngine.allowsEnumeratedItems(context: makeContext(before: "- Apples\n- ", after: "\n- Oranges")))
+        let inline = makeContext(before: "Fruit: apples, ", after: "oranges.")
+        XCTAssertTrue(AssemblyAIEngine.allowsEnumeratedItems(context: inline))
+        XCTAssertFalse(AssemblyAIEngine.allowsEnumeratedItems(context: makeContext(before: "", after: "")))
+        XCTAssertFalse(AssemblyAIEngine.allowsEnumeratedItems(context: makeContext(before: nil, after: nil)))
+        let search = makeContext(before: "Fruit: apples, ", after: "oranges.", fieldPurpose: .searchQuery)
+        XCTAssertFalse(AssemblyAIEngine.allowsEnumeratedItems(context: search))
+    }
+
+    func testProsePreservesParagraphsAndExplicitListsWithinText() throws {
+        for text in ["First paragraph.\n\nSecond paragraph.", "Shopping list:\n- Apples\n- Oranges"] {
+            let json = try JSONSerialization.data(withJSONObject: [
+                "text": text, "space_before": false, "space_after": false
+            ])
+            let plan = try XCTUnwrap(ModelInsertionPlan.decode(String(decoding: json, as: UTF8.self)))
+            XCTAssertEqual(plan.text, text)
+        }
+    }
+
     func testInsertionPromptPreservesCursorSidesAndLayoutAsSeparateData() throws {
         var context = makeContext()
         context.richTextContext = "• Apples\n• Bananas\n• \n• Oranges"
@@ -194,18 +245,22 @@ final class AssemblyAIEngineTests: XCTestCase {
 
     func testEnumeratedModelPlanRetainsSemanticItemsInOrder() throws {
         let plan = try XCTUnwrap(ModelInsertionPlan.decode(
-            #"{"items":["Macaroni and cheese","Sourdough starter"],"space_before":false,"space_after":false}"#
+            #"{"items":["Macaroni and cheese","Sourdough starter"],"space_before":false,"space_after":false}"#,
+            allowsEnumeratedItems: true
         ))
         XCTAssertEqual(plan.text, "Macaroni and cheese\nSourdough starter")
         XCTAssertEqual(plan.insertionText, plan.text)
-        XCTAssertNil(ModelInsertionPlan.decode(#"{"items":["Bread", " "],"space_before":false,"space_after":false}"#))
-        XCTAssertNil(ModelInsertionPlan.decode(#"{"items":"Bread, milk","space_before":false,"space_after":false}"#))
-        XCTAssertNil(ModelInsertionPlan.decode(#"{"items":[],"space_before":false,"space_after":false}"#))
+        XCTAssertNil(ModelInsertionPlan.decode(#"{"items":["Bread", " "],"space_before":false,"space_after":false}"#, allowsEnumeratedItems: true))
+        XCTAssertNil(ModelInsertionPlan.decode(#"{"items":"Bread, milk","space_before":false,"space_after":false}"#, allowsEnumeratedItems: true))
+        XCTAssertNil(ModelInsertionPlan.decode(#"{"items":[],"space_before":false,"space_after":false}"#, allowsEnumeratedItems: true))
+        XCTAssertNil(ModelInsertionPlan.decode(#"{"items":["Bread\nMilk"],"space_before":false,"space_after":false}"#, allowsEnumeratedItems: true))
+        XCTAssertNil(ModelInsertionPlan.decode(#"{"text":"Bread","items":["Milk"],"space_before":false,"space_after":false}"#, allowsEnumeratedItems: true))
     }
 
     func testContextualFormalPromptDoesNotForceSentencesOntoListFragments() {
         let prompt = AssemblyAIEngine.llmInstruction(
-            customInstruction: "", context: makeContext(), shareSurroundingText: true, style: .formal
+            customInstruction: "", context: makeContext(before: "- Apples\n- ", after: "\n- Oranges"),
+            shareSurroundingText: true, style: .formal
         )
         XCTAssertTrue(prompt.contains("Match neighboring capitalization AND terminal punctuation"))
         XCTAssertTrue(prompt.contains("NO final period"))
@@ -308,7 +363,8 @@ final class AssemblyAIEngineTests: XCTestCase {
 
     private func makeContext(
         category: DictationContextCategory = .workMessaging,
-        before: String? = "Confidential roadmap", after: String? = "Next quarter"
+        before: String? = "Confidential roadmap", after: String? = "Next quarter",
+        fieldPurpose: DictationFieldPurpose = .unknown
     ) -> DictationContext {
         DictationContext(
             processIdentifier: 123,
@@ -319,7 +375,7 @@ final class AssemblyAIEngineTests: XCTestCase {
             documentTitle: "Roadmap",
             fieldRole: "AXTextArea",
             fieldSubrole: nil,
-            fieldPurpose: .unknown,
+            fieldPurpose: fieldPurpose,
             textBeforeCursor: before,
             selectedText: nil,
             textAfterCursor: after,

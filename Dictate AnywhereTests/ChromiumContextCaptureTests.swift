@@ -80,10 +80,17 @@ final class ChromiumContextCaptureTests: XCTestCase {
     }
 
     @MainActor
+    func testChromiumRotationExplanationStaysProse() async throws {
+        let prose = "Snapping for rotation in this app is reversed. For everything else, I have to hold down Shift to snap. For rotation, I have to hold down Shift to stop snapping."
+        try await runChromeFixture(isList: false, spoken: prose, prose: prose)
+    }
+
+    @MainActor
     private func runChromeFixture(isList: Bool, spoken: String? = nil, expectedItem: String? = nil,
                                   neighbors: [String] = ["Apples", "Bananas", "Oranges", "Flowers"],
                                   expectedItems: [String]? = nil, ordered: Bool = false,
-                                  inlineAtEnd: Bool = false, plainNumbered: Bool = false) async throws {
+                                  inlineAtEnd: Bool = false, plainNumbered: Bool = false,
+                                  prose: String? = nil) async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["DICTATE_CHROMIUM_CAPTURE_TESTS"] == "1")
         let executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: executable))
@@ -92,13 +99,13 @@ final class ChromiumContextCaptureTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let before = plainNumbered ? "1. Apples\n2. Bananas\n3. " : "I need to buy some groceries: apples, bananas,"
-        let after = plainNumbered ? "\n4. Oranges\n5. Flowers" : inlineAtEnd ? "" : " oranges, and some sourdough starter."
+        let before = prose != nil ? "" : plainNumbered ? "1. Apples\n2. Bananas\n3. " : "I need to buy some groceries: apples, bananas,"
+        let after = prose != nil ? "" : plainNumbered ? "\n4. Oranges\n5. Flowers" : inlineAtEnd ? "" : " oranges, and some sourdough starter."
         let listTag = ordered ? "ol" : "ul"
         let contents = isList
             ? "<p>I need to buy:</p><\(listTag)><li>\(neighbors[0])</li><li>\(neighbors[1])</li><li id='target'><br></li><li>\(neighbors[2])</li><li>\(neighbors[3])</li></\(listTag)>"
             : before + after
-        let cursor = isList ? "r.setStart(document.getElementById('target'), 0);" : "r.setStart(e.firstChild, \(before.utf16.count));"
+        let cursor = prose != nil ? "r.setStart(e, 0);" : isList ? "r.setStart(document.getElementById('target'), 0);" : "r.setStart(e.firstChild, \(before.utf16.count));"
         let editorHTML = plainNumbered ? "<textarea id='editor'>\(contents)</textarea>"
             : "<div id='editor' contenteditable='true' role='textbox' aria-multiline='true'>\(contents)</div>"
         let selectionJS = plainNumbered ? "e.setSelectionRange(\(before.utf16.count), \(before.utf16.count));"
@@ -184,6 +191,14 @@ final class ChromiumContextCaptureTests: XCTestCase {
             let text = try await engine.transcribeRecording(at: audio)
             print("Synthetic fixture model text: \(text.debugDescription)")
             XCTAssertNotNil(engine.lastInsertionPlan)
+            XCTAssertFalse(try XCTUnwrap(engine.lastRawTranscript).isEmpty)
+            if prose != nil {
+                XCTAssertFalse(text.contains(where: \.isNewline), "Ordinary prose must not become fragment lines")
+                XCTAssertTrue(text.first?.isUppercase == true)
+                for phrase in ["snapping for rotation", "in this app is reversed", "everything else", "hold down shift to snap", "hold down shift to stop snapping"] {
+                    XCTAssertTrue(text.localizedCaseInsensitiveContains(phrase), "Missing meaning: \(phrase)")
+                }
+            }
             NSRunningApplication(processIdentifier: pid)?.activate()
             try await Task.sleep(for: .milliseconds(150))
             guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
@@ -220,8 +235,8 @@ final class ChromiumContextCaptureTests: XCTestCase {
             let expectedList = allItems.enumerated().map { index, value in
                 (ordered ? "\(index + 1). " : "• ") + value
             }.joined()
-            let expected = plainNumbered ? before + "Tangerines\n4. Blueberries\n5. Oranges\n6. Flowers" : isList ? "I need to buy:" + expectedList
-                : before + " " + item + (inlineAtEnd ? "" : "," + after)
+            let expected = prose != nil ? text : (plainNumbered ? before + "Tangerines\n4. Blueberries\n5. Oranges\n6. Flowers" : isList ? "I need to buy:" + expectedList
+                : before + " " + item + (inlineAtEnd ? "" : "," + after))
             var actual = ""
             for _ in 0..<10 {
                 try await Task.sleep(for: .milliseconds(100))

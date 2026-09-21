@@ -83,7 +83,7 @@ struct DictationListInsertion: Equatable, Sendable {
         return result
     }
 
-    private nonisolated static func matchingNeighbors(_ neighbors: [String], needsSpaceAfterMarker: Bool) -> Self {
+    nonisolated static func matchingNeighbors(_ neighbors: [String], needsSpaceAfterMarker: Bool) -> Self {
         let cases = neighbors.compactMap { text -> Capitalization? in
             guard let first = text.first(where: \.isLetter) else { return nil }
             return first.isUppercase ? .uppercase : first.isLowercase ? .lowercase : nil

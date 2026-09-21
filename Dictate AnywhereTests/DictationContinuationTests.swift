@@ -74,10 +74,32 @@ final class DictationContinuationTests: XCTestCase {
         await app.stopDictation()
         XCTAssertEqual(delivered, ["The original words. More words."])
         XCTAssertEqual(Settings.shared.transcriptHistory.map(\.text), delivered)
+        XCTAssertNil(Settings.shared.transcriptHistory.first?.rawText,
+                     "A previously polished prefix must not be presented as a complete raw transcript")
         XCTAssertTrue(store.entries.isEmpty)
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
         XCTAssertNil(app.continuingEntryID)
         XCTAssertEqual(app.status, .idle)
+    }
+
+    func testCompletedDictationKeepsRawTextBeforeCleanup() async throws {
+        let settings = Settings.shared
+        let oldFillerEnabled = settings.isFillerWordRemovalEnabled
+        let oldFillerWords = settings.fillerWordsToRemove
+        defer {
+            settings.isFillerWordRemovalEnabled = oldFillerEnabled
+            settings.fillerWordsToRemove = oldFillerWords
+        }
+        settings.isFillerWordRemovalEnabled = true
+        settings.fillerWordsToRemove = ["um"]
+        let engine = ContinuationTestEngine()
+        engine.stoppedText = "um Rotation snapping is reversed."
+        let app = app(engine: engine)
+        app.status = .recording
+        await app.stopDictation()
+        let entry = try XCTUnwrap(settings.transcriptHistory.last)
+        XCTAssertEqual(entry.text, "Rotation snapping is reversed.")
+        XCTAssertEqual(entry.rawText, engine.stoppedText)
     }
 
     func testCancelAgainPreservesPrefixAndOnlyNewAudioAcrossRelaunch() async throws {

@@ -910,6 +910,10 @@ final class AppState {
             return
         }
         let transcript = CancelledDictation.joining(transcriptPrefix, newTranscript)
+        // A continued session's prefix can already be polished; do not label
+        // that mixture (or just the newest chunk) as the full raw transcript.
+        let rawTranscript = transcriptPrefix.isEmpty
+            ? (usesAssemblyAI ? assemblyAIEngine.lastRawTranscript : newTranscript) : nil
         // A cancelled decoder may return no new result. The restored prefix
         // alone must not mark the newest audio as already fully transcribed.
         completedRecognitionTranscript = newTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -959,10 +963,10 @@ final class AppState {
 
         // Transcript post-processing
         var processedText = finalText
-        logger.info(
-            "postProcessing: mode=\(self.settings.transcriptPostProcessingMode.rawValue, privacy: .public), speechEngine=\(self.settings.engineChoice.rawValue, privacy: .public), inputChars=\(finalText.count, privacy: .public)"
-        )
         let postProcessingMode = usesAssemblyAI ? TranscriptPostProcessingMode.none : settings.transcriptPostProcessingMode
+        logger.info(
+            "postProcessing: mode=\(postProcessingMode.rawValue, privacy: .public), speechEngine=\(self.settings.engineChoice.rawValue, privacy: .public), inputChars=\(finalText.count, privacy: .public)"
+        )
         switch postProcessingMode {
         case .none:
             break
@@ -1089,7 +1093,7 @@ final class AppState {
         currentTranscript = processedText
         lastTranscript = processedText
         Self.lastTranscriptForMenuBar = processedText
-        settings.addTranscriptHistoryEntry(processedText)
+        settings.addTranscriptHistoryEntry(processedText, rawText: rawTranscript)
 
         // Insert text
         NotificationCenter.default.post(name: .dismissMenusForPaste, object: nil)

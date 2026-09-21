@@ -799,6 +799,8 @@ struct TranscriptHistoryEntry: Identifiable, Codable, Equatable {
     let id: UUID
     let text: String
     let createdAt: Date
+    /// Unedited recognition output. Older entries and partial recoveries may not have it.
+    var rawText: String? = nil
 }
 
 // MARK: - Conflict Detector
@@ -1939,14 +1941,15 @@ final class Settings {
         }
     }
 
-    func addTranscriptHistoryEntry(_ text: String) {
+    func addTranscriptHistoryEntry(_ text: String, rawText: String? = nil) {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
 
         transcriptHistory = Self.cappedTranscriptHistory(transcriptHistory + [TranscriptHistoryEntry(
             id: UUID(),
             text: trimmedText,
-            createdAt: Date()
+            createdAt: Date(),
+            rawText: rawText
         )])
     }
 

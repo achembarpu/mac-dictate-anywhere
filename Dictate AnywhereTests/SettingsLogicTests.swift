@@ -67,6 +67,29 @@ final class SettingsLogicTests: XCTestCase {
         super.tearDown()
     }
 
+    func testHistoryDecodesOlderEntriesWithoutRawText() throws {
+        let json = #"{"id":"5B5304DB-AD12-40AD-928B-43A113D1E9DE","text":"Older dictation","createdAt":811700095}"#
+        let entry = try JSONDecoder().decode(TranscriptHistoryEntry.self, from: Data(json.utf8))
+        XCTAssertEqual(entry.text, "Older dictation")
+        XCTAssertNil(entry.rawText)
+    }
+
+    func testHistoryPersistsAndSearchesRawAndFinalText() throws {
+        let settings = Settings.shared
+        settings.clearTranscriptHistory()
+        settings.addTranscriptHistoryEntry("Rotation snapping is reversed.", rawText: "um snapping for rotation is reversed")
+        let data = try XCTUnwrap(UserDefaults.standard.data(forKey: "transcriptHistory"))
+        let restored = try JSONDecoder().decode([TranscriptHistoryEntry].self, from: data)
+        XCTAssertEqual(restored.first?.text, "Rotation snapping is reversed.")
+        XCTAssertEqual(restored.first?.rawText, "um snapping for rotation is reversed")
+        XCTAssertEqual(TranscriptHistoryView.filteredEntries(restored, searchText: "UM SNAPPING").count, 1)
+        XCTAssertEqual(TranscriptHistoryView.filteredEntries(restored, searchText: "Rotation snapping").count, 1)
+        settings.removeTranscriptHistoryEntry(id: restored[0].id)
+        let deleted = try JSONDecoder().decode([TranscriptHistoryEntry].self,
+            from: XCTUnwrap(UserDefaults.standard.data(forKey: "transcriptHistory")))
+        XCTAssertTrue(deleted.isEmpty)
+    }
+
     // MARK: - Filler word removal
 
     func testRemoveFillerWordsRemovesConfiguredWords() {
