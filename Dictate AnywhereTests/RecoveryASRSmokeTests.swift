@@ -1,6 +1,7 @@
 import XCTest
 @preconcurrency import AVFoundation
 import Speech
+import FluidAudio
 @testable import Dictate_Anywhere
 
 /// Exercises the actual file-recovery paths with a known speech fixture and
@@ -18,6 +19,62 @@ final class RecoveryASRSmokeTests: XCTestCase {
 
     func testStreamingModelRecoversSavedAudio() async throws {
         try await checkFluidAudioRecovery(model: .parakeetEou320)
+    }
+
+    func testMultilingualModelRecoversSavedAudio() async throws {
+        try await checkFluidAudioRecovery(model: .multilingual)
+    }
+
+    func testNemotronModelRecoversSavedAudio() async throws {
+        try await checkFluidAudioRecovery(model: .nemotron1120)
+    }
+
+    /// Exercise the same sliding-window/vocabulary configuration used for final
+    /// dictation, without microphone access or the app's fallback hiding errors.
+    func testVocabularyWindowsPreserveBeginningAndEnding() async throws {
+        try XCTSkipUnless(ParakeetEngine().checkModelOnDisk(for: .englishOnly), "English Parakeet is not installed")
+        let ctcDirectory = CtcModels.defaultCacheDirectory(for: .ctc110m)
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: ctcDirectory.path), "CTC model is not installed")
+        let models = try await AsrModels.load(from: AsrModels.defaultCacheDirectory(for: .v2), version: .v2)
+        let ctcModels = try await CtcModels.load(from: ctcDirectory)
+        let tokenizer = try await CtcTokenizer.load(from: ctcDirectory)
+        let vocabulary = CustomVocabularyContext(terms: [
+            CustomVocabularyTerm(text: "cancellation", ctcTokenIds: tokenizer.encode("cancellation"))
+        ])
+        let manager = SlidingWindowAsrManager(config: SlidingWindowAsrConfig(
+            chunkSeconds: 11.0, hypothesisChunkSeconds: 1.0,
+            leftContextSeconds: 2.0, rightContextSeconds: 2.0,
+            minContextForConfirmation: 0.0, confirmationThreshold: 0.0))
+        do {
+            try await manager.configureVocabularyBoosting(
+                vocabulary: vocabulary, ctcModels: ctcModels,
+                config: ParakeetEngine.vocabularyRescorerConfig)
+            try await manager.loadModels(models)
+            try await manager.startStreaming(source: .microphone)
+            let fixture = try fixtureSamples()
+            let samples = fixture + [Float](repeating: 0, count: 8_000) + fixture
+            XCTAssertGreaterThan(samples.count, 11 * 16_000, "Fixture must exercise multiple windows")
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
+            for offset in stride(from: 0, to: samples.count, by: 16_000) {
+                let chunk = Array(samples[offset..<min(offset + 16_000, samples.count)])
+                let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(chunk.count)))
+                buffer.frameLength = AVAudioFrameCount(chunk.count)
+                chunk.withUnsafeBufferPointer { source in
+                    buffer.floatChannelData![0].update(from: source.baseAddress!, count: chunk.count)
+                }
+                await manager.streamAudio(buffer)
+            }
+            let text = try await manager.finish()
+            await manager.cleanup()
+            print("VOCABULARY_ASR: \(text)")
+            let words = text.lowercased().split { !$0.isLetter }.map(String.init)
+            XCTAssertEqual(words.filter { $0 == "weather" }.count, 2, "A beginning was lost: \(text)")
+            XCTAssertEqual(words.filter { $0 == "recording" }.count, 2, "Ordinary words were replaced: \(text)")
+            XCTAssertEqual(words.filter { $0 == "cancellation" }.count, 2, "Vocabulary was inserted or an ending lost: \(text)")
+        } catch {
+            await manager.cleanup()
+            throw error
+        }
     }
 
     private func checkFluidAudioRecovery(model: ParakeetModelChoice) async throws {

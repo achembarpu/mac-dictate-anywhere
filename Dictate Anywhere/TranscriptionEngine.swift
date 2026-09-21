@@ -476,6 +476,14 @@ final class ParakeetEngine: TranscriptionEngine {
     static let transcriptionSampleRate = 16_000
     static let chunkTranscriptionSeconds = 20
 
+    /// Keep acoustic vocabulary rescue from replacing unrelated dictation
+    /// phrases (for example, "the weather is lovely" with "cancellation").
+    /// These are FluidAudio's recommended opt-in text-similarity floors.
+    static let vocabularyRescorerConfig = VocabularyRescorer.Config(
+        spotterRescueMinSimilarity: 0.30,
+        spotterRescueMultiWordMinSimilarity: 0.50
+    )
+
     /// Samples committed per buffered transcription chunk.
     ///
     /// Chunks are disjoint: `commitBufferedChunksIfNeeded` drops exactly this
@@ -1670,7 +1678,8 @@ private actor AsrManagerCoordinator {
         do {
             try await streamingManager.configureVocabularyBoosting(
                 vocabulary: vocabulary,
-                ctcModels: ctcModels
+                ctcModels: ctcModels,
+                config: ParakeetEngine.vocabularyRescorerConfig
             )
             try await streamingManager.loadModels(models)
             try await streamingManager.startStreaming(source: .microphone)
