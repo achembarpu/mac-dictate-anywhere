@@ -743,11 +743,10 @@ enum OllamaPostProcessingService {
                 "temperature": 0
             ]
         ]
-        if let think = await thinkRequestValue(
-            for: reasoning,
-            baseURL: baseURL,
-            model: trimmedModel
-        ) {
+        let think = await PerfTrace.measure("cleanup.ollamaReasoningLookup") {
+            await thinkRequestValue(for: reasoning, baseURL: baseURL, model: trimmedModel)
+        }
+        if let think {
             payload["think"] = think
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)

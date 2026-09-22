@@ -16,8 +16,8 @@
 //    included, keeping the trace privacy-safe by construction.
 //  - Disk usage is bounded by the system, not by this helper: logd keeps
 //    compressed tracev3 stores under a predefined size quota and purges the
-//    oldest entries first. Tens of lines per dictation are negligible
-//    against that budget, so traces cannot grow unboundedly.
+//    oldest entries first. Long recordings may generate repeated STT spans,
+//    but traces cannot grow unboundedly.
 //
 //  Naming convention: "<area>.<phase>", e.g. "app.startup",
 //  "stt.modelLoad", "stt.finalize", "cleanup.generate".
@@ -34,8 +34,8 @@
 //  Release builds: tracing stays enabled. This is deliberate — improvements
 //  must be measured on release-representative builds. Signposts cost
 //  ~nothing unless Instruments is recording, and log volume is bounded
-//  (tens of lines per dictation; static names and durations only, no user
-//  content). The kill switch works identically in Release and Debug.
+//  (static names and durations only, no user content). The kill switch works
+//  identically in Release and Debug.
 //
 
 import Foundation
@@ -57,32 +57,52 @@ enum PerfTrace {
     nonisolated private static let signposter = OSSignposter(logger: logger)
     nonisolated private static let disabledSignposter = OSSignposter.disabled
 
-    /// False when `DICTATE_ANYWHERE_PERF_TRACE=0` is set. Signposts use the
-    /// disabled poster and completion lines are skipped.
-    nonisolated static var isEnabled: Bool {
-        ProcessInfo.processInfo.environment["DICTATE_ANYWHERE_PERF_TRACE"] != "0"
+    /// Read once at launch: the documented kill switch is a launch-time
+    /// setting, and checking the process environment on every span is costly.
+    nonisolated static let isEnabled = isEnabled(in: ProcessInfo.processInfo.environment)
+
+    nonisolated static func isEnabled(in environment: [String: String]) -> Bool {
+        environment["DICTATE_ANYWHERE_PERF_TRACE"] != "0"
     }
 
     /// Measures a synchronous closure. Returns the closure's value.
     @discardableResult
     nonisolated static func measure<T>(_ name: StaticString, _ operation: () throws -> T) rethrows -> T {
         let interval = begin(name)
-        defer { interval.end() }
-        return try operation()
+        do {
+            let result = try operation()
+            interval.end(outcome: "completed")
+            return result
+        } catch {
+            interval.end(outcome: outcome(for: error))
+            throw error
+        }
     }
 
     /// Measures an asynchronous closure. Returns the closure's value.
     @discardableResult
     nonisolated static func measure<T>(_ name: StaticString, _ operation: () async throws -> T) async rethrows -> T {
         let interval = begin(name)
-        defer { interval.end() }
-        return try await operation()
+        do {
+            let result = try await operation()
+            interval.end(outcome: "completed")
+            return result
+        } catch {
+            interval.end(outcome: outcome(for: error))
+            throw error
+        }
+    }
+
+    nonisolated static func outcome(for error: Error) -> StaticString {
+        if error is CancellationError || (error as? URLError)?.code == .cancelled {
+            return "cancelled"
+        }
+        return "failed"
     }
 
     /// Starts a manually-scoped interval. Pair with `end(outcome:)` on the
     /// returned token — `defer { token.end() }` covers every return/throw path.
-    /// Deferred ends report outcome "completed" even on error paths; failures
-    /// remain visible through each call site's existing error logging.
+    /// An early explicit end is safe: subsequent deferred ends are ignored.
     nonisolated static func begin(_ name: StaticString) -> PerfInterval {
         let enabled = isEnabled
         let poster = enabled ? signposter : disabledSignposter
@@ -91,7 +111,7 @@ enum PerfTrace {
             name: name,
             state: state,
             signposter: poster,
-            startTime: CFAbsoluteTimeGetCurrent(),
+            startTime: ProcessInfo.processInfo.systemUptime,
             enabled: enabled
         )
     }
@@ -117,18 +137,20 @@ enum PerfTrace {
 }
 
 /// An in-flight timing interval. Obtain via `PerfTrace.begin(_:)`.
-struct PerfInterval: Sendable {
+nonisolated final class PerfInterval: @unchecked Sendable {
     private let name: StaticString
     private let state: OSSignpostIntervalState
     private let signposter: OSSignposter
-    private let startTime: CFAbsoluteTime
+    private let startTime: TimeInterval
     private let enabled: Bool
+    private let lock = NSLock()
+    private var didEnd = false
 
     nonisolated fileprivate init(
         name: StaticString,
         state: OSSignpostIntervalState,
         signposter: OSSignposter,
-        startTime: CFAbsoluteTime,
+        startTime: TimeInterval,
         enabled: Bool
     ) {
         self.name = name
@@ -139,14 +161,23 @@ struct PerfInterval: Sendable {
     }
 
     /// Ends the interval, emitting the signpost and a duration log line.
+    /// The default "ended" does not claim success for a manually scoped span.
     /// Outcome must be a static literal (e.g. "completed", "cancelled").
     /// Nonisolated so `defer { token.end() }` works from any executor
     /// without hopping.
-    nonisolated func end(outcome: StaticString = "completed") {
-        let milliseconds = max(0, Int((CFAbsoluteTimeGetCurrent() - startTime) * 1_000))
+    @discardableResult
+    nonisolated func end(outcome: StaticString = "ended") -> Bool {
+        let shouldEnd = lock.withLock { () -> Bool in
+            guard !didEnd else { return false }
+            didEnd = true
+            return true
+        }
+        guard shouldEnd else { return false }
+        let milliseconds = max(0, Int((ProcessInfo.processInfo.systemUptime - startTime) * 1_000))
         signposter.endInterval(name, state)
         if enabled {
             PerfTrace.logCompletion(name: name, milliseconds: milliseconds, outcome: outcome)
         }
+        return true
     }
 }

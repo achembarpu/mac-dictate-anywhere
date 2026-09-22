@@ -41,16 +41,18 @@ final class TextInserter {
         } ?? frontmostApplication
         let resolvedTargetProcessIdentifier = targetApplication?.processIdentifier
         let targetBundleIdentifier = targetApplication?.bundleIdentifier
-        let insertionText = preparedTextForInsertion(
-            text,
-            targetBundleIdentifier: targetBundleIdentifier,
-            targetProcessIdentifier: resolvedTargetProcessIdentifier,
-            context: context,
-            style: style,
-            knownTerms: knownTerms,
-            modelInsertionPlan: modelInsertionPlan,
-            preserveModelFormatting: preserveModelFormatting
-        )
+        let insertionText = PerfTrace.measure("insertion.prepare") {
+            preparedTextForInsertion(
+                text,
+                targetBundleIdentifier: targetBundleIdentifier,
+                targetProcessIdentifier: resolvedTargetProcessIdentifier,
+                context: context,
+                style: style,
+                knownTerms: knownTerms,
+                modelInsertionPlan: modelInsertionPlan,
+                preserveModelFormatting: preserveModelFormatting
+            )
+        }
         let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere", category: "TextInsertion")
         logger.info("insertionFormatting: model=\(preserveModelFormatting) explicitSpacing=\(modelInsertionPlan != nil) inputUpper=\(text.first(where: \.isLetter)?.isUppercase == true) outputUpper=\(insertionText.first(where: \.isLetter)?.isUppercase == true) leadingSpace=\(insertionText.hasPrefix(" ")) trailingSpace=\(insertionText.hasSuffix(" "))")
         guard !insertionText.isEmpty else { return .failed }
@@ -77,6 +79,8 @@ final class TextInserter {
         var listEdit: (AXUIElement, PlainTextListEdit)?
         if let context, context.processIdentifier == resolvedTargetProcessIdentifier,
            PlainTextListEdit.needsRenumbering(insertion: insertionText, context: context) {
+            let listEditTrace = PerfTrace.begin("insertion.listEdit")
+            defer { listEditTrace.end() }
             guard let pid = resolvedTargetProcessIdentifier,
                   let element = Self.focusedTextElement(processIdentifier: pid),
                   Self.processIdentifier(of: element) == resolvedTargetProcessIdentifier,
@@ -143,6 +147,8 @@ final class TextInserter {
 
     private func finishListEdit(_ pending: (AXUIElement, PlainTextListEdit)?, insertionText: String) async {
         guard let (element, edit) = pending else { return }
+        let trace = PerfTrace.begin("insertion.listEditVerify")
+        defer { trace.end() }
         for _ in 0..<10 {
             if Self.textValue(of: element) == edit.expectedValue {
                 // Leave the cursor after the new items, not after old neighbors.

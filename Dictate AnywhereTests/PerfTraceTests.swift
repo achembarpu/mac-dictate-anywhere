@@ -20,9 +20,17 @@ final class PerfTraceTests: XCTestCase {
         XCTAssertEqual(value, "ok")
     }
 
-    func testBeginEndDoesNotCrash() {
+    func testErrorOutcomesIncludeURLSessionCancellation() {
+        struct Probe: Error {}
+        XCTAssertEqual(String(describing: PerfTrace.outcome(for: CancellationError())), "cancelled")
+        XCTAssertEqual(String(describing: PerfTrace.outcome(for: URLError(.cancelled))), "cancelled")
+        XCTAssertEqual(String(describing: PerfTrace.outcome(for: Probe())), "failed")
+    }
+
+    func testBeginEndIsIdempotent() {
         let interval = PerfTrace.begin("test.manual")
-        interval.end()
+        XCTAssertTrue(interval.end())
+        XCTAssertFalse(interval.end())
     }
 
     func testBeginEndWithCustomOutcomeDoesNotCrash() {
@@ -34,20 +42,10 @@ final class PerfTraceTests: XCTestCase {
         PerfTrace.event("test.event")
     }
 
-    func testIsEnabledDefaultsToTrue() {
-        // The test host does not set the kill-switch variable.
-        XCTAssertTrue(PerfTrace.isEnabled)
-    }
-
-    func testKillSwitchDisablesTracing() {
-        setenv("DICTATE_ANYWHERE_PERF_TRACE", "0", 1)
-        defer { unsetenv("DICTATE_ANYWHERE_PERF_TRACE") }
-        XCTAssertFalse(PerfTrace.isEnabled)
-    }
-
-    func testKillSwitchRestoresAfterUnset() {
-        // Guard: the previous test's defer must have cleaned up.
-        XCTAssertNil(ProcessInfo.processInfo.environment["DICTATE_ANYWHERE_PERF_TRACE"])
-        XCTAssertTrue(PerfTrace.isEnabled)
+    func testKillSwitchIsReadFromLaunchEnvironment() {
+        XCTAssertTrue(PerfTrace.isEnabled(in: [:]))
+        XCTAssertTrue(PerfTrace.isEnabled(in: ["DICTATE_ANYWHERE_PERF_TRACE": "1"]))
+        XCTAssertFalse(PerfTrace.isEnabled(in: ["DICTATE_ANYWHERE_PERF_TRACE": "0"]))
+        XCTAssertEqual(PerfTrace.isEnabled, PerfTrace.isEnabled(in: ProcessInfo.processInfo.environment))
     }
 }

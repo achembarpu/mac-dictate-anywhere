@@ -685,7 +685,7 @@ final class AppState {
         }
         guard !isShuttingDown else { return }
         let requestTrace = PerfTrace.begin("dictation.requestToRecording")
-        defer { requestTrace.end() }
+        defer { requestTrace.end(outcome: "aborted") }
         if settings.engineChoice != .assemblyAI,
            settings.inputSourceAutoSwitchEnabled,
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
@@ -738,12 +738,16 @@ final class AppState {
         guard !isShuttingDown else { return }
         captureInsertionTargetAppAndContext(engine: engine)
         guard !isShuttingDown else { return }
-        await beginRecording(engine: engine, mode: mode)
+        await beginRecording(engine: engine, mode: mode, requestTrace: requestTrace)
     }
 
-    private func beginRecording(engine: TranscriptionEngine, mode: HotkeyMode?) async {
+    private func beginRecording(
+        engine: TranscriptionEngine,
+        mode: HotkeyMode?,
+        requestTrace: PerfInterval? = nil
+    ) async {
         let trace = PerfTrace.begin("dictation.start")
-        defer { trace.end() }
+        defer { trace.end(outcome: "aborted") }
         guard !isShuttingDown else { return }
         engine.setSessionContextualVocabulary(sessionDictationContext?.lexicalHints ?? [])
         engine.setSessionDictationContext(sessionDictationContext)
@@ -890,6 +894,8 @@ final class AppState {
 
         activeRecordingStartupID = nil
         isTransitioning = false
+        trace.end(outcome: "completed")
+        requestTrace?.end(outcome: "completed")
 
         // If the user released a hold-to-record key while we were starting up, stop now.
         if pendingHoldRelease {
