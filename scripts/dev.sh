@@ -142,7 +142,9 @@ run_tests() {
   printf 'Testing %s (%s)\n' "$SCHEME" "$CONFIGURATION"
   rm -rf "$RESULT_BUNDLE_PATH"
   set +e
-  xcodebuild "${xcodebuild_args[@]}" -resultBundlePath "$RESULT_BUNDLE_PATH" test
+  xcodebuild "${xcodebuild_args[@]}" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK_OPTIMIZED" \
+    -resultBundlePath "$RESULT_BUNDLE_PATH" test
   local test_status=$?
   set -e
   local report_status=0
@@ -160,7 +162,7 @@ run_benchmark() {
   [[ "$CONFIGURATION" == "Debug" ]] || fail "Benchmarks require the Debug configuration"
   rm -rf "$RESULT_BUNDLE_PATH"
   xcodebuild "${xcodebuild_args[@]}" \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK PIPELINE_BENCHMARK_BASELINE" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED" \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
     -only-testing:"Dictate AnywhereTests/PipelinePerformanceBenchmarkTests" \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
