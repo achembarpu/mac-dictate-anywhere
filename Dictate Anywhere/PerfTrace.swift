@@ -41,6 +41,32 @@
 import Foundation
 import os
 
+nonisolated struct PerfTraceSessionMetadata: Sendable {
+    private(set) var labels: [String: String]
+
+    init(labels: [String: String]) {
+        self.labels = labels
+    }
+
+    func merging(_ updates: [String: String]) -> Self {
+        var merged = labels
+        merged.merge(updates) { _, new in new }
+        return Self(labels: merged)
+    }
+
+    var logFields: String {
+        labels.keys.sorted().compactMap { key in
+            guard let value = labels[key] else { return nil }
+            return "\(key)=\(value)"
+        }.joined(separator: " ")
+    }
+}
+
+private nonisolated final class PerfTraceMetadataStorage: @unchecked Sendable {
+    let lock = NSLock()
+    var value: PerfTraceSessionMetadata?
+}
+
 /// Central entry point for hot-path timing traces.
 ///
 /// Deliberately actor-independent: every member is `nonisolated` so tracing
@@ -56,6 +82,7 @@ enum PerfTrace {
 
     nonisolated private static let signposter = OSSignposter(logger: logger)
     nonisolated private static let disabledSignposter = OSSignposter.disabled
+    nonisolated private static let metadataStorage = PerfTraceMetadataStorage()
 
     /// Read once at launch: the documented kill switch is a launch-time
     /// setting, and checking the process environment on every span is costly.
@@ -100,6 +127,29 @@ enum PerfTrace {
         return "failed"
     }
 
+    /// Sets privacy-safe labels for the active dictation session. Values must
+    /// describe configuration or lifecycle state, never transcript or target
+    /// application content.
+    nonisolated static func setSessionMetadata(_ labels: [String: String]) {
+        metadataStorage.lock.withLock {
+            metadataStorage.value = PerfTraceSessionMetadata(labels: labels)
+        }
+    }
+
+    nonisolated static func updateSessionMetadata(_ labels: [String: String]) {
+        metadataStorage.lock.withLock {
+            metadataStorage.value = metadataStorage.value?.merging(labels)
+        }
+    }
+
+    nonisolated static func clearSessionMetadata() {
+        metadataStorage.lock.withLock { metadataStorage.value = nil }
+    }
+
+    nonisolated private static func currentSessionMetadata() -> PerfTraceSessionMetadata? {
+        metadataStorage.lock.withLock { metadataStorage.value }
+    }
+
     /// Starts a manually-scoped interval. Pair with `end(outcome:)` on the
     /// returned token — `defer { token.end() }` covers every return/throw path.
     /// An early explicit end is safe: subsequent deferred ends are ignored.
@@ -123,15 +173,17 @@ enum PerfTrace {
     nonisolated static func event(_ name: StaticString) {
         guard isEnabled else { return }
         signposter.emitEvent(name, id: signposter.makeSignpostID())
-        logger.notice("trace \(String(describing: name), privacy: .public) event=observed")
+        let metadata = currentSessionMetadata()?.logFields ?? "session_id=none"
+        logger.notice("trace \(String(describing: name), privacy: .public) event=observed \(metadata, privacy: .public)")
     }
 
     nonisolated fileprivate static func logCompletion(name: StaticString, milliseconds: Int, outcome: StaticString) {
         // Notice (default) level, not info: per Apple, info stays memory-only
         // while notice persists to disk (up to a system storage limit), so
         // historical `log show` queries work with zero configuration.
+        let metadata = currentSessionMetadata()?.logFields ?? "session_id=none"
         logger.notice(
-            "trace \(String(describing: name), privacy: .public) duration_ms=\(milliseconds, privacy: .public) outcome=\(String(describing: outcome), privacy: .public)"
+            "trace \(String(describing: name), privacy: .public) duration_ms=\(milliseconds, privacy: .public) outcome=\(String(describing: outcome), privacy: .public) \(metadata, privacy: .public)"
         )
     }
 }

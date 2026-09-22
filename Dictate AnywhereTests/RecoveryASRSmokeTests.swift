@@ -9,7 +9,13 @@ import FluidAudio
 @MainActor
 final class RecoveryASRSmokeTests: XCTestCase {
     override func setUp() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["RUN_RECOVERY_ASR_TESTS"] == "1",
+        let recoveryEnabled = ProcessInfo.processInfo.environment["RUN_RECOVERY_ASR_TESTS"] == "1"
+        #if PIPELINE_BENCHMARK
+        let benchmarkEnabled = true
+        #else
+        let benchmarkEnabled = false
+        #endif
+        try XCTSkipUnless(recoveryEnabled || benchmarkEnabled,
                           "Set RUN_RECOVERY_ASR_TESTS=1 to test recovery with installed speech models")
     }
 
@@ -106,6 +112,100 @@ final class RecoveryASRSmokeTests: XCTestCase {
         defer { Settings.shared.appleSpeechLanguage = oldLanguage }
         Settings.shared.appleSpeechLanguage = .english
         try await checkRecovery(using: AppleSpeechEngine())
+    }
+
+    /// Replays one saved speech fixture through the real offline transcription
+    /// paths. Gated because it requires installed models and is intentionally
+    /// slower than the normal test suite.
+    func testRepeatableOfflineASRBenchmark() async throws {
+        #if !PIPELINE_BENCHMARK
+        throw XCTSkip("Run scripts/dev.sh benchmark to enable the offline ASR benchmark")
+        #else
+        let iterations = max(1, Int(ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pipeline-benchmark-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DictationRecoveryStore(directory: directory)
+        let capture = try store.beginCapture()
+        capture.append(try fixtureSamples())
+        let preserved = try await store.preserve(capture, preview: "", completedTranscript: nil)
+        let entry = try XCTUnwrap(preserved)
+        let audioURL = store.audioURL(id: entry.id)
+
+        let settings = Settings.shared
+        let oldModel = settings.parakeetModelChoice
+        let oldLanguage = settings.selectedLanguage
+        let oldAppleSpeechLanguage = settings.appleSpeechLanguage
+        let oldMode = settings.transcriptPostProcessingMode
+        defer {
+            settings.parakeetModelChoice = oldModel
+            settings.selectedLanguage = oldLanguage
+            settings.appleSpeechLanguage = oldAppleSpeechLanguage
+            settings.transcriptPostProcessingMode = oldMode
+            PerfTrace.clearSessionMetadata()
+        }
+
+        if let model = ParakeetModelChoice(rawValue: ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_MODEL"] ?? "parakeetEou320") {
+            let engine = ParakeetEngine()
+            try XCTSkipUnless(engine.checkModelOnDisk(for: model), "Parakeet model \(model.rawValue) is not installed")
+            settings.parakeetModelChoice = model
+            settings.selectedLanguage = .english
+            settings.transcriptPostProcessingMode = .none
+            try await engine.prepare()
+            await benchmark(
+                engine: engine,
+                name: "parakeet",
+                model: model.rawValue,
+                audioURL: audioURL,
+                iterations: iterations
+            )
+        }
+
+        if AppleSpeechEngine.isSupported,
+           SFSpeechRecognizer.authorizationStatus() == .authorized {
+            let engine = AppleSpeechEngine()
+            settings.appleSpeechLanguage = .english
+            try? await engine.prepare()
+            if engine.isReady {
+                await benchmark(
+                    engine: engine,
+                    name: "appleSpeech",
+                    model: "english",
+                    audioURL: audioURL,
+                    iterations: iterations
+                )
+            }
+        }
+
+        #endif
+    }
+
+    private func benchmark(
+        engine: TranscriptionEngine,
+        name: String,
+        model: String,
+        audioURL: URL,
+        iterations: Int
+    ) async {
+        for iteration in 1...iterations {
+            PerfTrace.setSessionMetadata([
+                "session_id": "benchmark-\(name)-\(iteration)",
+                "benchmark": "offline_asr",
+                "iteration": String(iteration),
+                "engine": name,
+                "model": model,
+                "language": "english",
+                "cleanup_mode": "none",
+                "s1_mini_enabled": "false",
+                "filler_removal_enabled": "false",
+                "context_awareness_enabled": "false"
+            ])
+            let clock = ContinuousClock()
+            let startedAt = clock.now
+            let text = (try? await engine.transcribeRecording(at: audioURL)) ?? ""
+            let elapsed = startedAt.duration(to: clock.now)
+            XCTAssertFalse(text.isEmpty, "\(name) benchmark produced no transcript")
+            print("REPRO_ASR_BENCHMARK engine=\(name) model=\(model) iteration=\(iteration) elapsed=\(elapsed)")
+        }
     }
 
     private func checkRecovery(using engine: TranscriptionEngine) async throws {

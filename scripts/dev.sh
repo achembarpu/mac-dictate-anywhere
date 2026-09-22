@@ -23,6 +23,8 @@ Commands:
   launch  Build and launch the canonical Debug app
   test [OPTIONS]
           Build and run the project tests
+  benchmark
+          Run the repeatable offline ASR fixture benchmark
   check   Validate the Xcode project and Debug scheme
   clean   Stop the app and remove project DerivedData
   stop    Stop the running canonical app
@@ -152,6 +154,15 @@ run_tests() {
       "$report_status" "$test_status" >&2
   fi
   return "$test_status"
+}
+
+run_benchmark() {
+  [[ "$CONFIGURATION" == "Debug" ]] || fail "Benchmarks require the Debug configuration"
+  rm -rf "$RESULT_BUNDLE_PATH"
+  xcodebuild "${xcodebuild_args[@]}" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK" \
+    -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
+    -resultBundlePath "$RESULT_BUNDLE_PATH" test
 }
 
 report_test_results() {
@@ -334,7 +345,7 @@ if [[ "$command" == "signing" ]]; then
 fi
 
 case "$command" in
-  build|test)
+  build|test|benchmark)
     parse_configuration_options "${@:2}"
     ;;
   launch|check|clean|stop)
@@ -354,6 +365,7 @@ case "$command" in
   build) require_command xcodebuild; build ;;
   launch) launch ;;
   test) require_command xcodebuild; run_tests ;;
+  benchmark) require_command xcodebuild; run_benchmark ;;
   check) require_command xcodebuild; check; validate_lifecycle_contract ;;
   clean) validate_clean_path; stop; rm -rf -- "$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"; printf 'Removed DerivedData: %s\n' "$DEFAULT_DERIVED_DATA_PATH" ;;
   stop) stop ;;

@@ -48,4 +48,10 @@ final class PerfTraceTests: XCTestCase {
         XCTAssertFalse(PerfTrace.isEnabled(in: ["DICTATE_ANYWHERE_PERF_TRACE": "0"]))
         XCTAssertEqual(PerfTrace.isEnabled, PerfTrace.isEnabled(in: ProcessInfo.processInfo.environment))
     }
+
+    func testSessionMetadataMergesAndClears() {
+        PerfTrace.setSessionMetadata(["session_id": "test", "engine": "parakeet"])
+        PerfTrace.updateSessionMetadata(["model": "test-model"])
+        PerfTrace.clearSessionMetadata()
+    }
 }

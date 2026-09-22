@@ -660,6 +660,53 @@ final class AppState {
 
     // MARK: - Dictation Flow
 
+    private func beginPerformanceSession(mode: HotkeyMode?) {
+        let engine = settings.engineChoice
+        let model: String
+        let language: String
+        switch engine {
+        case .parakeet:
+            model = settings.parakeetModelChoice.rawValue
+            language = settings.selectedLanguage.rawValue
+        case .appleSpeech:
+            model = settings.appleSpeechLanguage.rawValue
+            language = settings.appleSpeechLanguage.rawValue
+        case .assemblyAI:
+            model = "assemblyAI"
+            language = settings.selectedLanguage.rawValue
+        }
+
+        PerfTrace.setSessionMetadata([
+            "session_id": UUID().uuidString,
+            "engine": engine.rawValue,
+            "model": model,
+            "language": language,
+            "hotkey_mode": mode?.rawValue ?? "none",
+            "eou_enabled": String(engine == .parakeet
+                && settings.parakeetModelChoice.supportsEndOfUtterance
+                && settings.autoStopAfterSpeechEndsEnabled),
+            "cleanup_mode": settings.transcriptPostProcessingMode.rawValue,
+            "s1_mini_enabled": String(settings.transcriptPostProcessingMode == .s1Mini),
+            "filler_removal_enabled": String(settings.isFillerWordRemovalEnabled
+                && !settings.fillerWordsToRemove.isEmpty),
+            "context_awareness_enabled": String(settings.dictationContextAwarenessEnabled),
+            "audio_mute_enabled": String(settings.muteSystemAudioDuringRecordingEnabled),
+            "microphone_boost_enabled": String(settings.boostMicrophoneVolumeEnabled),
+            "input_auto_switch_enabled": String(settings.inputSourceAutoSwitchEnabled),
+            "custom_vocabulary_enabled": String(!settings.customVocabulary.isEmpty)
+        ])
+    }
+
+    private func updatePerformanceContextLabels() {
+        let context = sessionDictationContext
+        PerfTrace.updateSessionMetadata([
+            "context_category": context?.category.rawValue ?? "none",
+            "context_excluded": String(context?.isContextExcluded ?? false),
+            "secure_field": String(context?.isSecureField ?? false),
+            "text_position_snapshot": String(context?.hasTextPositionSnapshot ?? false)
+        ])
+    }
+
     func startDictation(mode: HotkeyMode? = nil) async {
         guard !isShuttingDown else { return }
         logger.info("startDictation: entry, status=\(String(describing: self.status), privacy: .public), isTransitioning=\(self.isTransitioning, privacy: .public), engineChoice=\(String(describing: self.settings.engineChoice), privacy: .public)")
@@ -684,6 +731,7 @@ final class AppState {
             return // The permission gesture must never become a recording gesture.
         }
         guard !isShuttingDown else { return }
+        beginPerformanceSession(mode: mode)
         let requestTrace = PerfTrace.begin("dictation.requestToRecording")
         defer { requestTrace.end(outcome: "aborted") }
         if settings.engineChoice != .assemblyAI,
@@ -737,6 +785,7 @@ final class AppState {
         }
         guard !isShuttingDown else { return }
         captureInsertionTargetAppAndContext(engine: engine)
+        updatePerformanceContextLabels()
         guard !isShuttingDown else { return }
         await beginRecording(engine: engine, mode: mode, requestTrace: requestTrace)
     }
@@ -922,7 +971,10 @@ final class AppState {
 
     private func finishDictation() async {
         let trace = PerfTrace.begin("dictation.stopToInsertion")
-        defer { trace.end() }
+        defer {
+            trace.end()
+            PerfTrace.clearSessionMetadata()
+        }
         stopAudioLevelPolling()
 
         // Show processing overlay
@@ -1248,7 +1300,10 @@ final class AppState {
     func cancelDictation() async {
         guard canCancelDictation else { return }
         let trace = PerfTrace.begin("dictation.cancel")
-        defer { trace.end() }
+        defer {
+            trace.end()
+            PerfTrace.clearSessionMetadata()
+        }
 
         isCancelling = true
         invalidateContextCapture()
