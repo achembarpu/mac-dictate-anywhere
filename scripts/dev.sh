@@ -25,6 +25,7 @@ Commands:
           Build and run the project tests
   benchmark
           Run repeatable ASR and synthetic pipeline benchmarks
+          Accepts --configuration Debug|Release and --release
   check   Validate the Xcode project and Debug scheme
   clean   Stop the app and remove project DerivedData
   stop    Stop the running canonical app
@@ -121,6 +122,7 @@ configure_xcodebuild_args() {
     -scheme "$SCHEME"
     -configuration "$CONFIGURATION"
     -derivedDataPath "$DERIVED_DATA_PATH"
+    -destination 'platform=macOS,arch=arm64'
   )
 
   if [[ "$CONFIGURATION" == "Debug" && -f "$SIGNING_CONFIG_PATH" ]]; then
@@ -159,10 +161,21 @@ run_tests() {
 }
 
 run_benchmark() {
-  [[ "$CONFIGURATION" == "Debug" ]] || fail "Benchmarks require the Debug configuration"
+  local benchmark_conditions="PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED"
+  local -a benchmark_xcodebuild_args=("${xcodebuild_args[@]}")
+  [[ "$CONFIGURATION" == "Debug" ]] && benchmark_conditions="DEBUG $benchmark_conditions"
+  if [[ "$CONFIGURATION" == "Release" ]]; then
+    # Local benchmark artifacts do not need distribution signing. Keep normal
+    # Release builds on the production signing path above.
+    benchmark_xcodebuild_args+=(
+      CODE_SIGNING_ALLOWED=NO
+      CODE_SIGNING_REQUIRED=NO
+      ENABLE_TESTABILITY=YES
+    )
+  fi
   rm -rf "$RESULT_BUNDLE_PATH"
-  xcodebuild "${xcodebuild_args[@]}" \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED" \
+  xcodebuild "${benchmark_xcodebuild_args[@]}" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
     -only-testing:"Dictate AnywhereTests/PipelinePerformanceBenchmarkTests" \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test

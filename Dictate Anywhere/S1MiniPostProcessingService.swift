@@ -236,6 +236,7 @@ actor S1MiniInferenceEngine {
             1_024,
             max(32, Int(ceil(Double(transcriptTokenCount) * 1.3)) + 32)
         )
+        PerfTrace.updateRequestCounts(tokenCount: transcriptTokenCount + promptTokens.count)
         // Keep the documented llama.cpp context size. Reducing Qwen3's context
         // dynamically changes logits enough for S1-mini to emit EOS on valid
         // short transcripts.

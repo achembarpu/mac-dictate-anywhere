@@ -1066,6 +1066,8 @@ final class ParakeetEngine: TranscriptionEngine {
     func transcribeRecording(at url: URL) async throws -> String {
         let trace = PerfTrace.begin("stt.transcribeFile")
         defer { trace.end() }
+        let audioFile = try AVAudioFile(forReading: url)
+        PerfTrace.updateRequestCounts(sampleCount: Int(audioFile.length))
         let model = selectedModelChoice
         guard await asrCoordinator.isInitialized(for: model) else { throw TranscriptionError.engineNotReady }
         if model.tdtModelVersion != nil {

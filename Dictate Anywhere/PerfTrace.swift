@@ -142,6 +142,16 @@ enum PerfTrace {
         }
     }
 
+    /// Adds numeric request facts to subsequent interval records without
+    /// including transcript or prompt content in the trace.
+    nonisolated static func updateRequestCounts(sampleCount: Int? = nil, tokenCount: Int? = nil) {
+        var updates: [String: String] = [:]
+        if let sampleCount { updates["sample_count"] = String(sampleCount) }
+        if let tokenCount { updates["token_count"] = String(tokenCount) }
+        guard !updates.isEmpty else { return }
+        updateSessionMetadata(updates)
+    }
+
     nonisolated static func clearSessionMetadata() {
         metadataStorage.lock.withLock { metadataStorage.value = nil }
     }
