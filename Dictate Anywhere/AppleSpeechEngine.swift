@@ -72,6 +72,9 @@ final class AppleSpeechEngine: TranscriptionEngine {
 
     private let stateLock = NSLock()
     private var transcript = ""
+    /// One-shot guard for the `stt.firstPartial` trace event. Guarded by
+    /// `stateLock` because live transcript callbacks arrive off the main actor.
+    private var firstPartialEmitted = false
     private var levelSampleBuffer: [Float] = []
     private var audioCaptureController: AudioCaptureController?
     var recoveryCapture: RecoveryAudioCapture?
@@ -133,6 +136,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
                 contextualVocabulary: vocabulary,
                 onTranscript: { [weak self] text in
                     self?.setTranscript(text)
+                    self?.markFirstPartialIfNeeded(text: text)
                 }
             )
             preparedSession = session
@@ -182,6 +186,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
 
         stateLock.withLock {
             transcript = ""
+            firstPartialEmitted = false
             levelSampleBuffer.removeAll(keepingCapacity: true)
         }
         let usesExplicitMicrophoneSelection = Settings.shared.selectedMicrophoneUID != nil
@@ -255,6 +260,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
         activeSession = nil
         setTranscript("")
         stateLock.withLock {
+            firstPartialEmitted = false
             levelSampleBuffer.removeAll(keepingCapacity: false)
         }
     }
@@ -340,6 +346,21 @@ final class AppleSpeechEngine: TranscriptionEngine {
     private func setTranscript(_ text: String) {
         stateLock.withLock {
             transcript = text
+        }
+    }
+
+    /// Emits the one-shot `stt.firstPartial` event for live transcript text.
+    /// Only live callbacks emit: a final-only result (stop path) leaves the
+    /// event absent, which itself reports that no live partial appeared.
+    private func markFirstPartialIfNeeded(text: String) {
+        let shouldEmit = stateLock.withLock { () -> Bool in
+            guard !firstPartialEmitted,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            firstPartialEmitted = true
+            return true
+        }
+        if shouldEmit {
+            PerfTrace.event("stt.firstPartial")
         }
     }
 

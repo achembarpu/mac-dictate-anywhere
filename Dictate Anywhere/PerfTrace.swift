@@ -26,6 +26,12 @@
 //  Kill switch (both signposts and log lines): launch with
 //  `DICTATE_ANYWHERE_PERF_TRACE=0` in the environment.
 //
+//  Release builds: tracing stays enabled. This is deliberate — improvements
+//  must be measured on release-representative builds. Signposts cost
+//  ~nothing unless Instruments is recording, and log volume is bounded
+//  (tens of lines per dictation; static names and durations only, no user
+//  content). The kill switch works identically in Release and Debug.
+//
 
 import Foundation
 import os

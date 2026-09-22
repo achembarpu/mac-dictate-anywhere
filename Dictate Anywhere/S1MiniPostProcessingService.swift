@@ -226,25 +226,12 @@ actor S1MiniInferenceEngine {
             throw S1MiniServiceError.modelLoadFailed
         }
 
-        let transcriptTokenCount = try tokenize(
-            transcript,
-            vocabulary: vocabulary,
-            addSpecial: false,
-            parseSpecial: false
-        ).count
-        guard transcriptTokenCount <= S1MiniModelSpec.maximumTranscriptTokens else {
-            throw S1MiniServiceError.transcriptTooLong(
-                actual: transcriptTokenCount,
-                maximum: S1MiniModelSpec.maximumTranscriptTokens
-            )
-        }
-
-        var promptTokens = try tokenize(
-            prompt,
-            vocabulary: vocabulary,
-            addSpecial: false,
-            parseSpecial: true
+        let (transcriptTokenCount, initialPromptTokens) = try tokenizeInputs(
+            transcript: transcript,
+            prompt: prompt,
+            vocabulary: vocabulary
         )
+        var promptTokens = initialPromptTokens
         let maximumOutputTokens = min(
             1_024,
             max(32, Int(ceil(Double(transcriptTokenCount) * 1.3)) + 32)
@@ -283,6 +270,60 @@ actor S1MiniInferenceEngine {
             throw S1MiniServiceError.promptEvaluationFailed(promptStatus)
         }
 
+        let output = try sampleOutput(
+            context: context,
+            vocabulary: vocabulary,
+            maximumOutputTokens: maximumOutputTokens
+        )
+
+        let decoded = String(decoding: output, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        logger.info(
+            "generate: promptTokens=\(promptTokens.count, privacy: .public), inputTokens=\(transcriptTokenCount, privacy: .public), outputChars=\(decoded.count, privacy: .public)"
+        )
+        return decoded
+    }
+
+    /// Tokenizes the transcript (for the length guard) and the prompt.
+    /// Traced separately so future work can distinguish tokenizer cost
+    /// from context setup, prompt evaluation, and sampling.
+    private func tokenizeInputs(
+        transcript: String,
+        prompt: String,
+        vocabulary: OpaquePointer
+    ) throws -> (transcriptTokenCount: Int, promptTokens: [llama_token]) {
+        let trace = PerfTrace.begin("cleanup.tokenize")
+        defer { trace.end() }
+        let transcriptTokenCount = try tokenize(
+            transcript,
+            vocabulary: vocabulary,
+            addSpecial: false,
+            parseSpecial: false
+        ).count
+        guard transcriptTokenCount <= S1MiniModelSpec.maximumTranscriptTokens else {
+            throw S1MiniServiceError.transcriptTooLong(
+                actual: transcriptTokenCount,
+                maximum: S1MiniModelSpec.maximumTranscriptTokens
+            )
+        }
+        let promptTokens = try tokenize(
+            prompt,
+            vocabulary: vocabulary,
+            addSpecial: false,
+            parseSpecial: true
+        )
+        return (transcriptTokenCount, promptTokens)
+    }
+
+    /// Runs the autoregressive sampling loop. Traced separately so future
+    /// work can derive per-token timings from the existing token counts.
+    private func sampleOutput(
+        context: OpaquePointer,
+        vocabulary: OpaquePointer,
+        maximumOutputTokens: Int
+    ) throws -> Data {
+        let trace = PerfTrace.begin("cleanup.decode")
+        defer { trace.end() }
         var output = Data()
         for _ in 0..<maximumOutputTokens {
             try Task.checkCancellation()
@@ -301,13 +342,7 @@ actor S1MiniInferenceEngine {
                 throw S1MiniServiceError.tokenEvaluationFailed(tokenStatus)
             }
         }
-
-        let decoded = String(decoding: output, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        logger.info(
-            "generate: promptTokens=\(promptTokens.count, privacy: .public), inputTokens=\(transcriptTokenCount, privacy: .public), outputChars=\(decoded.count, privacy: .public)"
-        )
-        return decoded
+        return output
     }
 
     private func loadModelIfNeeded(from url: URL) throws -> OpaquePointer {

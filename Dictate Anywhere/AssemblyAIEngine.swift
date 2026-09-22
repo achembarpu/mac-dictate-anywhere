@@ -94,6 +94,9 @@ final class AssemblyAIEngine: TranscriptionEngine {
 
     private let stateLock = NSLock()
     private var transcript = ""
+    /// One-shot guard for the `stt.firstPartial` trace event. Guarded by
+    /// `stateLock` because live preview callbacks arrive off the main actor.
+    private var firstPartialEmitted = false
     private var fullRecordingSamples: [Float] = []
     private var levelSampleBuffer: [Float] = []
     private var recordingExceededLimit = false
@@ -153,6 +156,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
         lastResultWasPolished = false
         stateLock.withLock {
             transcript = ""
+            firstPartialEmitted = false
             fullRecordingSamples.removeAll(keepingCapacity: true)
             levelSampleBuffer.removeAll(keepingCapacity: true)
             recordingExceededLimit = false
@@ -642,9 +646,18 @@ final class AssemblyAIEngine: TranscriptionEngine {
                 contextualVocabulary: vocabulary
             ) { [weak self] text in
                 guard let self else { return }
-                self.stateLock.withLock {
-                    guard self.livePreviewSessionID == id else { return }
+                let shouldEmit = self.stateLock.withLock { () -> Bool in
+                    guard self.livePreviewSessionID == id else { return false }
                     self.transcript = text
+                    guard !self.firstPartialEmitted,
+                          !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+                    self.firstPartialEmitted = true
+                    return true
+                }
+                // Only live preview callbacks emit: a final-only result
+                // leaves the event absent, reporting no live partial appeared.
+                if shouldEmit {
+                    PerfTrace.event("stt.firstPartial")
                 }
             }
         } catch {
