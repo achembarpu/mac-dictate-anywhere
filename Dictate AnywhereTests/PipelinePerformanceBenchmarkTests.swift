@@ -29,12 +29,12 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         let startedAt = ContinuousClock.now
 
         for _ in 0..<updateCount {
-            #if PIPELINE_BENCHMARK_OPTIMIZED
+            #if PIPELINE_CHILD_BENCHMARK
             monitor.update(samples: sampleWindow[...])
             #else
             monitor.update(samples: sampleWindow)
             #endif
-            #if PIPELINE_BENCHMARK_OPTIMIZED
+            #if PIPELINE_CHILD_BENCHMARK
             let shouldDisplay = AudioMonitor.hasMeaningfulLevelChange(
                 from: lastDisplayedLevel, to: monitor.smoothedLevel
             )
@@ -109,7 +109,7 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         }
         let uncachedElapsed = uncachedStartedAt.duration(to: .now)
 
-        #if PIPELINE_BENCHMARK_OPTIMIZED
+        #if PIPELINE_CHILD_BENCHMARK
         let inserter = TextInserter()
         let firstCachedStartedAt = ContinuousClock.now
         inserter.prewarmPasteScript()
@@ -141,7 +141,7 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
             (.none, .english, true),
             (.s1Mini, .english, false)
         ]
-        #if PIPELINE_BENCHMARK_OPTIMIZED
+        #if PIPELINE_CHILD_BENCHMARK
         let enabledCount = cases.reduce(into: 0) { count, value in
             if S1MiniPrewarmPolicy.shouldPrewarm(
                 mode: value.0, language: value.1, prewarmEnabled: value.2
@@ -157,7 +157,7 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         XCTAssertEqual(enabledCount, 1)
         print("PIPELINE_BENCHMARK component=s1_mini_prewarm_policy enabled_cases=\(enabledCount)")
 
-        #if PIPELINE_BENCHMARK_OPTIMIZED
+        #if PIPELINE_CHILD_BENCHMARK
         guard let path = ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"],
               !path.isEmpty else {
             print("PIPELINE_BENCHMARK component=s1_mini_model_load skipped=no_model_path")

@@ -177,6 +177,7 @@ run_benchmark() {
   xcodebuild "${benchmark_xcodebuild_args[@]}" \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
+    -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark" \
     -only-testing:"Dictate AnywhereTests/PipelinePerformanceBenchmarkTests" \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
 }

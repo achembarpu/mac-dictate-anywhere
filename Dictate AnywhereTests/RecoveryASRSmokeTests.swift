@@ -179,6 +179,56 @@ final class RecoveryASRSmokeTests: XCTestCase {
         #endif
     }
 
+    func testNonStreamingPendingAudioWorkBenchmark() throws {
+        #if !PIPELINE_BENCHMARK
+        throw XCTSkip("Run scripts/dev.sh benchmark to enable pipeline benchmarks")
+        #else
+        // Mirror the non-streaming loop's current 500 ms cadence, 300 ms
+        // minimum delta, 30 s commit threshold, and 20 s commit chunk. This
+        // deterministic fixture measures buffer work without microphone or
+        // model availability, and is reused by E1 candidates.
+        let sampleRate = 16_000
+        let callbackSamples = sampleRate / 2
+        let minimumDelta = 4_800
+        let commitThreshold = sampleRate * 30
+        let commitChunk = sampleRate * 20
+        let callbackCount = 120
+        var pendingSamples = 0
+        var totalCapturedSamples = 0
+        var lastObservedSampleCount = 0
+        var reprocessedSamples = 0
+        var newlyCapturedSamples = 0
+        var transcriptionCount = 0
+
+        for _ in 0..<callbackCount {
+            pendingSamples += callbackSamples
+            totalCapturedSamples += callbackSamples
+            if pendingSamples >= commitThreshold {
+                pendingSamples -= commitChunk
+            }
+
+            let newSampleCount = totalCapturedSamples - lastObservedSampleCount
+            guard newSampleCount > minimumDelta else { continue }
+            reprocessedSamples += pendingSamples
+            newlyCapturedSamples += newSampleCount
+            transcriptionCount += 1
+            lastObservedSampleCount = totalCapturedSamples
+        }
+
+        let ratio = Double(reprocessedSamples) / Double(newlyCapturedSamples)
+        XCTAssertGreaterThan(ratio, 1.0)
+        XCTAssertGreaterThan(transcriptionCount, 1)
+        let ratioText = String(format: "%.2f", ratio)
+        print(
+            "PIPELINE_BENCHMARK component=non_streaming_pending_audio "
+                + "callbacks=\(callbackCount) transcriptions=\(transcriptionCount) "
+                + "reprocessed_samples=\(reprocessedSamples) "
+                + "new_samples=\(newlyCapturedSamples) "
+                + "reprocess_ratio=\(ratioText)"
+        )
+        #endif
+    }
+
     private func benchmark(
         engine: TranscriptionEngine,
         name: String,
