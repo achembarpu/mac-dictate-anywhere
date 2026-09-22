@@ -24,7 +24,7 @@ Commands:
   test [OPTIONS]
           Build and run the project tests
   benchmark
-          Run the repeatable offline ASR fixture benchmark
+          Run repeatable ASR and synthetic pipeline benchmarks
   check   Validate the Xcode project and Debug scheme
   clean   Stop the app and remove project DerivedData
   stop    Stop the running canonical app
@@ -162,6 +162,7 @@ run_benchmark() {
   xcodebuild "${xcodebuild_args[@]}" \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK" \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
+    -only-testing:"Dictate AnywhereTests/PipelinePerformanceBenchmarkTests" \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
 }
 
