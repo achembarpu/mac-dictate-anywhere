@@ -8,11 +8,16 @@
 //  - `OSSignposter` intervals (macOS 12+) make every span visible in
 //    Instruments via the os_signpost instrument. Signposts are designed for
 //    near-zero overhead, so they stay enabled in all builds.
-//  - A matching `Logger` info line records the duration in milliseconds, so
-//    timings are also visible in Console.app and `log show` without profiling.
+//  - A matching `Logger` notice line records the duration in milliseconds,
+//    visible live in Console.app / `log stream` and historically via
+//    `log show` (notice persists to disk; info would stay memory-only).
 //  - Only static interval names and numeric durations are logged. Audio,
 //    transcripts, prompts, file paths, and other user content are never
 //    included, keeping the trace privacy-safe by construction.
+//  - Disk usage is bounded by the system, not by this helper: logd keeps
+//    compressed tracev3 stores under a predefined size quota and purges the
+//    oldest entries first. Tens of lines per dictation are negligible
+//    against that budget, so traces cannot grow unboundedly.
 //
 //  Naming convention: "<area>.<phase>", e.g. "app.startup",
 //  "stt.modelLoad", "stt.finalize", "cleanup.generate".
@@ -98,7 +103,10 @@ enum PerfTrace {
     }
 
     nonisolated fileprivate static func logCompletion(name: StaticString, milliseconds: Int, outcome: StaticString) {
-        logger.info(
+        // Notice (default) level, not info: per Apple, info stays memory-only
+        // while notice persists to disk (up to a system storage limit), so
+        // historical `log show` queries work with zero configuration.
+        logger.notice(
             "trace \(String(describing: name), privacy: .public) duration_ms=\(milliseconds, privacy: .public) outcome=\(String(describing: outcome), privacy: .public)"
         )
     }
