@@ -1495,7 +1495,9 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         // Small settle delay reduces HAL start races on rapid re-trigger.
+        let settleTrace = PerfTrace.begin("audio.settle")
         try? await Task.sleep(for: .milliseconds(120))
+        settleTrace.end()
     }
 }
 
