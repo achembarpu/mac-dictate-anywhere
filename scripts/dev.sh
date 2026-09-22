@@ -160,7 +160,7 @@ run_benchmark() {
   [[ "$CONFIGURATION" == "Debug" ]] || fail "Benchmarks require the Debug configuration"
   rm -rf "$RESULT_BUNDLE_PATH"
   xcodebuild "${xcodebuild_args[@]}" \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK PIPELINE_BENCHMARK_BASELINE" \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
     -only-testing:"Dictate AnywhereTests/PipelinePerformanceBenchmarkTests" \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
