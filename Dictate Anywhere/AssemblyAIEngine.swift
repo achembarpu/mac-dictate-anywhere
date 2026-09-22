@@ -142,6 +142,8 @@ final class AssemblyAIEngine: TranscriptionEngine {
     }
 
     func startRecording(deviceID: AudioDeviceID?) async throws {
+        let trace = PerfTrace.begin("audio.startup")
+        defer { trace.end() }
         guard isReady else { throw AssemblyAIEngineError.missingAPIKey }
         audioCaptureStartupCancellation?.cancel()
         await stopLivePreview()
@@ -242,6 +244,8 @@ final class AssemblyAIEngine: TranscriptionEngine {
     }
 
     func stopRecording() async -> String {
+        let trace = PerfTrace.begin("stt.stopToFinal")
+        defer { trace.end() }
         stopAudioCapture()
         await stopLivePreview()
         await warmUpTask?.value
@@ -290,6 +294,8 @@ final class AssemblyAIEngine: TranscriptionEngine {
     }
 
     func transcribeRecording(at url: URL) async throws -> String {
+        let trace = PerfTrace.begin("stt.transcribe")
+        defer { trace.end() }
         var samples: [Float] = []
         let reader = try RecoveryAudioReader(url: url)
         while let chunk = try reader.nextSamples() {

@@ -113,6 +113,8 @@ final class AppleSpeechEngine: TranscriptionEngine {
     }
 
     func prepare() async throws {
+        let trace = PerfTrace.begin("stt.enginePrepare")
+        defer { trace.end() }
         guard Self.isSupported else {
             isReady = false
             throw TranscriptionError.appleSpeechUnavailable
@@ -149,6 +151,8 @@ final class AppleSpeechEngine: TranscriptionEngine {
     }
 
     func startRecording(deviceID: AudioDeviceID?) async throws {
+        let trace = PerfTrace.begin("audio.startup")
+        defer { trace.end() }
         guard Self.isSupported else {
             throw TranscriptionError.appleSpeechUnavailable
         }
@@ -230,6 +234,8 @@ final class AppleSpeechEngine: TranscriptionEngine {
     }
 
     func stopRecording() async -> String {
+        let trace = PerfTrace.begin("stt.stopToFinal")
+        defer { trace.end() }
         stopAudioCapture()
 
         guard let session = activeSession else { return currentTranscript }
@@ -254,6 +260,8 @@ final class AppleSpeechEngine: TranscriptionEngine {
     }
 
     func transcribeRecording(at url: URL) async throws -> String {
+        let trace = PerfTrace.begin("stt.transcribe")
+        defer { trace.end() }
         guard #available(macOS 26.0, *), Self.isSupported else { throw TranscriptionError.appleSpeechUnavailable }
         let session = try await AppleSpeechSession(
             requestedLocale: Self.locale(for: Settings.shared.appleSpeechLanguage),

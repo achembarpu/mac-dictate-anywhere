@@ -276,6 +276,8 @@ final class S1MiniModelManager {
     }
 
     func downloadModel() async throws {
+        let trace = PerfTrace.begin("cleanup.modelDownload")
+        defer { trace.end() }
         guard !isBusy else { throw S1MiniModelManagerError.downloadInProgress }
 
         if let existingURL = try? await validatedModelURL() {

@@ -219,6 +219,8 @@ actor S1MiniInferenceEngine {
         transcript: String,
         modelURL: URL
     ) throws -> String {
+        let trace = PerfTrace.begin("cleanup.generate")
+        defer { trace.end() }
         let model = try loadModelIfNeeded(from: modelURL)
         guard let vocabulary = llama_model_get_vocab(model) else {
             throw S1MiniServiceError.modelLoadFailed
@@ -309,6 +311,8 @@ actor S1MiniInferenceEngine {
     }
 
     private func loadModelIfNeeded(from url: URL) throws -> OpaquePointer {
+        let trace = PerfTrace.begin("cleanup.modelLoad")
+        defer { trace.end() }
         let path = url.standardizedFileURL.path
         guard FileManager.default.fileExists(atPath: path) else {
             throw S1MiniServiceError.modelNotDownloaded
@@ -441,6 +445,8 @@ enum S1MiniPostProcessingService {
         contextSetting: S1MiniContextSetting,
         context: DictationPostProcessingContext?
     ) async throws -> String {
+        let trace = PerfTrace.begin("cleanup.request")
+        defer { trace.end() }
         let resolvedContext = contextSetting.resolved(for: context)
         let prompt = S1MiniPromptBuilder.prompt(
             transcript: text,
@@ -471,6 +477,8 @@ enum S1MiniPostProcessingService {
     }
 
     static func unload() async {
+        let trace = PerfTrace.begin("cleanup.unload")
+        defer { trace.end() }
         await S1MiniInferenceEngine.shared.unload()
     }
 }

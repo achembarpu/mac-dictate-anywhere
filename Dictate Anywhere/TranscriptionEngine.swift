@@ -703,6 +703,8 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func downloadModel() async throws {
+        let trace = PerfTrace.begin("stt.modelDownload")
+        defer { trace.end() }
         guard !isDownloading else { return }
         let modelChoice = selectedModelChoice
 
@@ -798,6 +800,8 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func prepare() async throws {
+        let trace = PerfTrace.begin("stt.enginePrepare")
+        defer { trace.end() }
         let modelChoice = selectedModelChoice
         logger.info("prepare: entry for \(modelChoice.displayName, privacy: .public)")
         if await asrCoordinator.isInitialized(for: modelChoice) {
@@ -888,6 +892,8 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func startRecording(deviceID: AudioDeviceID?) async throws {
+        let trace = PerfTrace.begin("audio.startup")
+        defer { trace.end() }
         let startupCancellation = AudioCaptureStartupCancellation()
         audioCaptureStartupCancellation?.cancel()
         audioCaptureStartupCancellation = startupCancellation
@@ -1003,6 +1009,8 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func stopRecording() async -> String {
+        let trace = PerfTrace.begin("stt.stopToFinal")
+        defer { trace.end() }
         guard isRecordingActive else { return currentTranscript }
 
         // Stop capture before awaiting recognition so a finishing request cannot
@@ -1049,6 +1057,8 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func transcribeRecording(at url: URL) async throws -> String {
+        let trace = PerfTrace.begin("stt.transcribeFile")
+        defer { trace.end() }
         let model = selectedModelChoice
         guard await asrCoordinator.isInitialized(for: model) else { throw TranscriptionError.engineNotReady }
         if model.tdtModelVersion != nil {
@@ -1186,6 +1196,8 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     private func performFinalTranscription() async -> String {
+        let trace = PerfTrace.begin("stt.finalize")
+        defer { trace.end() }
         guard await asrCoordinator.isInitialized() else { return currentTranscript }
 
         // Capture the live transcript before re-transcription overwrites it.
@@ -1505,6 +1517,8 @@ private actor AsrManagerCoordinator {
     }
 
     func initializeSenseVoice() async throws {
+        let trace = PerfTrace.begin("stt.modelLoad")
+        defer { trace.end() }
         await cleanup()
         // int8: ~225 MB, ANE-targeted, accuracy-neutral per FluidAudio docs.
         // Non-ANE Macs get the fp32 encoder instead — see senseVoiceEncoderPrecision.
@@ -1521,6 +1535,8 @@ private actor AsrManagerCoordinator {
     }
 
     func initialize(models: AsrModels, config: ASRConfig) async throws {
+        let trace = PerfTrace.begin("stt.modelLoad")
+        defer { trace.end() }
         logger.info("initialize: starting (existing manager=\(self.manager != nil, privacy: .public))")
         await cleanup()
         let m = AsrManager(config: config)
@@ -1531,6 +1547,8 @@ private actor AsrManagerCoordinator {
     }
 
     func initializeStreaming(modelChoice: ParakeetModelChoice) async throws {
+        let trace = PerfTrace.begin("stt.modelLoad")
+        defer { trace.end() }
         guard modelChoice.usesTrueStreaming else { throw TranscriptionError.engineNotReady }
         // The picker already hides ANE-only models on Intel; this stops a stale
         // persisted selection from starting a download that can never load.
@@ -1606,6 +1624,8 @@ private actor AsrManagerCoordinator {
     }
 
     func transcribe(_ samples: [Float]) async throws -> ASRResult {
+        let trace = PerfTrace.begin("stt.transcribe")
+        defer { trace.end() }
         if let senseVoiceManager {
             let startedAt = Date()
             let text = try await senseVoiceManager.transcribe(audio: samples)

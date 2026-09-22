@@ -245,6 +245,8 @@ final class AppState {
 
     /// Stops process-lifetime services before AppKit tears down the process.
     func shutdown() async {
+        let trace = PerfTrace.begin("app.shutdown")
+        defer { trace.end() }
         guard !isShuttingDown else { return }
         isShuttingDown = true
         invalidateContextCapture()
@@ -302,6 +304,8 @@ final class AppState {
     }
 
     private func runStartupSequence() async {
+        let trace = PerfTrace.begin("app.startup")
+        defer { trace.end() }
         await permissions.check()
         guard !isShuttingDown else { return }
         updateAccessibilityIntegration(granted: permissions.accessibilityGranted, promptIfNeeded: true)
@@ -340,6 +344,8 @@ final class AppState {
     // MARK: - Engine Lifecycle
 
     func prepareActiveEngine() async {
+        let trace = PerfTrace.begin("stt.prepare")
+        defer { trace.end() }
         guard !isShuttingDown else { return }
         logger.info("prepareActiveEngine: called, engineChoice=\(String(describing: self.settings.engineChoice), privacy: .public), status=\(String(describing: self.status), privacy: .public)")
         if case .recording = status { return }
@@ -897,6 +903,8 @@ final class AppState {
     }
 
     private func finishDictation() async {
+        let trace = PerfTrace.begin("dictation.stopToInsertion")
+        defer { trace.end() }
         stopAudioLevelPolling()
 
         // Show processing overlay

@@ -395,6 +395,8 @@ enum AIPostProcessingService {
         vocabulary: [String] = [],
         context: DictationPostProcessingContext? = nil
     ) async throws -> String {
+        let trace = PerfTrace.begin("cleanup.request")
+        defer { trace.end() }
         if let schemaResult = try await processWithSchema(
             text: text,
             prompt: prompt,
