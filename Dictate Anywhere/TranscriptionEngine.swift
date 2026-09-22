@@ -469,6 +469,9 @@ final class ParakeetEngine: TranscriptionEngine {
     private var isTranscribing = false
     private var isRecordingActive = false
     private var lastTapCallbackTime: CFAbsoluteTime = 0
+    /// One-shot guard for the `stt.firstPartial` trace event. Reset at every
+    /// recording start so it fires exactly once per dictation session.
+    private var firstPartialEmitted = false
 
     private let minAudioEnergy: Float = 0.005
     private let minimumSpeechPeak: Float = 0.02
@@ -894,6 +897,7 @@ final class ParakeetEngine: TranscriptionEngine {
     func startRecording(deviceID: AudioDeviceID?) async throws {
         let trace = PerfTrace.begin("audio.startup")
         defer { trace.end() }
+        firstPartialEmitted = false
         let startupCancellation = AudioCaptureStartupCancellation()
         audioCaptureStartupCancellation?.cancel()
         audioCaptureStartupCancellation = startupCancellation
@@ -1043,6 +1047,7 @@ final class ParakeetEngine: TranscriptionEngine {
         transcriptionTask = nil
         isRecordingActive = false
         committedTranscript = ""
+        firstPartialEmitted = false
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: false)
             levelSampleBuffer.removeAll(keepingCapacity: false)
@@ -1094,6 +1099,14 @@ final class ParakeetEngine: TranscriptionEngine {
 
     // MARK: - Transcription Loop
 
+    /// Emits the one-shot `stt.firstPartial` event the first time a loop
+    /// produces visible transcript text in the current recording session.
+    private func markFirstPartialEmitted() {
+        guard !firstPartialEmitted else { return }
+        firstPartialEmitted = true
+        PerfTrace.event("stt.firstPartial")
+    }
+
     private func transcriptionLoop() async {
         logger.info("transcriptionLoop: entry")
         guard await asrCoordinator.isInitialized() else {
@@ -1140,6 +1153,7 @@ final class ParakeetEngine: TranscriptionEngine {
                     let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     let merged = Self.joinChunkTranscripts(base: committedTranscript, addition: text)
                     if !merged.isEmpty {
+                        markFirstPartialEmitted()
                         await MainActor.run { self.currentTranscript = merged }
                     }
                 } catch {
@@ -1182,6 +1196,7 @@ final class ParakeetEngine: TranscriptionEngine {
                 let text = await asrCoordinator.currentStreamingTranscript()
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
+                    markFirstPartialEmitted()
                     await MainActor.run { self.currentTranscript = text }
                 }
                 if await asrCoordinator.consumeEndOfUtteranceSignal() {
@@ -1284,6 +1299,7 @@ final class ParakeetEngine: TranscriptionEngine {
         isRecordingActive = false
         isTranscribing = false
         committedTranscript = ""
+        firstPartialEmitted = false
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: false)
             levelSampleBuffer.removeAll(keepingCapacity: false)
