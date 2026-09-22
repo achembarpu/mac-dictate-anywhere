@@ -684,6 +684,8 @@ final class AppState {
             return // The permission gesture must never become a recording gesture.
         }
         guard !isShuttingDown else { return }
+        let requestTrace = PerfTrace.begin("dictation.requestToRecording")
+        defer { requestTrace.end() }
         if settings.engineChoice != .assemblyAI,
            settings.inputSourceAutoSwitchEnabled,
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
@@ -734,9 +736,7 @@ final class AppState {
             }
         }
         guard !isShuttingDown else { return }
-        let captureTrace = PerfTrace.begin("dictation.capture")
         captureInsertionTargetAppAndContext(engine: engine)
-        captureTrace.end()
         guard !isShuttingDown else { return }
         await beginRecording(engine: engine, mode: mode)
     }
@@ -1232,6 +1232,8 @@ final class AppState {
 
     func cancelDictation() async {
         guard canCancelDictation else { return }
+        let trace = PerfTrace.begin("dictation.cancel")
+        defer { trace.end() }
 
         isCancelling = true
         invalidateContextCapture()
@@ -1335,6 +1337,8 @@ final class AppState {
 
     func recoverCancelledDictation(_ entry: CancelledDictation) async {
         guard status == .idle, !isTransitioning else { return }
+        let trace = PerfTrace.begin("recovery.transcribe")
+        defer { trace.end() }
         do {
             try recoveryStore.reload()
             guard recoveryStore.entries.contains(where: { $0.id == entry.id }) else { return }
@@ -1383,6 +1387,8 @@ final class AppState {
 
     func continueCancelledDictation(_ entry: CancelledDictation) async {
         guard !isShuttingDown, status == .idle, !isTransitioning else { return }
+        let trace = PerfTrace.begin("recovery.continue")
+        defer { trace.end() }
         isTransitioning = true
         defer { if status != .recording { isTransitioning = false } }
         if !permissions.micGranted {
@@ -1453,6 +1459,8 @@ final class AppState {
         target: NSRunningApplication? = nil,
         useFrontmost: Bool = true
     ) {
+        let trace = PerfTrace.begin("dictation.capture")
+        defer { trace.end() }
         invalidateContextCapture()
         sessionDictationContext = nil
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -1626,12 +1634,14 @@ final class AppState {
     private func configureEndOfUtteranceHandler(for engine: TranscriptionEngine) {
         guard let parakeet = engine as? ParakeetEngine else { return }
         parakeet.endOfUtteranceHandler = { [weak self] in
+            PerfTrace.event("eou.detected")
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard self.settings.autoStopAfterSpeechEndsEnabled else { return }
                 guard self.settings.parakeetModelChoice.supportsEndOfUtterance else { return }
                 guard self.sessionHotkeyMode == .handsFreeToggle else { return }
                 guard self.status == .recording, !self.isTransitioning else { return }
+                PerfTrace.event("eou.stop")
                 await self.stopDictation()
             }
         }

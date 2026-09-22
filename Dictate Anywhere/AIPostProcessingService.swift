@@ -421,11 +421,13 @@ enum AIPostProcessingService {
         let instructions = schemaInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
         let session = LanguageModelSession(instructions: instructions)
 
-        let response = try await session.respond(
-            to: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
-            generating: PostProcessingResult.self,
-            options: generationOptions(for: text)
-        )
+        let response = try await PerfTrace.measure("cleanup.appleIntelligenceSchema") {
+            try await session.respond(
+                to: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
+                generating: PostProcessingResult.self,
+                options: generationOptions(for: text)
+            )
+        }
 
         let result = response.content
         switch result.action.trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -463,10 +465,12 @@ enum AIPostProcessingService {
             instructions: toolInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
         )
 
-        _ = try await session.respond(
-            to: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
-            options: generationOptions(for: text)
-        )
+        _ = try await PerfTrace.measure("cleanup.appleIntelligenceTools") {
+            try await session.respond(
+                to: remotePostProcessingRequestPrompt(text: text, vocabulary: vocabulary, context: context),
+                options: generationOptions(for: text)
+            )
+        }
 
         // Extract the tool result
         if let rawCleaned = resultBox.cleanedText {
@@ -1050,7 +1054,9 @@ enum OllamaPostProcessingService {
     }
 
     private static func performGenerateRequest(_ request: URLRequest) async throws -> String {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PerfTrace.measure("cleanup.ollamaRequest") {
+            try await URLSession.shared.data(for: request)
+        }
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(GenerateResponse.self, from: data)
@@ -1064,7 +1070,7 @@ enum OllamaPostProcessingService {
             throw ServiceError.emptyResponse
         }
 
-        logger.info(
+        logger.notice(
             """
             generate request kind=full-transcript \
             total_duration_ns=\(decoded.totalDuration ?? -1, privacy: .public) \
@@ -1648,7 +1654,9 @@ enum OpenRouterPostProcessingService {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PerfTrace.measure("cleanup.openRouterRequest") {
+            try await URLSession.shared.data(for: request)
+        }
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
@@ -1986,7 +1994,9 @@ enum OpenAICompatiblePostProcessingService {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PerfTrace.measure("cleanup.openAICompatibleRequest") {
+            try await URLSession.shared.data(for: request)
+        }
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)

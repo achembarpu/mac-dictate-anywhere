@@ -8,8 +8,8 @@
 //  - `OSSignposter` intervals (macOS 12+) make every span visible in
 //    Instruments via the os_signpost instrument. Signposts are designed for
 //    near-zero overhead, so they stay enabled in all builds.
-//  - A matching `Logger` notice line records the duration in milliseconds,
-//    visible live in Console.app / `log stream` and historically via
+//  - Matching `Logger` notice lines record interval durations and point
+//    events, visible live in Console.app / `log stream` and historically via
 //    `log show` (notice persists to disk; info would stay memory-only).
 //  - Only static interval names and numeric durations are logged. Audio,
 //    transcripts, prompts, file paths, and other user content are never
@@ -97,9 +97,13 @@ enum PerfTrace {
     }
 
     /// Marks a single point of interest (e.g. first partial result).
+    ///
+    /// The matching notice makes the marker available in historical Console
+    /// queries too, not only during a live Instruments recording.
     nonisolated static func event(_ name: StaticString) {
         guard isEnabled else { return }
         signposter.emitEvent(name, id: signposter.makeSignpostID())
+        logger.notice("trace \(String(describing: name), privacy: .public) event=observed")
     }
 
     nonisolated fileprivate static func logCompletion(name: StaticString, milliseconds: Int, outcome: StaticString) {

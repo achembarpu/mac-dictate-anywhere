@@ -169,25 +169,28 @@ final class AssemblyAIEngine: TranscriptionEngine {
         let livePreviewID = UUID()
         stateLock.withLock { livePreviewSessionID = livePreviewID }
         let initialContextualVocabulary = sessionContextualVocabulary
-        var previewSession = await makeLivePreviewSession(id: livePreviewID)
-        if let session = previewSession {
-            guard audioCaptureStartupCancellation === startupCancellation else {
+        let previewSession = try await PerfTrace.measure("stt.livePreviewStart") {
+            var previewSession = await makeLivePreviewSession(id: livePreviewID)
+            if let session = previewSession {
+                guard audioCaptureStartupCancellation === startupCancellation else {
+                    stateLock.withLock { livePreviewSessionID = nil }
+                    await session.cancel()
+                    throw CancellationError()
+                }
+                do {
+                    try await session.start()
+                } catch {
+                    logger.notice(
+                        "Apple Speech live preview could not start: \(error.localizedDescription, privacy: .public)"
+                    )
+                    stateLock.withLock { livePreviewSessionID = nil }
+                    await session.cancel()
+                    previewSession = nil
+                }
+            } else {
                 stateLock.withLock { livePreviewSessionID = nil }
-                await session.cancel()
-                throw CancellationError()
             }
-            do {
-                try await session.start()
-            } catch {
-                logger.notice(
-                    "Apple Speech live preview could not start: \(error.localizedDescription, privacy: .public)"
-                )
-                stateLock.withLock { livePreviewSessionID = nil }
-                await session.cancel()
-                previewSession = nil
-            }
-        } else {
-            stateLock.withLock { livePreviewSessionID = nil }
+            return previewSession
         }
         livePreviewSession = previewSession
         if sessionContextualVocabulary != initialContextualVocabulary {
@@ -250,10 +253,14 @@ final class AssemblyAIEngine: TranscriptionEngine {
     func stopRecording() async -> String {
         let trace = PerfTrace.begin("stt.stopToFinal")
         defer { trace.end() }
+        let audioTeardownTrace = PerfTrace.begin("audio.teardown")
         stopAudioCapture()
         await stopLivePreview()
+        audioTeardownTrace.end()
+        let warmUpTrace = PerfTrace.begin("stt.warmConnectionWait")
         await warmUpTask?.value
         warmUpTask = nil
+        warmUpTrace.end()
 
         let snapshot = stateLock.withLock {
             (samples: fullRecordingSamples, exceededLimit: recordingExceededLimit)
@@ -325,47 +332,52 @@ final class AssemblyAIEngine: TranscriptionEngine {
         guard !apiKey.isEmpty else { throw AssemblyAIEngineError.missingAPIKey }
 
         let context = settings.dictationContextAwarenessEnabled ? sessionDictationContext : nil
-        let config = AssemblyAIRequestConfiguration(
-            sampleRate: Self.sampleRate,
-            channels: 1,
-            languageCodes: [settings.assemblyAILanguage.rawValue],
-            sttPrompt: Self.sttPrompt(
-                context: context,
-                includeAppMetadata: shareSurroundingText,
-                promptOverrides: settings.assemblyAIPromptOverrides
-            ),
-            keytermsPrompt: Self.fittedKeyterms(
-                settings.customVocabulary
-                    + (shareSurroundingText
-                        ? sessionContextualVocabulary : [])
-            ),
-            llmInstruction: outputMode == .polished
-                ? Self.llmInstruction(
-                    customInstruction: settings.assemblyAIInstruction,
+        let request: URLRequest = try PerfTrace.measure("stt.assemblyAIRequestBuild") {
+            let config = AssemblyAIRequestConfiguration(
+                sampleRate: Self.sampleRate,
+                channels: 1,
+                languageCodes: [settings.assemblyAILanguage.rawValue],
+                sttPrompt: Self.sttPrompt(
                     context: context,
-                    shareSurroundingText: shareSurroundingText,
-                    style: context.map { settings.dictationWritingStyle(for: $0.category) },
+                    includeAppMetadata: shareSurroundingText,
                     promptOverrides: settings.assemblyAIPromptOverrides
-                )
-                : nil
-        )
-        let boundary = "dictate-anywhere-\(UUID().uuidString)"
-        let body = try Self.multipartBody(
-            config: config,
-            pcmAudio: Self.pcm16Data(from: samples),
-            boundary: boundary
-        )
-        var request = URLRequest(
-            url: settings.assemblyAIRegion.baseURL.appendingPathComponent("v1/transcribe/live")
-        )
-        request.httpMethod = "POST"
-        request.timeoutInterval = 90
-        request.setValue(apiKey, forHTTPHeaderField: "Authorization")
-        request.setValue(
-            "multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body
+                ),
+                keytermsPrompt: Self.fittedKeyterms(
+                    settings.customVocabulary
+                        + (shareSurroundingText
+                            ? sessionContextualVocabulary : [])
+                ),
+                llmInstruction: outputMode == .polished
+                    ? Self.llmInstruction(
+                        customInstruction: settings.assemblyAIInstruction,
+                        context: context,
+                        shareSurroundingText: shareSurroundingText,
+                        style: context.map { settings.dictationWritingStyle(for: $0.category) },
+                        promptOverrides: settings.assemblyAIPromptOverrides
+                    )
+                    : nil
+            )
+            let boundary = "dictate-anywhere-\(UUID().uuidString)"
+            let body = try Self.multipartBody(
+                config: config,
+                pcmAudio: Self.pcm16Data(from: samples),
+                boundary: boundary
+            )
+            var request = URLRequest(
+                url: settings.assemblyAIRegion.baseURL.appendingPathComponent("v1/transcribe/live")
+            )
+            request.httpMethod = "POST"
+            request.timeoutInterval = 90
+            request.setValue(apiKey, forHTTPHeaderField: "Authorization")
+            request.setValue(
+                "multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            return request
+        }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PerfTrace.measure("stt.assemblyAIRequest") {
+            try await URLSession.shared.data(for: request)
+        }
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse else {
             throw AssemblyAIEngineError.invalidResponse
@@ -377,9 +389,12 @@ final class AssemblyAIEngine: TranscriptionEngine {
                 message: decoded?.detail ?? decoded?.error
             )
         }
-        guard let decoded = try? JSONDecoder().decode(AssemblyAIDictationResponse.self, from: data)
-        else {
-            throw AssemblyAIEngineError.invalidResponse
+        let decoded: AssemblyAIDictationResponse = try PerfTrace.measure("stt.assemblyAIResponseDecode") {
+            guard let decoded = try? JSONDecoder().decode(AssemblyAIDictationResponse.self, from: data)
+            else {
+                throw AssemblyAIEngineError.invalidResponse
+            }
+            return decoded
         }
         let expectsInsertionPlan = outputMode == .polished && Self.canRequestInsertionPlan(
             context: context, shareSurroundingText: shareSurroundingText
@@ -627,9 +642,11 @@ final class AssemblyAIEngine: TranscriptionEngine {
     }
 
     private static func warmConnection(region: AssemblyAIRegion) async {
-        var request = URLRequest(url: region.baseURL.appendingPathComponent("warm"))
-        request.timeoutInterval = 10
-        _ = try? await URLSession.shared.data(for: request)
+        await PerfTrace.measure("stt.assemblyAIWarmConnection") {
+            var request = URLRequest(url: region.baseURL.appendingPathComponent("warm"))
+            request.timeoutInterval = 10
+            _ = try? await URLSession.shared.data(for: request)
+        }
     }
 
     private func makeLivePreviewSession(

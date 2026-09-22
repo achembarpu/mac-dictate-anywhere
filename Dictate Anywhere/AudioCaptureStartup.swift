@@ -72,6 +72,8 @@ nonisolated func startAudioCaptureOffMainActor(
     cancellation: AudioCaptureStartupCancellation,
     makeController: @escaping () throws -> AudioCaptureController
 ) async throws -> AudioCaptureController {
+    let trace = PerfTrace.begin("audio.controllerCreate")
+    defer { trace.end() }
     let factory = AudioCaptureFactoryBox(makeController: makeController)
 
     return try await withCheckedThrowingContinuation { continuation in

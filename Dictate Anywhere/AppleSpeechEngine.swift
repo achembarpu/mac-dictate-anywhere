@@ -192,7 +192,9 @@ final class AppleSpeechEngine: TranscriptionEngine {
         let usesExplicitMicrophoneSelection = Settings.shared.selectedMicrophoneUID != nil
 
         do {
-            try await session.start()
+            try await PerfTrace.measure("stt.appleSpeechSessionStart") {
+                try await session.start()
+            }
             // Context may have arrived while the recognizer was preparing.
             if preparedVocabulary != appleContextualVocabulary() {
                 await updateSessionContextualVocabulary(sessionContextualVocabulary)
@@ -241,10 +243,14 @@ final class AppleSpeechEngine: TranscriptionEngine {
     func stopRecording() async -> String {
         let trace = PerfTrace.begin("stt.stopToFinal")
         defer { trace.end() }
+        let audioTeardownTrace = PerfTrace.begin("audio.teardown")
         stopAudioCapture()
+        audioTeardownTrace.end()
 
         guard let session = activeSession else { return currentTranscript }
-        let finalTranscript = await session.finish()
+        let finalTranscript = await PerfTrace.measure("stt.finalize") {
+            await session.finish()
+        }
         activeSession = nil
         setTranscript(finalTranscript)
         logger.info("Apple Speech recording finished with \(finalTranscript.count, privacy: .public) characters")
