@@ -34,7 +34,8 @@ final class TextInserter {
         preserveModelFormatting: Bool = false
     ) async -> TextInsertionResult {
         let trace = PerfTrace.begin("insertion.deliver")
-        defer { trace.end() }
+        var deliverOutcome: StaticString = "failed"
+        defer { trace.end(outcome: deliverOutcome) }
         let frontmostApplication = NSWorkspace.shared.frontmostApplication
         let targetApplication = targetProcessIdentifier.flatMap {
             NSRunningApplication(processIdentifier: $0)
@@ -61,12 +62,14 @@ final class TextInserter {
         guard await copyToClipboard(insertionText) else { return .failed }
         guard pasteAutomatically else {
             resetPendingSeparator()
+            deliverOutcome = "copiedOnly"
             return .copiedOnly
         }
 
         // Check accessibility permission
         guard hasAccessibilityPermission(promptIfNeeded: true) else {
             resetPendingSeparator()
+            deliverOutcome = "copiedOnly"
             return .copiedOnly
         }
 
@@ -90,6 +93,7 @@ final class TextInserter {
                   Self.snapshotMatches(value: value, range: range, context: context) else {
                 logger.info("plainListEdit: live snapshot unavailable or changed")
                 resetPendingSeparator()
+                deliverOutcome = "copiedOnly"
                 return .copiedOnly
             }
             if let edit = PlainTextListEdit.prepare(value: value,
@@ -100,6 +104,7 @@ final class TextInserter {
                       Self.textValue(of: element) == value,
                       selectedTextRange(in: element).map({ $0.location == range.location && $0.length == range.length }) == true else {
                     _ = await copyToClipboard(insertionText)
+                    deliverOutcome = "copiedOnly"
                     return .copiedOnly
                 }
                 let didSelect = Self.setSelection(edit.range, in: element)
@@ -116,6 +121,7 @@ final class TextInserter {
                     logger.info("plainListEdit: selection verification failed, set=\(didSelect)")
                     _ = Self.setSelection(NSRange(location: range.location, length: range.length), in: element)
                     _ = await copyToClipboard(insertionText)
+                    deliverOutcome = "copiedOnly"
                     return .copiedOnly
                 }
                 listEdit = (element, edit)
@@ -126,6 +132,7 @@ final class TextInserter {
         if await simulatePasteWithAppleScript() {
             await finishListEdit(listEdit, insertionText: insertionText)
             prepareForNextInsertion(targetBundleIdentifier: targetBundleIdentifier)
+            deliverOutcome = "success"
             return .success
         }
 
@@ -134,6 +141,7 @@ final class TextInserter {
             try? await Task.sleep(for: .milliseconds(100))
             await finishListEdit(listEdit, insertionText: insertionText)
             prepareForNextInsertion(targetBundleIdentifier: targetBundleIdentifier)
+            deliverOutcome = "success"
             return .success
         }
 
@@ -142,6 +150,7 @@ final class TextInserter {
             _ = await copyToClipboard(insertionText)
         }
         resetPendingSeparator()
+        deliverOutcome = "copiedOnly"
         return .copiedOnly
     }
 
@@ -781,7 +790,10 @@ final class TextInserter {
                 end tell
                 """
                 var error: NSDictionary?
-                if let scriptObject = NSAppleScript(source: script) {
+                let compileTrace = PerfTrace.begin("insertion.pasteCompile")
+                let scriptObject = NSAppleScript(source: script)
+                compileTrace.end(outcome: scriptObject == nil ? "failed" : "success")
+                if let scriptObject {
                     scriptObject.executeAndReturnError(&error)
                     continuation.resume(returning: error == nil)
                 } else {
