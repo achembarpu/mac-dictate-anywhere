@@ -1019,7 +1019,9 @@ final class ParakeetEngine: TranscriptionEngine {
 
         // Stop capture before awaiting recognition so a finishing request cannot
         // keep recording the user's microphone in the background.
+        let audioTeardownTrace = PerfTrace.begin("audio.teardown")
         await teardownAudioEngineIfNeeded()
+        audioTeardownTrace.end()
 
         // Stop transcription loop
         isTranscribing = false

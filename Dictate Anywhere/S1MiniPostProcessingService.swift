@@ -241,6 +241,9 @@ actor S1MiniInferenceEngine {
         // short transcripts.
         let contextSize = 4_096
 
+        // Context allocation plus prompt evaluation: the remaining timed
+        // portion of generate() besides model load, tokenize, and decode.
+        let promptEvalTrace = PerfTrace.begin("cleanup.promptEval")
         var contextParameters = llama_context_default_params()
         contextParameters.n_ctx = UInt32(contextSize)
         contextParameters.n_batch = 2_048
@@ -256,6 +259,7 @@ actor S1MiniInferenceEngine {
         contextParameters.n_threads_batch = threadCount
 
         guard let context = llama_init_from_model(model, contextParameters) else {
+            promptEvalTrace.end()
             throw S1MiniServiceError.contextCreationFailed
         }
         defer { llama_free(context) }
@@ -267,8 +271,10 @@ actor S1MiniInferenceEngine {
             )
         }
         guard promptStatus == 0 else {
+            promptEvalTrace.end()
             throw S1MiniServiceError.promptEvaluationFailed(promptStatus)
         }
+        promptEvalTrace.end()
 
         let output = try sampleOutput(
             context: context,

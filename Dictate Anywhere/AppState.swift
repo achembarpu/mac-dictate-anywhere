@@ -734,7 +734,9 @@ final class AppState {
             }
         }
         guard !isShuttingDown else { return }
+        let captureTrace = PerfTrace.begin("dictation.capture")
         captureInsertionTargetAppAndContext(engine: engine)
+        captureTrace.end()
         guard !isShuttingDown else { return }
         await beginRecording(engine: engine, mode: mode)
     }
@@ -960,6 +962,7 @@ final class AppState {
 
         // AssemblyAI already returns the user-selected polished or verbatim
         // result. Local engines retain the existing filler/live-preview path.
+        let normalizeTrace = PerfTrace.begin("transcript.normalize")
         let finalText: String
         if usesAssemblyAI {
             finalText = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -969,6 +972,7 @@ final class AppState {
                 in: .whitespacesAndNewlines)
             finalText = liveFallback.count > cleaned.count ? liveFallback : cleaned
         }
+        normalizeTrace.end()
 
         guard !finalText.isEmpty else {
             currentTranscript = ""
@@ -1112,6 +1116,7 @@ final class AppState {
         }
 
         guard !Task.isCancelled else { return }
+        let historyTrace = PerfTrace.begin("transcript.history")
         if postProcessingMode != .none,
            postProcessingMode != .fluidAudioVocabulary {
             processedText = normalizePostProcessedTranscript(processedText)
@@ -1120,7 +1125,7 @@ final class AppState {
             "postProcessing: completed changed=\(processedText != finalText, privacy: .public), outputChars=\(processedText.count, privacy: .public)"
         )
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { historyTrace.end(); return }
         // Delivery is committed from this point; cancellation must never race a paste.
         isDeliveringTranscript = true
         updateCancellationAvailability()
@@ -1128,6 +1133,7 @@ final class AppState {
         lastTranscript = processedText
         Self.lastTranscriptForMenuBar = processedText
         settings.addTranscriptHistoryEntry(processedText, rawText: rawTranscript)
+        historyTrace.end()
 
         // Insert text
         NotificationCenter.default.post(name: .dismissMenusForPaste, object: nil)
@@ -1157,6 +1163,7 @@ final class AppState {
 
         // Restore mic volume and recording audio state after text insertion.
         // gives Bluetooth audio routing time to settle back to playback mode.
+        let teardownTrace = PerfTrace.begin("dictation.teardown")
         volumeController.restoreMicrophoneVolume()
         if settings.muteSystemAudioDuringRecordingEnabled {
             try? await Task.sleep(for: .milliseconds(200))
@@ -1176,6 +1183,7 @@ final class AppState {
         await discardSessionRecovery(completed: true)
         sessionEngine = nil
         status = .idle
+        teardownTrace.end()
     }
 
     private func handleTranscriptionFailure(_ message: String, engine: TranscriptionEngine) async {
@@ -1519,6 +1527,8 @@ final class AppState {
         for mode: TranscriptPostProcessingMode,
         isConfiguredServerLocal: Bool = false
     ) -> DictationPostProcessingContext? {
+        let trace = PerfTrace.begin("cleanup.context")
+        defer { trace.end() }
         let support = mode.dictationContextSupport(
             isConfiguredServerLocal: isConfiguredServerLocal
         )
@@ -1542,6 +1552,8 @@ final class AppState {
     /// starts. Retry only missing snapshots after the original app is active;
     /// successful start-of-session snapshots remain the source of truth.
     private func insertionContextForDelivery() async -> DictationContext? {
+        let trace = PerfTrace.begin("dictation.context")
+        defer { trace.end() }
         guard let captured = sessionDictationContext,
               !captured.hasTextPositionSnapshot,
               !captured.isSecureField,
