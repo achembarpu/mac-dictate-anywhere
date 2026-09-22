@@ -1142,6 +1142,7 @@ final class AppState {
         historyTrace.end()
 
         // Insert text
+        let insertionOrchestrationTrace = PerfTrace.begin("insertion.orchestration")
         NotificationCenter.default.post(name: .dismissMenusForPaste, object: nil)
         await reactivateInsertionTargetIfNeeded()
         let insertionContext = await insertionContextForDelivery()
@@ -1163,6 +1164,14 @@ final class AppState {
                 modelInsertionPlan: modelInsertionPlan,
                 preserveModelFormatting: preserveModelFormatting
             )
+        }
+        switch result {
+        case .success:
+            insertionOrchestrationTrace.end(outcome: "success")
+        case .copiedOnly:
+            insertionOrchestrationTrace.end(outcome: "copiedOnly")
+        case .failed:
+            insertionOrchestrationTrace.end(outcome: "failed")
         }
         insertionTargetApp = nil
         sessionDictationContext = nil
@@ -1604,9 +1613,14 @@ final class AppState {
         audioLevelTask = Task { [weak self] in
             var displayTranscript = self?.transcriptPrefix ?? ""
             var transcriptPollTick = 0
+            var levelPollCount = 0
             var lastTranscriptLength = 0
             while !Task.isCancelled {
                 guard let self, self.status == .recording else { break }
+
+                levelPollCount += 1
+                let levelPollTrace = levelPollCount.isMultiple(of: 30)
+                    ? PerfTrace.begin("audio.levelPoll") : nil
 
                 // Pull level samples from the lock-protected buffer (thread-safe)
                 let samples = engine.levelSamples(count: 1600)
@@ -1626,6 +1640,7 @@ final class AppState {
                 }
 
                 self.overlay.show(state: .listening(level: level, transcript: displayTranscript))
+                levelPollTrace?.end()
                 try? await Task.sleep(for: .milliseconds(33))
             }
         }
