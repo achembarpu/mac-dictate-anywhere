@@ -1669,6 +1669,8 @@ private actor AsrManagerCoordinator {
     }
 
     func transcribeWithCustomVocabulary(_ samples: [Float], terms: [String]) async throws -> ASRResult {
+        let trace = PerfTrace.begin("stt.vocabularyBoost")
+        defer { trace.end() }
         guard manager != nil else { throw TranscriptionError.engineNotReady }
         guard let models else { throw TranscriptionError.engineNotReady }
 

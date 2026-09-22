@@ -718,6 +718,8 @@ final class TextInserter {
     }
 
     private func copyToClipboard(_ text: String) async -> Bool {
+        let trace = PerfTrace.begin("insertion.clipboard")
+        defer { trace.end() }
         let pasteboard = NSPasteboard.general
 
         for _ in 0..<3 {
@@ -743,6 +745,8 @@ final class TextInserter {
     }
 
     private func simulatePasteWithCGEvent() -> Bool {
+        let trace = PerfTrace.begin("insertion.pasteEvent")
+        defer { trace.end() }
         let vKeyCode: CGKeyCode = 9
         guard let source = CGEventSource(stateID: .hidSystemState) else { return false }
 
@@ -761,7 +765,9 @@ final class TextInserter {
     }
 
     private func simulatePasteWithAppleScript() async -> Bool {
-        await withCheckedContinuation { continuation in
+        let trace = PerfTrace.begin("insertion.pasteScript")
+        defer { trace.end() }
+        return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let script = """
                 tell application "System Events"

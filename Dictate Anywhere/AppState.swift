@@ -419,6 +419,8 @@ final class AppState {
     }
 
     func handleParakeetModelSelectionChange(userInitiated: Bool) async {
+        let trace = PerfTrace.begin("stt.modelSwitch")
+        defer { trace.end() }
         guard status == .idle else { return }
         settings.engineChoice = .parakeet
         settings.userHasChosenEngine = userInitiated
@@ -427,6 +429,8 @@ final class AppState {
     }
 
     func handleEngineSelectionChange(_ choice: TranscriptionEngineChoice) async {
+        let trace = PerfTrace.begin("stt.modelSwitch")
+        defer { trace.end() }
         guard status == .idle else { return }
         guard availableEngineChoices.contains(choice) else { return }
         guard choice != .appleSpeech || AppleSpeechEngine.isSupported else { return }
@@ -444,6 +448,8 @@ final class AppState {
     }
 
     func handleAppleSpeechLanguageChange(_ language: SupportedLanguage) async {
+        let trace = PerfTrace.begin("stt.modelSwitch")
+        defer { trace.end() }
         guard status == .idle, settings.engineChoice == .appleSpeech else { return }
         guard appleSpeechSupportedLanguages.contains(language) else { return }
         settings.appleSpeechLanguage = language
@@ -587,6 +593,8 @@ final class AppState {
     // MARK: - Ollama Model Management
 
     func startOllamaModelDownload(_ model: String) async {
+        let trace = PerfTrace.begin("cleanup.modelDownload")
+        defer { trace.end() }
         guard ollamaDownloadState == nil, ollamaDeletingModel == nil else { return }
 
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -732,6 +740,8 @@ final class AppState {
     }
 
     private func beginRecording(engine: TranscriptionEngine, mode: HotkeyMode?) async {
+        let trace = PerfTrace.begin("dictation.start")
+        defer { trace.end() }
         guard !isShuttingDown else { return }
         engine.setSessionContextualVocabulary(sessionDictationContext?.lexicalHints ?? [])
         engine.setSessionDictationContext(sessionDictationContext)
@@ -1520,6 +1530,8 @@ final class AppState {
     }
 
     private func reactivateInsertionTargetIfNeeded() async {
+        let trace = PerfTrace.begin("insertion.targetActivation")
+        defer { trace.end() }
         guard let app = insertionTargetApp, !app.isTerminated else { return }
         if app.activate() {
             try? await Task.sleep(for: .milliseconds(120))
