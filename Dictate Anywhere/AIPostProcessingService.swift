@@ -716,6 +716,8 @@ enum OllamaPostProcessingService {
         vocabulary: [String] = [],
         context: DictationPostProcessingContext? = nil
     ) async throws -> String {
+        let trace = PerfTrace.begin("cleanup.request")
+        defer { trace.end() }
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedModel.isEmpty else {
             throw ServiceError.missingModel
@@ -1456,6 +1458,8 @@ enum OpenRouterPostProcessingService {
         apiKeyEnvironmentVariable: String,
         context: DictationPostProcessingContext? = nil
     ) async throws -> String {
+        let trace = PerfTrace.begin("cleanup.request")
+        defer { trace.end() }
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedModel.isEmpty else {
             throw ServiceError.missingModel
@@ -1788,6 +1792,8 @@ enum OpenAICompatiblePostProcessingService {
         vocabulary: [String] = [],
         context: DictationPostProcessingContext? = nil
     ) async throws -> String {
+        let trace = PerfTrace.begin("cleanup.request")
+        defer { trace.end() }
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedModel.isEmpty else {
             throw ServiceError.missingModel

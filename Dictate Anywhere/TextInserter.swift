@@ -33,6 +33,8 @@ final class TextInserter {
         modelInsertionPlan: ModelInsertionPlan? = nil,
         preserveModelFormatting: Bool = false
     ) async -> TextInsertionResult {
+        let trace = PerfTrace.begin("insertion.deliver")
+        defer { trace.end() }
         let frontmostApplication = NSWorkspace.shared.frontmostApplication
         let targetApplication = targetProcessIdentifier.flatMap {
             NSRunningApplication(processIdentifier: $0)

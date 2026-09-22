@@ -31,23 +31,30 @@ import Foundation
 import os
 
 /// Central entry point for hot-path timing traces.
+///
+/// Deliberately actor-independent: every member is `nonisolated` so tracing
+/// never forces a hop onto the main actor (or any other executor). This is
+/// sound because the shared instances (`String`, `Logger`, `OSSignposter`)
+/// are all `Sendable` and the underlying unified logging system is safe for
+/// concurrent use.
 enum PerfTrace {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere"
+    nonisolated private static let subsystem: String =
+        Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere"
 
-    private static let logger = Logger(subsystem: subsystem, category: "Performance")
+    nonisolated private static let logger = Logger(subsystem: subsystem, category: "Performance")
 
-    private static let signposter = OSSignposter(logger: logger)
-    private static let disabledSignposter = OSSignposter.disabled
+    nonisolated private static let signposter = OSSignposter(logger: logger)
+    nonisolated private static let disabledSignposter = OSSignposter.disabled
 
     /// False when `DICTATE_ANYWHERE_PERF_TRACE=0` is set. Signposts use the
     /// disabled poster and completion lines are skipped.
-    static var isEnabled: Bool {
+    nonisolated static var isEnabled: Bool {
         ProcessInfo.processInfo.environment["DICTATE_ANYWHERE_PERF_TRACE"] != "0"
     }
 
     /// Measures a synchronous closure. Returns the closure's value.
     @discardableResult
-    static func measure<T>(_ name: StaticString, _ operation: () throws -> T) rethrows -> T {
+    nonisolated static func measure<T>(_ name: StaticString, _ operation: () throws -> T) rethrows -> T {
         let interval = begin(name)
         defer { interval.end() }
         return try operation()
@@ -55,7 +62,7 @@ enum PerfTrace {
 
     /// Measures an asynchronous closure. Returns the closure's value.
     @discardableResult
-    static func measure<T>(_ name: StaticString, _ operation: () async throws -> T) async rethrows -> T {
+    nonisolated static func measure<T>(_ name: StaticString, _ operation: () async throws -> T) async rethrows -> T {
         let interval = begin(name)
         defer { interval.end() }
         return try await operation()
@@ -63,14 +70,14 @@ enum PerfTrace {
 
     /// Starts a manually-scoped interval. Pair with `end(outcome:)` on the
     /// returned token — `defer { token.end() }` covers every return/throw path.
-    static func begin(_ name: StaticString) -> PerfInterval {
+    /// Deferred ends report outcome "completed" even on error paths; failures
+    /// remain visible through each call site's existing error logging.
+    nonisolated static func begin(_ name: StaticString) -> PerfInterval {
         let enabled = isEnabled
         let poster = enabled ? signposter : disabledSignposter
-        let id = poster.makeSignpostID()
-        let state = poster.beginInterval(name, id: id)
+        let state = poster.beginInterval(name, id: poster.makeSignpostID())
         return PerfInterval(
             name: name,
-            id: id,
             state: state,
             signposter: poster,
             startTime: CFAbsoluteTimeGetCurrent(),
@@ -79,12 +86,12 @@ enum PerfTrace {
     }
 
     /// Marks a single point of interest (e.g. first partial result).
-    static func event(_ name: StaticString) {
+    nonisolated static func event(_ name: StaticString) {
         guard isEnabled else { return }
         signposter.emitEvent(name, id: signposter.makeSignpostID())
     }
 
-    fileprivate static func logCompletion(name: StaticString, milliseconds: Int, outcome: StaticString) {
+    nonisolated fileprivate static func logCompletion(name: StaticString, milliseconds: Int, outcome: StaticString) {
         logger.info(
             "trace \(String(describing: name), privacy: .public) duration_ms=\(milliseconds, privacy: .public) outcome=\(String(describing: outcome), privacy: .public)"
         )
@@ -94,22 +101,19 @@ enum PerfTrace {
 /// An in-flight timing interval. Obtain via `PerfTrace.begin(_:)`.
 struct PerfInterval: Sendable {
     private let name: StaticString
-    private let id: OSSignpostID
     private let state: OSSignpostIntervalState
     private let signposter: OSSignposter
     private let startTime: CFAbsoluteTime
     private let enabled: Bool
 
-    fileprivate init(
+    nonisolated fileprivate init(
         name: StaticString,
-        id: OSSignpostID,
         state: OSSignpostIntervalState,
         signposter: OSSignposter,
         startTime: CFAbsoluteTime,
         enabled: Bool
     ) {
         self.name = name
-        self.id = id
         self.state = state
         self.signposter = signposter
         self.startTime = startTime
@@ -118,7 +122,9 @@ struct PerfInterval: Sendable {
 
     /// Ends the interval, emitting the signpost and a duration log line.
     /// Outcome must be a static literal (e.g. "completed", "cancelled").
-    func end(outcome: StaticString = "completed") {
+    /// Nonisolated so `defer { token.end() }` works from any executor
+    /// without hopping.
+    nonisolated func end(outcome: StaticString = "completed") {
         let milliseconds = max(0, Int((CFAbsoluteTimeGetCurrent() - startTime) * 1_000))
         signposter.endInterval(name, state)
         if enabled {
