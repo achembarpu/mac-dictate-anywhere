@@ -17,6 +17,7 @@ protocol AppleSpeechSessionProtocol: AnyObject, Sendable {
     func append(samples: [Float])
     func finish() async -> String
     func cancel() async
+    func updateContextualVocabulary(_ terms: [String]) async throws
 }
 
 final class AppleSpeechEngine: TranscriptionEngine {
@@ -102,6 +103,15 @@ final class AppleSpeechEngine: TranscriptionEngine {
         sessionContextualVocabulary = terms
     }
 
+    func updateSessionContextualVocabulary(_ terms: [String]) async {
+        sessionContextualVocabulary = terms
+        do {
+            try await activeSession?.updateContextualVocabulary(appleContextualVocabulary())
+        } catch {
+            logger.notice("Could not update live contextual vocabulary: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     func prepare() async throws {
         guard Self.isSupported else {
             isReady = false
@@ -174,6 +184,10 @@ final class AppleSpeechEngine: TranscriptionEngine {
 
         do {
             try await session.start()
+            // Context may have arrived while the recognizer was preparing.
+            if preparedVocabulary != appleContextualVocabulary() {
+                await updateSessionContextualVocabulary(sessionContextualVocabulary)
+            }
             let controller = try await startAudioCaptureOffMainActor(
                 timeout: audioCaptureStartupTimeout,
                 queue: audioCaptureSetupQueue,
@@ -210,9 +224,13 @@ final class AppleSpeechEngine: TranscriptionEngine {
         }
     }
 
-    func stopRecording() async -> String {
+    func stopAudioCapture() {
         audioCaptureController?.stop()
         audioCaptureController = nil
+    }
+
+    func stopRecording() async -> String {
+        stopAudioCapture()
 
         guard let session = activeSession else { return currentTranscript }
         let finalTranscript = await session.finish()
@@ -445,6 +463,12 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
         analysisTask = Task { [analyzer, inputStream] in
             try await analyzer.analyzeSequence(inputStream)
         }
+    }
+
+    func updateContextualVocabulary(_ terms: [String]) async throws {
+        let context = AnalysisContext()
+        context.contextualStrings[.general] = terms
+        try await analyzer.setContext(context)
     }
 
     private func startResults() {

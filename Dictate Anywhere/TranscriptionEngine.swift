@@ -215,12 +215,15 @@ protocol TranscriptionEngine: AnyObject {
     func levelSamples(count: Int) -> [Float]
     func prepare() async throws
     func startRecording(deviceID: AudioDeviceID?) async throws
+    /// Stop microphone input immediately, retaining buffered audio for finalization.
+    func stopAudioCapture() async
     func stopRecording() async -> String
     func cancel() async
     func transcribeRecording(at url: URL) async throws -> String
     /// Session-scoped local recognition hints. Engines that do not support
     /// contextual vocabulary safely ignore this value.
     func setSessionContextualVocabulary(_ terms: [String])
+    func updateSessionContextualVocabulary(_ terms: [String]) async
     /// Session-scoped destination context. Cloud engines may use the category
     /// and, only with explicit permission, bounded surrounding text.
     func setSessionDictationContext(_ context: DictationContext?)
@@ -231,6 +234,9 @@ protocol TranscriptionEngine: AnyObject {
 
 extension TranscriptionEngine {
     func setSessionContextualVocabulary(_ terms: [String]) {}
+    func updateSessionContextualVocabulary(_ terms: [String]) async {
+        setSessionContextualVocabulary(terms)
+    }
     func setSessionDictationContext(_ context: DictationContext?) {}
     var lastTranscriptionError: String? { nil }
 }
@@ -990,6 +996,10 @@ final class ParakeetEngine: TranscriptionEngine {
                 await self?.transcriptionLoop()
             }
         }
+    }
+
+    func stopAudioCapture() async {
+        await teardownAudioEngineIfNeeded()
     }
 
     func stopRecording() async -> String {

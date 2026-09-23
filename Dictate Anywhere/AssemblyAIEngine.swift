@@ -121,6 +121,18 @@ final class AssemblyAIEngine: TranscriptionEngine {
         sessionContextualVocabulary = terms
     }
 
+    func updateSessionContextualVocabulary(_ terms: [String]) async {
+        sessionContextualVocabulary = terms
+        do {
+            try await livePreviewSession?.updateContextualVocabulary(Self.livePreviewVocabulary(
+                customVocabulary: Settings.shared.customVocabulary,
+                contextualVocabulary: terms
+            ))
+        } catch {
+            logger.notice("Could not update live preview vocabulary: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     func setSessionDictationContext(_ context: DictationContext?) {
         sessionDictationContext = context
     }
@@ -150,6 +162,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
         let usesExplicitMicrophoneSelection = Settings.shared.selectedMicrophoneUID != nil
         let livePreviewID = UUID()
         stateLock.withLock { livePreviewSessionID = livePreviewID }
+        let initialContextualVocabulary = sessionContextualVocabulary
         var previewSession = await makeLivePreviewSession(id: livePreviewID)
         if let session = previewSession {
             guard audioCaptureStartupCancellation === startupCancellation else {
@@ -171,6 +184,9 @@ final class AssemblyAIEngine: TranscriptionEngine {
             stateLock.withLock { livePreviewSessionID = nil }
         }
         livePreviewSession = previewSession
+        if sessionContextualVocabulary != initialContextualVocabulary {
+            await updateSessionContextualVocabulary(sessionContextualVocabulary)
+        }
 
         do {
             let controller = try await startAudioCaptureOffMainActor(
@@ -220,9 +236,13 @@ final class AssemblyAIEngine: TranscriptionEngine {
         }
     }
 
-    func stopRecording() async -> String {
+    func stopAudioCapture() {
         audioCaptureController?.stop()
         audioCaptureController = nil
+    }
+
+    func stopRecording() async -> String {
+        stopAudioCapture()
         await stopLivePreview()
         await warmUpTask?.value
         warmUpTask = nil

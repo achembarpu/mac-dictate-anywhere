@@ -431,6 +431,7 @@ private final class ContinuationTestEngine: TranscriptionEngine {
     private var pendingStart: CheckedContinuation<Void, Never>?
     func levelSamples(count: Int) -> [Float] { [] }
     func prepare() async throws { isReady = true }
+    func stopAudioCapture() async {}
     func setSessionContextualVocabulary(_ vocabulary: [String]) {
         onSetSessionContextualVocabulary?()
     }

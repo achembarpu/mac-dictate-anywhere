@@ -516,12 +516,14 @@ enum DictationContextCapture {
         AXUIElementSetMessagingTimeout(application, 0.25)
         if focusedElement == nil, requestWebAccessibility(in: application) {
             // Chromium debounces AXEnhancedUserInterface activation for two
-            // seconds. Poll focus within a bounded startup window; repeatedly
+            // seconds. Poll focus off the microphone startup path; repeatedly
             // setting the flag would restart that debounce. Once activated,
             // subsequent captures take the normal fast path above.
             let deadline = ProcessInfo.processInfo.systemUptime + 2.75
             repeat {
+                if Task.isCancelled { break }
                 Thread.sleep(forTimeInterval: 0.1)
+                if Task.isCancelled { break }
                 focusedElement = focusedTextElement(in: application, processIdentifier: processIdentifier, logFailure: false)
             } while focusedElement == nil && ProcessInfo.processInfo.systemUptime < deadline
         }

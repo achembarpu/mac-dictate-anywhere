@@ -212,6 +212,7 @@ final class DictationRecoveryTests: XCTestCase {
 
 @MainActor
 private final class RecoveryTestEngine: TranscriptionEngine {
+    func stopAudioCapture() async {}
     var recoveryCapture: RecoveryAudioCapture?
     var isReady = true
     var currentTranscript = ""

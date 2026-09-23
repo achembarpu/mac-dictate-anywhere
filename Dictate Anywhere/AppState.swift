@@ -113,6 +113,9 @@ final class AppState {
     /// App that was frontmost when dictation started (used as paste target)
     private var insertionTargetApp: NSRunningApplication?
     private var sessionDictationContext: DictationContext?
+    private var contextCaptureID: UUID?
+    private var contextApplicationTask: Task<Void, Never>?
+    private let contextCaptureOverride: (@Sendable (pid_t?) async -> DictationContext?)?
 
     /// Engine pinned for the active dictation session (start -> stop/cancel).
     private var sessionEngine: TranscriptionEngine?
@@ -154,13 +157,15 @@ final class AppState {
         microphonePermissionRequester: (@MainActor @Sendable () async -> Bool)? = nil,
         recoveryStore: DictationRecoveryStore? = nil,
         engine: TranscriptionEngine? = nil,
-        transcriptDelivery: ((String) async -> TextInsertionResult)? = nil
+        transcriptDelivery: ((String) async -> TextInsertionResult)? = nil,
+        contextCapture: (@Sendable (pid_t?) async -> DictationContext?)? = nil
     ) {
         self.permissions = permissions ?? Permissions()
         self.microphonePermissionRequester = microphonePermissionRequester
         self.recoveryStore = recoveryStore ?? DictationRecoveryStore()
         self.engineOverride = engine
         self.transcriptDeliveryOverride = transcriptDelivery
+        self.contextCaptureOverride = contextCapture
         setupHotkeyCallbacks()
         setupPermissionCallbacks()
         setupInputSourceCallbacks()
@@ -242,6 +247,7 @@ final class AppState {
     func shutdown() async {
         guard !isShuttingDown else { return }
         isShuttingDown = true
+        invalidateContextCapture()
         startupTask?.cancel()
         startupTask = nil
         inputSourceApplyTask?.cancel()
@@ -714,7 +720,7 @@ final class AppState {
             }
         }
         guard !isShuttingDown else { return }
-        await captureInsertionTargetAppAndContext()
+        captureInsertionTargetAppAndContext(engine: engine)
         guard !isShuttingDown else { return }
         await beginRecording(engine: engine, mode: mode)
     }
@@ -736,6 +742,7 @@ final class AppState {
         isDeliveringTranscript = false
         prepareSessionRecovery(for: engine)
         if continuingEntryID != nil && recoveryCapture == nil {
+            invalidateContextCapture()
             await discardSessionRecovery()
             clearEndOfUtteranceHandler(for: engine)
             engine.setSessionContextualVocabulary([])
@@ -827,6 +834,7 @@ final class AppState {
 
         guard !isShuttingDown else { return }
         guard didStart else {
+            invalidateContextCapture()
             let wasContinuing = continuingEntryID != nil
             await discardSessionRecovery()
             let message = lastStartError?.localizedDescription ?? "Unknown audio startup error"
@@ -898,6 +906,14 @@ final class AppState {
         settings.playSound("Pop")
 
         let engine = sessionEngine ?? activeEngine
+
+        // A short utterance can finish before a cold editor exposes its text.
+        // Stop the microphone now, then await context before the cloud request
+        // or local cleanup/insertion consumes it.
+        await engine.stopAudioCapture()
+        await contextApplicationTask?.value
+        guard !Task.isCancelled else { return }
+        invalidateContextCapture()
 
         // Get final transcript
         let newTranscript = await engine.stopRecording()
@@ -1192,6 +1208,7 @@ final class AppState {
         guard canCancelDictation else { return }
 
         isCancelling = true
+        invalidateContextCapture()
         updateCancellationAvailability()
         let preview = currentTranscript
         processingTask?.cancel()
@@ -1377,7 +1394,7 @@ final class AppState {
             let target = saved.targetBundleIdentifier.flatMap {
                 NSRunningApplication.runningApplications(withBundleIdentifier: $0).first { !$0.isTerminated }
             }
-            await captureInsertionTargetAppAndContext(target: target, useFrontmost: false)
+            captureInsertionTargetAppAndContext(engine: engine, target: target, useFrontmost: false)
             await reactivateInsertionTargetIfNeeded()
             try Task.checkCancellation()
             guard !isShuttingDown else {
@@ -1387,6 +1404,7 @@ final class AppState {
             recoveringEntryID = nil
             await beginRecording(engine: engine, mode: .handsFreeToggle)
         } catch {
+            invalidateContextCapture()
             finishContinuation(removingSource: false)
             recoveringEntryID = nil
             insertionTargetApp = nil
@@ -1398,46 +1416,76 @@ final class AppState {
 
     // MARK: - Audio Level Polling
 
-    private func captureInsertionTargetAppAndContext(target: NSRunningApplication? = nil, useFrontmost: Bool = true) async {
-        let currentPID = ProcessInfo.processInfo.processIdentifier
-        guard let frontmost = useFrontmost ? NSWorkspace.shared.frontmostApplication : target,
-              frontmost.processIdentifier != currentPID else {
-            insertionTargetApp = nil
-            sessionDictationContext = nil
-            overlay.beginSession(targetProcessIdentifier: nil)
-            return
-        }
-        insertionTargetApp = frontmost
+    private func invalidateContextCapture() {
+        contextCaptureID = nil
+        contextApplicationTask?.cancel()
+        contextApplicationTask = nil
+    }
 
-        // The overlay follows the app the transcript will land in. Everything
-        // after this point is awaited — context capture here, then audio
-        // startup — and the user may bring another app forward while it runs,
-        // so the display must be pinned to this app before any of it. It also
-        // has to be pinned ahead of the guard below, which returns early for
-        // most post-processing settings.
-        overlay.beginSession(targetProcessIdentifier: frontmost.processIdentifier)
+    private func captureInsertionTargetAppAndContext(
+        engine: TranscriptionEngine,
+        target: NSRunningApplication? = nil,
+        useFrontmost: Bool = true
+    ) {
+        invalidateContextCapture()
+        sessionDictationContext = nil
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let frontmost = useFrontmost ? NSWorkspace.shared.frontmostApplication : target
+        insertionTargetApp = frontmost?.processIdentifier == currentPID ? nil : frontmost
+
+        // Pin the destination before starting either asynchronous operation.
+        // Accessibility initialization must not hold up microphone startup.
+        overlay.beginSession(targetProcessIdentifier: insertionTargetApp?.processIdentifier)
 
         // Only read the screen when the active speech or cleanup model can use
         // what we read. Local `none` and FluidAudio Vocabulary never see it.
         let activeModelUsesContext = settings.engineChoice == .assemblyAI
             || settings.transcriptPostProcessingMode.usesDictationContext
-        guard settings.dictationContextAwarenessEnabled, activeModelUsesContext else {
-            sessionDictationContext = nil
-            return
+        let capture: @Sendable () async -> DictationContext?
+        if let contextCaptureOverride {
+            let pid = insertionTargetApp?.processIdentifier
+            capture = { await contextCaptureOverride(pid) }
+        } else {
+            guard let frontmost = insertionTargetApp,
+                  settings.dictationContextAwarenessEnabled, activeModelUsesContext else { return }
+
+            let processIdentifier = frontmost.processIdentifier
+            let bundleIdentifier = frontmost.bundleIdentifier
+            let appName = frontmost.localizedName ?? bundleIdentifier ?? "Unknown app"
+            let rules = settings.dictationAppRules
+            capture = {
+                DictationContextCapture.capture(
+                    processIdentifier: processIdentifier,
+                    bundleIdentifier: bundleIdentifier,
+                    appName: appName,
+                    rules: rules
+                )
+            }
         }
 
-        let processIdentifier = frontmost.processIdentifier
-        let bundleIdentifier = frontmost.bundleIdentifier
-        let appName = frontmost.localizedName ?? bundleIdentifier ?? "Unknown app"
-        let rules = settings.dictationAppRules
-        sessionDictationContext = await Task.detached(priority: .userInitiated) {
-            DictationContextCapture.capture(
-                processIdentifier: processIdentifier,
-                bundleIdentifier: bundleIdentifier,
-                appName: appName,
-                rules: rules
-            )
-        }.value
+        let id = UUID()
+        contextCaptureID = id
+        let started = ContinuousClock.now
+        // AsyncStream makes cancellation release the waiter immediately, even
+        // if a synchronous Accessibility call is still returning on its worker.
+        let (stream, continuation) = AsyncStream<DictationContext?>.makeStream()
+        let worker = Task.detached(priority: .userInitiated) {
+            guard !Task.isCancelled else { continuation.finish(); return }
+            let context = await capture()
+            continuation.yield(context)
+            continuation.finish()
+        }
+        continuation.onTermination = { _ in worker.cancel() }
+        contextApplicationTask = Task { [weak self] in
+            for await context in stream {
+                guard let self, !Task.isCancelled, !self.isShuttingDown,
+                      self.contextCaptureID == id else { return }
+                self.sessionDictationContext = context
+                engine.setSessionDictationContext(context)
+                await engine.updateSessionContextualVocabulary(context?.lexicalHints ?? [])
+                self.logger.info("contextCapture: completed alongside recording in \(String(describing: started.duration(to: .now)), privacy: .public)")
+            }
+        }
     }
 
     private func postProcessingContext(includeCapturedText: Bool) -> DictationPostProcessingContext? {
