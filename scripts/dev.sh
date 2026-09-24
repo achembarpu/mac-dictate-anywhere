@@ -165,17 +165,21 @@ run_benchmark() {
   local -a benchmark_xcodebuild_args=("${xcodebuild_args[@]}")
   [[ "$CONFIGURATION" == "Debug" ]] && benchmark_conditions="DEBUG $benchmark_conditions"
   if [[ "$CONFIGURATION" == "Release" ]]; then
-    # Local benchmark artifacts do not need distribution signing. Keep normal
-    # Release builds on the production signing path above.
+    # Testable Release products use the local development team, not the
+    # distribution identity used by normal Release builds.
+    [[ -f "$SIGNING_CONFIG_PATH" ]] || fail "Release benchmarks require local Team ID signing: run scripts/dev.sh signing TEAM_ID"
     benchmark_xcodebuild_args+=(
-      CODE_SIGNING_ALLOWED=NO
-      CODE_SIGNING_REQUIRED=NO
+      -xcconfig "$SIGNING_CONFIG_PATH"
+      CODE_SIGN_STYLE=Automatic
+      CODE_SIGN_IDENTITY="Apple Development"
       ENABLE_TESTABILITY=YES
+      CODE_COVERAGE_ENABLED=NO
     )
   fi
   rm -rf "$RESULT_BUNDLE_PATH"
   xcodebuild "${benchmark_xcodebuild_args[@]}" \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
+    -enableCodeCoverage NO \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark" \
     -only-testing:"Dictate AnywhereTests/PipelinePerformanceBenchmarkTests" \
