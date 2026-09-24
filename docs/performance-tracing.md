@@ -1,9 +1,14 @@
 # Performance tracing
 
-`PerfTrace` emits privacy-safe `OSSignposter` intervals and durable unified-log
-notice records. Trace names, elapsed time, and fixed event markers are the only
-recorded fields: no audio, transcript, prompt, path, model name, or app metadata
-is logged. Tracing is on in Debug and Release builds. Set
+`PerfTrace` emits `OSSignposter` intervals and unified-log notice records.
+Records contain static trace names, timings, outcomes, session configuration,
+and numeric workload facts. They never contain audio, transcripts, prompts,
+file paths, or the target application's identity. Session labels include the
+selected engine/model/language, a random session ID, device model, OS version,
+and build configuration; treat exported logs as diagnostic data. Intervals
+snapshot their session labels when they begin, so an async operation finishing
+after a new dictation starts retains its original session ID. Tracing is on in
+Debug and Release builds. Set
 `DICTATE_ANYWHERE_PERF_TRACE=0` before launch to disable it.
 
 ## Capture a dictation
@@ -22,17 +27,29 @@ which does not imply success; measured throwing operations report `completed`,
 produces `trace <name> event=observed` and is therefore visible both in
 Instruments and in historical logs.
 
+Filter by `session_id` to compare one dictation. `input_samples`, `new_samples`,
+and `reprocessed_samples` on `stt.batchPreview` describe each call, not the
+entire recording. `stt.transcribe` nests beneath preview, commit, or final-tail
+spans. The first-partial event means recognition produced nonempty live text;
+it is not a UI-render or audio-callback timestamp. A missing event means no
+live partial appeared. `audio.captureSummary` records captured and dropped
+pending samples for Parakeet; it does not measure Core Audio hardware overruns.
+S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local;
+`output_bytes` measures UTF-8 output size.
+
 ## Pipeline map
 
 | User-visible boundary | Trace names |
 | --- | --- |
-| Accepted hotkey request to confirmed microphone capture | `dictation.requestToRecording`, `dictation.capture`, `dictation.contextCapture`, `dictation.start`, `audio.controllerWait`, `audio.controllerCreate`, `audio.microphoneBoost`, `audio.systemMute` |
-| Live recognition availability | `stt.firstPartial`; Apple Speech reports `stt.appleSpeechSessionStart`, and AssemblyAI also reports `stt.livePreviewStart` and `stt.assemblyAIWarmConnection` |
+| Startup and switching | `app.startup`, `app.permissionCheck`, `app.appleSpeechAssetRefresh`, `app.inputSourceApply`, `stt.prepare`, `stt.modelSwitch`, `stt.enginePrepare`, `stt.modelLoad` |
+| Accepted hotkey request to confirmed microphone capture | `dictation.requestToRecording`, `dictation.inputSourceApply`, `dictation.capture`, `dictation.contextCapture`, `dictation.start`, `audio.startup`, `audio.controllerWait`, `audio.controllerCreate`, `audio.microphoneBoost`, `audio.systemMute` |
+| Live recognition availability | `stt.firstPartial`, `stt.batchPreview`, `stt.chunkCommit`, `stt.streamingProcess`, `stt.transcribe`, `audio.captureSummary`; Apple Speech reports `stt.appleSpeechSessionStart`, `stt.appleSpeechAssetInstall`, `stt.appleSpeechAnalyzerPrepare`, `stt.appleSpeechInputSummary`; AssemblyAI also reports `stt.livePreviewStart` and `stt.assemblyAIWarmConnection` |
 | Automatic end-of-utterance | `eou.detected`, `eou.stop`, followed by the regular stop path |
-| Stop recording to final transcript | `dictation.stopToInsertion`, `stt.stopToFinal`, `audio.teardown`, `stt.finalize`, `stt.transcribe` |
-| AssemblyAI final request | `stt.assemblyAIRequestBuild`, `stt.assemblyAIRequest`, `stt.assemblyAIResponseDecode`, `stt.warmConnectionWait` |
+| Stop recording to final transcript | `dictation.stopToInsertion`, `stt.stopToFinal`, `audio.teardown`, `stt.finalize`, `stt.finalTail`, `stt.streamingFinish`, `stt.finalVocabulary`, `stt.transcribe` |
+| FluidAudio vocabulary final pass | `stt.vocabularyBoost`, `stt.ctcModelLoad`, `stt.ctcTokenizerLoad`, `stt.vocabularyEncode`, `stt.vocabularyManagerSetup`, `stt.vocabularyInference`, `stt.vocabularyCleanup` |
+| AssemblyAI final request | `stt.assemblyAIFinal`, `stt.assemblyAIRequestBuild`, `stt.assemblyAIRequest`, `stt.assemblyAIResponseDecode`, `stt.warmConnectionWait` |
 | Local cleanup | `cleanup.validate`, `cleanup.request`, `cleanup.modelLoad`, `cleanup.tokenize`, `cleanup.promptEval`, `cleanup.decode`, `cleanup.generate` |
-| Apple Intelligence cleanup | `cleanup.appleIntelligenceSchema`, `cleanup.appleIntelligenceTools` |
+| Apple Intelligence cleanup | `cleanup.appleIntelligenceSchema`, `cleanup.appleIntelligenceSchemaAccepted`, `cleanup.appleIntelligenceToolsFallback`, `cleanup.appleIntelligenceTools` |
 | Remote cleanup | `cleanup.ollamaReasoningLookup`, `cleanup.ollamaRequest`, `cleanup.openRouterRequest`, `cleanup.openAICompatibleRequest`; Ollama also persists its server-reported load/prompt/eval timings |
 | Delivery and restoration | `transcript.normalize`, `transcript.history`, `insertion.targetActivation`, `insertion.deliver`, `insertion.prepare`, `insertion.listEdit`, `insertion.clipboard`, `insertion.pasteScript`, `insertion.pasteEvent`, `insertion.listEditVerify`, `dictation.teardown`, `audio.microphoneRestore`, `audio.systemRestore` |
 | Cancel and recovery paths | `dictation.cancel`, `recovery.captureStart`, `recovery.preserve`, `recovery.discard`, `recovery.reload`, `recovery.transcribe`, `recovery.continue` |
@@ -45,3 +62,6 @@ audio-controller creation, and engine session startup before changing behavior.
 `audio.controllerWait` includes queueing and the caller's timeout; `audio.controllerCreate`
 tracks actual construction and may finish later if CoreAudio is blocked. The
 request-to-recording span ends before an immediate hold-to-record stop begins.
+Use Instruments' Time Profiler, Allocations, Energy Log, and audio diagnostics
+alongside these application spans for CPU, memory, thermal behavior, callback
+duration, and hardware dropouts; these are not measured by `PerfTrace`.

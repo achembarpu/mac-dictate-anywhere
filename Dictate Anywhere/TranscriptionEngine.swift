@@ -463,6 +463,7 @@ final class ParakeetEngine: TranscriptionEngine {
     private var levelSampleBuffer: [Float] = []
     private var fullRecordingSamples: [Float] = []
     private var totalSampleCount: Int = 0
+    private var droppedPendingSamples: Int = 0
     private var committedTranscript: String = ""
     private let sampleLock = NSLock()
     private var transcriptionTask: Task<Void, Never>?
@@ -938,6 +939,7 @@ final class ParakeetEngine: TranscriptionEngine {
             levelSampleBuffer.removeAll(keepingCapacity: true)
             fullRecordingSamples.removeAll(keepingCapacity: true)
             totalSampleCount = 0
+            droppedPendingSamples = 0
         }
         committedTranscript = ""
 
@@ -966,6 +968,7 @@ final class ParakeetEngine: TranscriptionEngine {
                     let projectedCount = self.sampleBuffer.count + samples.count
                     if projectedCount > self.hardPendingSampleCap {
                         droppedCount = projectedCount - self.hardPendingSampleCap
+                        self.droppedPendingSamples += droppedCount
                         let toRemove = min(droppedCount, self.sampleBuffer.count)
                         if toRemove > 0 {
                             self.sampleBuffer.removeFirst(toRemove)
@@ -1022,6 +1025,10 @@ final class ParakeetEngine: TranscriptionEngine {
         let audioTeardownTrace = PerfTrace.begin("audio.teardown")
         await teardownAudioEngineIfNeeded()
         audioTeardownTrace.end()
+        let audioCounts = sampleLock.withLock {
+            ["captured_samples": totalSampleCount, "dropped_pending_samples": droppedPendingSamples]
+        }
+        PerfTrace.event("audio.captureSummary", counts: audioCounts)
 
         // Stop transcription loop
         isTranscribing = false
@@ -1064,10 +1071,9 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func transcribeRecording(at url: URL) async throws -> String {
-        let trace = PerfTrace.begin("stt.transcribeFile")
-        defer { trace.end() }
         let audioFile = try AVAudioFile(forReading: url)
-        PerfTrace.updateRequestCounts(sampleCount: Int(audioFile.length))
+        let trace = PerfTrace.begin("stt.transcribeFile", counts: ["input_samples": Int(audioFile.length)])
+        defer { trace.end() }
         let model = selectedModelChoice
         guard await asrCoordinator.isInitialized(for: model) else { throw TranscriptionError.engineNotReady }
         if model.tdtModelVersion != nil {
@@ -1118,6 +1124,7 @@ final class ParakeetEngine: TranscriptionEngine {
             return
         }
         var lastObservedSampleCount = 0
+        var lastPreviewTotalSampleCount = 0
         var loopIteration = 0
 
         while isTranscribing && !Task.isCancelled {
@@ -1152,7 +1159,21 @@ final class ParakeetEngine: TranscriptionEngine {
                 do {
                     let pendingSamples = sampleLock.withLock { sampleBuffer }
                     logger.info("transcriptionLoop: calling transcribe with \(pendingSamples.count, privacy: .public) samples")
-                    let result = try await asrCoordinator.transcribe(pendingSamples)
+                    let newSamples = min(pendingSamples.count, totalSamples - lastPreviewTotalSampleCount)
+                    let previewTrace = PerfTrace.begin("stt.batchPreview", counts: [
+                        "input_samples": pendingSamples.count,
+                        "new_samples": newSamples,
+                        "reprocessed_samples": pendingSamples.count - newSamples
+                    ])
+                    lastPreviewTotalSampleCount = totalSamples
+                    let result: ASRResult
+                    do {
+                        result = try await asrCoordinator.transcribe(pendingSamples)
+                        previewTrace.end(outcome: "completed")
+                    } catch {
+                        previewTrace.end(outcome: PerfTrace.outcome(for: error))
+                        throw error
+                    }
                     logger.info("transcriptionLoop: transcribe returned \(result.text.count, privacy: .public) chars")
                     let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     let merged = Self.joinChunkTranscripts(base: committedTranscript, addition: text)
@@ -1194,11 +1215,19 @@ final class ParakeetEngine: TranscriptionEngine {
             }
 
             do {
-                let buffer = try makePCMBuffer(from: pendingSamples)
-                try await asrCoordinator.appendStreamingAudio(buffer)
-                try await asrCoordinator.processStreamingAudio()
-                let text = await asrCoordinator.currentStreamingTranscript()
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let processTrace = PerfTrace.begin("stt.streamingProcess", counts: ["input_samples": pendingSamples.count])
+                let text: String
+                do {
+                    let buffer = try makePCMBuffer(from: pendingSamples)
+                    try await asrCoordinator.appendStreamingAudio(buffer)
+                    try await asrCoordinator.processStreamingAudio()
+                    text = await asrCoordinator.currentStreamingTranscript()
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    processTrace.end(outcome: "completed")
+                } catch {
+                    processTrace.end(outcome: PerfTrace.outcome(for: error))
+                    throw error
+                }
                 if !text.isEmpty {
                     markFirstPartialEmitted()
                     await MainActor.run { self.currentTranscript = text }
@@ -1235,6 +1264,8 @@ final class ParakeetEngine: TranscriptionEngine {
             }
 
             do {
+                let vocabularyTrace = PerfTrace.begin("stt.finalVocabulary", counts: ["input_samples": recordedSamples.count])
+                defer { vocabularyTrace.end() }
                 let result = try await asrCoordinator.transcribeWithCustomVocabulary(
                     recordedSamples,
                     terms: settings.customVocabulary
@@ -1261,6 +1292,8 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         do {
+            let tailTrace = PerfTrace.begin("stt.finalTail", counts: ["input_samples": samples.count])
+            defer { tailTrace.end() }
             let result = try await asrCoordinator.transcribe(samples)
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             finalTranscript = Self.joinChunkTranscripts(base: finalTranscript, addition: text)
@@ -1281,6 +1314,8 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         do {
+            let finishTrace = PerfTrace.begin("stt.streamingFinish", counts: ["tail_samples": pendingSamples.count])
+            defer { finishTrace.end() }
             if !pendingSamples.isEmpty {
                 let buffer = try makePCMBuffer(from: pendingSamples)
                 try await asrCoordinator.appendStreamingAudio(buffer)
@@ -1385,6 +1420,8 @@ final class ParakeetEngine: TranscriptionEngine {
             guard !chunk.isEmpty else { break }
 
             do {
+                let commitTrace = PerfTrace.begin("stt.chunkCommit", counts: ["input_samples": chunk.count])
+                defer { commitTrace.end() }
                 let result = try await asrCoordinator.transcribe(chunk)
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 sampleLock.withLock {
@@ -1646,7 +1683,7 @@ private actor AsrManagerCoordinator {
     }
 
     func transcribe(_ samples: [Float]) async throws -> ASRResult {
-        let trace = PerfTrace.begin("stt.transcribe")
+        let trace = PerfTrace.begin("stt.transcribe", counts: ["input_samples": samples.count])
         defer { trace.end() }
         if let senseVoiceManager {
             let startedAt = Date()
@@ -1675,7 +1712,7 @@ private actor AsrManagerCoordinator {
     }
 
     func transcribeWithCustomVocabulary(_ samples: [Float], terms: [String]) async throws -> ASRResult {
-        let trace = PerfTrace.begin("stt.vocabularyBoost")
+        let trace = PerfTrace.begin("stt.vocabularyBoost", counts: ["input_samples": samples.count, "vocabulary_terms": terms.count])
         defer { trace.end() }
         guard manager != nil else { throw TranscriptionError.engineNotReady }
         guard let models else { throw TranscriptionError.engineNotReady }
@@ -1688,7 +1725,9 @@ private actor AsrManagerCoordinator {
         }
 
         if ctcModels == nil {
-            ctcModels = try await CtcModels.downloadAndLoad(variant: .ctc110m)
+            ctcModels = try await PerfTrace.measure("stt.ctcModelLoad") {
+                try await CtcModels.downloadAndLoad(variant: .ctc110m)
+            }
         }
         guard let ctcModels else {
             return try await transcribe(samples)
@@ -1696,16 +1735,20 @@ private actor AsrManagerCoordinator {
 
         if ctcTokenizer == nil {
             let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
-            ctcTokenizer = try await CtcTokenizer.load(from: ctcModelDir)
+            ctcTokenizer = try await PerfTrace.measure("stt.ctcTokenizerLoad") {
+                try await CtcTokenizer.load(from: ctcModelDir)
+            }
         }
         guard let ctcTokenizer else {
             return try await transcribe(samples)
         }
 
-        let vocabularyTerms = rawTerms.compactMap { term -> CustomVocabularyTerm? in
-            let tokenIds = ctcTokenizer.encode(term)
-            guard !tokenIds.isEmpty else { return nil }
-            return CustomVocabularyTerm(text: term, ctcTokenIds: tokenIds)
+        let vocabularyTerms = PerfTrace.measure("stt.vocabularyEncode") {
+            rawTerms.compactMap { term -> CustomVocabularyTerm? in
+                let tokenIds = ctcTokenizer.encode(term)
+                guard !tokenIds.isEmpty else { return nil }
+                return CustomVocabularyTerm(text: term, ctcTokenIds: tokenIds)
+            }
         }
         guard !vocabularyTerms.isEmpty else {
             return try await transcribe(samples)
@@ -1730,25 +1773,34 @@ private actor AsrManagerCoordinator {
         )
 
         do {
-            try await streamingManager.configureVocabularyBoosting(
-                vocabulary: vocabulary,
-                ctcModels: ctcModels,
-                config: ParakeetEngine.vocabularyRescorerConfig
-            )
-            try await streamingManager.loadModels(models)
-            try await streamingManager.startStreaming(source: .microphone)
-
-            let streamChunkSize = 16_000
-            var offset = 0
-            while offset < samples.count {
-                let end = min(offset + streamChunkSize, samples.count)
-                let buffer = try makePCMBuffer(from: Array(samples[offset..<end]))
-                await streamingManager.streamAudio(buffer)
-                offset = end
+            try await PerfTrace.measure("stt.vocabularyManagerSetup") {
+                try await streamingManager.configureVocabularyBoosting(
+                    vocabulary: vocabulary,
+                    ctcModels: ctcModels,
+                    config: ParakeetEngine.vocabularyRescorerConfig
+                )
+                try await streamingManager.loadModels(models)
+                try await streamingManager.startStreaming(source: .microphone)
             }
 
-            let text = try await streamingManager.finish()
-            await streamingManager.cleanup()
+            let inferenceTrace = PerfTrace.begin("stt.vocabularyInference", counts: ["input_samples": samples.count])
+            let text: String
+            do {
+                let streamChunkSize = 16_000
+                var offset = 0
+                while offset < samples.count {
+                    let end = min(offset + streamChunkSize, samples.count)
+                    let buffer = try makePCMBuffer(from: Array(samples[offset..<end]))
+                    await streamingManager.streamAudio(buffer)
+                    offset = end
+                }
+                text = try await streamingManager.finish()
+                inferenceTrace.end(outcome: "completed")
+            } catch {
+                inferenceTrace.end(outcome: PerfTrace.outcome(for: error))
+                throw error
+            }
+            await PerfTrace.measure("stt.vocabularyCleanup") { await streamingManager.cleanup() }
 
             let result = ASRResult(
                 text: text,
@@ -1761,7 +1813,7 @@ private actor AsrManagerCoordinator {
             )
             return result
         } catch {
-            await streamingManager.cleanup()
+            await PerfTrace.measure("stt.vocabularyCleanup") { await streamingManager.cleanup() }
             logger.error(
                 "transcribeWithCustomVocabulary: FluidAudio vocabulary boosting failed: \(error.localizedDescription, privacy: .public)"
             )

@@ -403,10 +403,12 @@ enum AIPostProcessingService {
             vocabulary: vocabulary,
             context: context
         ) {
+            PerfTrace.event("cleanup.appleIntelligenceSchemaAccepted")
             return schemaResult
         }
 
         // Fallback keeps prior reliability behavior if schema generation fails/decodes poorly.
+        PerfTrace.event("cleanup.appleIntelligenceToolsFallback")
         return try await processWithTools(text: text, prompt: prompt, vocabulary: vocabulary, context: context)
     }
 

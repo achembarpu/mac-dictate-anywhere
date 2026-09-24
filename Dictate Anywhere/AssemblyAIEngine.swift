@@ -320,6 +320,8 @@ final class AssemblyAIEngine: TranscriptionEngine {
     }
 
     private func transcribe(samples: [Float]) async throws -> String {
+        let trace = PerfTrace.begin("stt.assemblyAIFinal", counts: ["input_samples": samples.count])
+        defer { trace.end() }
         lastInsertionPlan = nil
         lastResultWasPolished = false
         lastRawTranscript = nil

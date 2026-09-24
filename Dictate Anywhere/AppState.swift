@@ -306,18 +306,22 @@ final class AppState {
     private func runStartupSequence() async {
         let trace = PerfTrace.begin("app.startup")
         defer { trace.end() }
-        await permissions.check()
+        await PerfTrace.measure("app.permissionCheck") { await permissions.check() }
         guard !isShuttingDown else { return }
         updateAccessibilityIntegration(granted: permissions.accessibilityGranted, promptIfNeeded: true)
         await prepareActiveEngine()
         guard !isShuttingDown else { return }
-        await refreshAppleSpeechAssetState()
+        await PerfTrace.measure("app.appleSpeechAssetRefresh") {
+            await refreshAppleSpeechAssetState()
+        }
         guard !isShuttingDown else { return }
         inputSourceMonitor.startMonitoring()
         if settings.engineChoice != .assemblyAI,
            settings.inputSourceAutoSwitchEnabled,
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
-            await enqueueInputSourceProfileApply(for: inputSourceID).value
+            await PerfTrace.measure("app.inputSourceApply") {
+                await enqueueInputSourceProfileApply(for: inputSourceID).value
+            }
         }
     }
 
@@ -681,6 +685,7 @@ final class AppState {
             "engine": engine.rawValue,
             "model": model,
             "language": language,
+            "audio_tap_buffer_frames": "4096",
             "hotkey_mode": mode?.rawValue ?? "none",
             "eou_enabled": String(engine == .parakeet
                 && settings.parakeetModelChoice.supportsEndOfUtterance
@@ -739,7 +744,9 @@ final class AppState {
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
             // Backstop: the eager pre-warm usually already did this; going
             // through the queue serializes against an apply still in flight.
-            await enqueueInputSourceProfileApply(for: inputSourceID, showLoadingOverlay: true).value
+            await PerfTrace.measure("dictation.inputSourceApply") {
+                await enqueueInputSourceProfileApply(for: inputSourceID, showLoadingOverlay: true).value
+            }
         }
         guard !isShuttingDown else { return }
         let engine = activeEngine

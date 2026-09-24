@@ -2,8 +2,8 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class PerfTraceTests: XCTestCase {
-    func testSyncMeasureReturnsValue() throws {
-        let value = try PerfTrace.measure("test.sync") { 42 }
+    func testSyncMeasureReturnsValue() {
+        let value = PerfTrace.measure("test.sync") { 42 }
         XCTAssertEqual(value, 42)
     }
 
@@ -12,8 +12,8 @@ final class PerfTraceTests: XCTestCase {
         XCTAssertThrowsError(try PerfTrace.measure("test.syncThrow") { throw Probe() })
     }
 
-    func testAsyncMeasureReturnsValue() async throws {
-        let value = try await PerfTrace.measure("test.async") {
+    func testAsyncMeasureReturnsValue() async {
+        let value = await PerfTrace.measure("test.async") {
             try? await Task.sleep(for: .milliseconds(1))
             return "ok"
         }
@@ -50,8 +50,20 @@ final class PerfTraceTests: XCTestCase {
     }
 
     func testSessionMetadataMergesAndClears() {
+        let original = PerfTraceSessionMetadata(labels: ["session_id": "first", "engine": "parakeet"])
+        let updated = original.merging(["session_id": "second", "model": "test-model"])
+        XCTAssertEqual(original.logFields, "engine=parakeet session_id=first")
+        XCTAssertEqual(updated.logFields, "engine=parakeet model=test-model session_id=second")
         PerfTrace.setSessionMetadata(["session_id": "test", "engine": "parakeet"])
         PerfTrace.updateSessionMetadata(["model": "test-model"])
         PerfTrace.clearSessionMetadata()
+    }
+
+    func testRequestCountsStayOnTheirInterval() {
+        let interval = PerfTrace.begin("test.request", counts: ["input_samples": 16_000])
+        interval.recordCounts(["new_samples": 8_000])
+        XCTAssertTrue(interval.end(outcome: "completed"))
+        interval.recordCounts(["new_samples": 32_000])
+        XCTAssertFalse(interval.end())
     }
 }

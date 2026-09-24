@@ -440,6 +440,9 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
     private let inputStream: AsyncStream<AnalyzerInput>
     private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
     private let conversionLock = NSLock()
+    private var inputBufferCount = 0
+    private var convertedBufferCount = 0
+    private var inputSampleCount = 0
     private var analysisTask: Task<CMTime?, Error>?
     private var resultTask: Task<String, Error>?
 
@@ -460,7 +463,9 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
             guard allowsAssetInstallation else {
                 throw TranscriptionError.appleSpeechLanguageUnsupported
             }
-            try await installationRequest.downloadAndInstall()
+            try await PerfTrace.measure("stt.appleSpeechAssetInstall") {
+                try await installationRequest.downloadAndInstall()
+            }
         }
 
         guard let sourceFormat = AVAudioFormat(
@@ -482,7 +487,9 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
             context.contextualStrings[.general] = contextualVocabulary
             try await analyzer.setContext(context)
         }
-        try await analyzer.prepareToAnalyze(in: analyzerFormat)
+        try await PerfTrace.measure("stt.appleSpeechAnalyzerPrepare") {
+            try await analyzer.prepareToAnalyze(in: analyzerFormat)
+        }
 
         let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
         self.transcriber = transcriber
@@ -558,7 +565,10 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
         do {
             let sourceBuffer = try makePCMBuffer(from: samples)
             let buffer = try conversionLock.withLock {
-                try convertIfNeeded(sourceBuffer)
+                inputBufferCount += 1
+                inputSampleCount += samples.count
+                if sourceBuffer.format != analyzerFormat { convertedBufferCount += 1 }
+                return try convertIfNeeded(sourceBuffer)
             }
             inputContinuation.yield(AnalyzerInput(buffer: buffer))
         } catch {
@@ -568,6 +578,11 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
 
     func finish() async -> String {
         inputContinuation.finish()
+        let counts = conversionLock.withLock {
+            ["input_buffers": inputBufferCount, "converted_buffers": convertedBufferCount,
+             "input_samples": inputSampleCount]
+        }
+        PerfTrace.event("stt.appleSpeechInputSummary", counts: counts)
         do {
             let lastSample = try await analysisTask?.value
             if let lastSample {

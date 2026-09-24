@@ -236,7 +236,10 @@ actor S1MiniInferenceEngine {
             1_024,
             max(32, Int(ceil(Double(transcriptTokenCount) * 1.3)) + 32)
         )
-        PerfTrace.updateRequestCounts(tokenCount: transcriptTokenCount + promptTokens.count)
+        trace.recordCounts([
+            "input_tokens": transcriptTokenCount,
+            "prompt_tokens": promptTokens.count
+        ])
         // Keep the documented llama.cpp context size. Reducing Qwen3's context
         // dynamically changes logits enough for S1-mini to emit EOS on valid
         // short transcripts.
@@ -277,11 +280,12 @@ actor S1MiniInferenceEngine {
         }
         promptEvalTrace.end()
 
-        let output = try sampleOutput(
+        let (output, outputTokenCount) = try sampleOutput(
             context: context,
             vocabulary: vocabulary,
             maximumOutputTokens: maximumOutputTokens
         )
+        trace.recordCounts(["output_tokens": outputTokenCount, "output_bytes": output.count])
 
         let decoded = String(decoding: output, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -328,16 +332,18 @@ actor S1MiniInferenceEngine {
         context: OpaquePointer,
         vocabulary: OpaquePointer,
         maximumOutputTokens: Int
-    ) throws -> Data {
+    ) throws -> (Data, Int) {
         let trace = PerfTrace.begin("cleanup.decode")
         defer { trace.end() }
         var output = Data()
+        var outputTokenCount = 0
         for _ in 0..<maximumOutputTokens {
             try Task.checkCancellation()
             let token = try greedyToken(context: context, vocabulary: vocabulary)
             if llama_vocab_is_eog(vocabulary, token) {
                 break
             }
+            outputTokenCount += 1
             output.append(try piece(for: token, vocabulary: vocabulary))
 
             var nextToken = token
@@ -349,7 +355,8 @@ actor S1MiniInferenceEngine {
                 throw S1MiniServiceError.tokenEvaluationFailed(tokenStatus)
             }
         }
-        return output
+        trace.recordCounts(["output_tokens": outputTokenCount])
+        return (output, outputTokenCount)
     }
 
     private func loadModelIfNeeded(from url: URL) throws -> OpaquePointer {
