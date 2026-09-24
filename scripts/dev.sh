@@ -163,6 +163,19 @@ run_tests() {
 run_benchmark() {
   local benchmark_conditions="PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED"
   local -a benchmark_xcodebuild_args=("${xcodebuild_args[@]}")
+  # Keep nonempty for macOS's Bash 3.2 with `set -u` array expansion.
+  local -a benchmark_test_environment=("TEST_RUNNER_PIPELINE_BENCHMARK=1")
+  local name
+  # xcodebuild does not pass ordinary shell variables to its test host. Xcode
+  # strips TEST_RUNNER_ and forwards only these explicitly opted-in settings.
+  for name in DICTATE_ANYWHERE_PERF_TRACE PIPELINE_BENCHMARK_ITERATIONS \
+    PIPELINE_BENCHMARK_MODEL PIPELINE_BENCHMARK_AUDIO_PATH \
+    PIPELINE_BENCHMARK_REFERENCE_PATH PIPELINE_BENCHMARK_MAX_WER \
+    S1_MINI_MODEL_PATH RUN_MODEL_SWITCH_BENCHMARK; do
+    if [[ -n "${!name:-}" ]]; then
+      benchmark_test_environment+=("TEST_RUNNER_${name}=${!name}")
+    fi
+  done
   [[ "$CONFIGURATION" == "Debug" ]] && benchmark_conditions="DEBUG $benchmark_conditions"
   if [[ "$CONFIGURATION" == "Release" ]]; then
     # Testable Release products use the local development team, not the
@@ -177,12 +190,16 @@ run_benchmark() {
     )
   fi
   rm -rf "$RESULT_BUNDLE_PATH"
-  xcodebuild "${benchmark_xcodebuild_args[@]}" \
+  env "${benchmark_test_environment[@]}" xcodebuild "${benchmark_xcodebuild_args[@]}" \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
     -enableCodeCoverage NO \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
+    -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testInstalledMandarinASRBenchmark" \
+    -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark" \
     -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark" \
     -only-testing:"Dictate AnywhereTests/PipelinePerformanceBenchmarkTests" \
+    -only-testing:"Dictate AnywhereTests/PipelineWorkloadBenchmarkTests" \
+    -only-testing:"Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings" \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
 }
 
