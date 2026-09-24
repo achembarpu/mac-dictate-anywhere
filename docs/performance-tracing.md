@@ -34,6 +34,8 @@ spans. The first-partial event means recognition produced nonempty live text;
 it is not a UI-render or audio-callback timestamp. A missing event means no
 live partial appeared. `audio.captureSummary` records captured and dropped
 pending samples for Parakeet; it does not measure Core Audio hardware overruns.
+`stt.appleSpeechInputSummary` records attempted, converted, and rejected input
+buffers but not analyzer queue depth or processing lag.
 S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local;
 `output_bytes` measures UTF-8 output size.
 

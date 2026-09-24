@@ -1157,15 +1157,20 @@ final class ParakeetEngine: TranscriptionEngine {
             let hasSignificant = hasSignificantAudio(recentSamples)
             if hasSignificant {
                 do {
-                    let pendingSamples = sampleLock.withLock { sampleBuffer }
+                    // Snapshot the buffer and captured count together: the tap
+                    // may append while the model is running, and mismatched
+                    // snapshots would mislabel new audio as reprocessed.
+                    let (pendingSamples, previewTotalSamples) = sampleLock.withLock {
+                        (sampleBuffer, totalSampleCount)
+                    }
                     logger.info("transcriptionLoop: calling transcribe with \(pendingSamples.count, privacy: .public) samples")
-                    let newSamples = min(pendingSamples.count, totalSamples - lastPreviewTotalSampleCount)
+                    let newSamples = min(pendingSamples.count, previewTotalSamples - lastPreviewTotalSampleCount)
                     let previewTrace = PerfTrace.begin("stt.batchPreview", counts: [
                         "input_samples": pendingSamples.count,
                         "new_samples": newSamples,
                         "reprocessed_samples": pendingSamples.count - newSamples
                     ])
-                    lastPreviewTotalSampleCount = totalSamples
+                    lastPreviewTotalSampleCount = previewTotalSamples
                     let result: ASRResult
                     do {
                         result = try await asrCoordinator.transcribe(pendingSamples)

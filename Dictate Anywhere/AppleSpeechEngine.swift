@@ -443,6 +443,7 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
     private var inputBufferCount = 0
     private var convertedBufferCount = 0
     private var inputSampleCount = 0
+    private var rejectedInputBufferCount = 0
     private var analysisTask: Task<CMTime?, Error>?
     private var resultTask: Task<String, Error>?
 
@@ -570,7 +571,11 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
                 if sourceBuffer.format != analyzerFormat { convertedBufferCount += 1 }
                 return try convertIfNeeded(sourceBuffer)
             }
-            inputContinuation.yield(AnalyzerInput(buffer: buffer))
+            if case .enqueued = inputContinuation.yield(AnalyzerInput(buffer: buffer)) {
+                // The unbounded stream accepted this buffer.
+            } else {
+                conversionLock.withLock { rejectedInputBufferCount += 1 }
+            }
         } catch {
             inputContinuation.finish()
         }
@@ -580,7 +585,7 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
         inputContinuation.finish()
         let counts = conversionLock.withLock {
             ["input_buffers": inputBufferCount, "converted_buffers": convertedBufferCount,
-             "input_samples": inputSampleCount]
+             "rejected_input_buffers": rejectedInputBufferCount, "input_samples": inputSampleCount]
         }
         PerfTrace.event("stt.appleSpeechInputSummary", counts: counts)
         do {

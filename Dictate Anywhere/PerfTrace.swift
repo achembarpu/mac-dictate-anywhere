@@ -43,23 +43,23 @@ import Darwin
 import os
 
 nonisolated struct PerfTraceSessionMetadata: Sendable {
-    private(set) var labels: [String: String]
+    let labels: [String: String]
+    /// Formatting once per session avoids sorting the same labels on every
+    /// streaming interval (roughly one every 80 ms).
+    let logFields: String
 
     init(labels: [String: String]) {
         self.labels = labels
+        self.logFields = labels.keys.sorted().compactMap { key in
+            guard let value = labels[key] else { return nil }
+            return "\(key)=\(value)"
+        }.joined(separator: " ")
     }
 
     func merging(_ updates: [String: String]) -> Self {
         var merged = labels
         merged.merge(updates) { _, new in new }
         return Self(labels: merged)
-    }
-
-    var logFields: String {
-        labels.keys.sorted().compactMap { key in
-            guard let value = labels[key] else { return nil }
-            return "\(key)=\(value)"
-        }.joined(separator: " ")
     }
 }
 
