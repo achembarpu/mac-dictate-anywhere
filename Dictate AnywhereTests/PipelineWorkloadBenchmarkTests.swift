@@ -133,31 +133,36 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
         defer { PerfTrace.clearSessionMetadata() }
         await S1MiniPostProcessingService.unload()
 
-        for (name, text) in [
-            ("short", "Um, I think we should send the report tomorrow."),
-            ("long", Array(repeating: "We reviewed the project and agreed on the next steps.", count: 12)
-                .joined(separator: " "))
-        ] {
-            var latencies: [Double] = []
-            for iteration in 1...iterations {
-                PerfTrace.setSessionMetadata([
-                    "session_id": "benchmark-s1-\(name)-\(iteration)", "engine": "s1Mini",
-                    "model": "s1Mini", "language": "english", "benchmark": "cleanup"
-                ])
-                let start = ContinuousClock.now
-                let output = try await S1MiniPostProcessingService.process(
-                    text: text, modelURL: url, styling: .semiFormal,
-                    structure: .prose, contextSetting: .general, context: nil
-                )
-                latencies.append(BenchmarkStatistics.elapsedMilliseconds(from: start))
-                XCTAssertFalse(output.isEmpty)
+        do {
+            for (name, text) in [
+                ("short", "Um, I think we should send the report tomorrow."),
+                ("long", Array(repeating: "We reviewed the project and agreed on the next steps.", count: 12)
+                    .joined(separator: " "))
+            ] {
+                var latencies: [Double] = []
+                for iteration in 1...iterations {
+                    PerfTrace.setSessionMetadata([
+                        "session_id": "benchmark-s1-\(name)-\(iteration)", "engine": "s1Mini",
+                        "model": "s1Mini", "language": "english", "benchmark": "cleanup"
+                    ])
+                    let start = ContinuousClock.now
+                    let output = try await S1MiniPostProcessingService.process(
+                        text: text, modelURL: url, styling: .semiFormal,
+                        structure: .prose, contextSetting: .general, context: nil
+                    )
+                    latencies.append(BenchmarkStatistics.elapsedMilliseconds(from: start))
+                    XCTAssertFalse(output.isEmpty)
+                }
+                print("PIPELINE_BENCHMARK component=s1_mini_cleanup fixture=\(name) first_request_ms=\(latencies[0]) cold_model=\(name == "short")")
+                if latencies.count > 1 {
+                    BenchmarkStatistics(Array(latencies.dropFirst())).report(
+                        component: "s1_mini_cleanup_warm", details: "fixture=\(name) input_chars=\(text.count)"
+                    )
+                }
             }
-            print("PIPELINE_BENCHMARK component=s1_mini_cleanup fixture=\(name) first_request_ms=\(latencies[0]) cold_model=\(name == "short")")
-            if latencies.count > 1 {
-                BenchmarkStatistics(Array(latencies.dropFirst())).report(
-                    component: "s1_mini_cleanup_warm", details: "fixture=\(name) input_chars=\(text.count)"
-                )
-            }
+        } catch {
+            await S1MiniPostProcessingService.unload()
+            throw error
         }
         await S1MiniPostProcessingService.unload()
     }
@@ -169,6 +174,7 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
             throw XCTSkip("Apple Intelligence is not available on this Mac")
         }
         let text = "Um, please send the report tomorrow morning."
+        defer { PerfTrace.clearSessionMetadata() }
         var latencies: [Double] = []
         for iteration in 1...iterations {
             PerfTrace.setSessionMetadata([
@@ -182,7 +188,6 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
             latencies.append(BenchmarkStatistics.elapsedMilliseconds(from: start))
             XCTAssertFalse(output.isEmpty)
         }
-        PerfTrace.clearSessionMetadata()
         BenchmarkStatistics(latencies).report(component: "apple_intelligence_cleanup", details: "input_chars=\(text.count)")
     }
 }

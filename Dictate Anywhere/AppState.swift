@@ -738,7 +738,11 @@ final class AppState {
         guard !isShuttingDown else { return }
         beginPerformanceSession(mode: mode)
         let requestTrace = PerfTrace.begin("dictation.requestToRecording")
-        defer { requestTrace.end(outcome: "aborted") }
+        defer {
+            if requestTrace.end(outcome: "aborted") {
+                PerfTrace.clearSessionMetadata()
+            }
+        }
         if settings.engineChoice != .assemblyAI,
            settings.inputSourceAutoSwitchEnabled,
            let inputSourceID = inputSourceMonitor.currentInputSourceID() {
@@ -803,7 +807,11 @@ final class AppState {
         requestTrace: PerfInterval? = nil
     ) async {
         let trace = PerfTrace.begin("dictation.start")
-        defer { trace.end(outcome: "aborted") }
+        defer {
+            if trace.end(outcome: "aborted") {
+                PerfTrace.clearSessionMetadata()
+            }
+        }
         guard !isShuttingDown else { return }
         engine.setSessionContextualVocabulary(sessionDictationContext?.lexicalHints ?? [])
         engine.setSessionDictationContext(sessionDictationContext)
@@ -1511,6 +1519,8 @@ final class AppState {
                 return
             }
             recoveringEntryID = nil
+            beginPerformanceSession(mode: .handsFreeToggle)
+            updatePerformanceContextLabels()
             await beginRecording(engine: engine, mode: .handsFreeToggle)
         } catch {
             invalidateContextCapture()

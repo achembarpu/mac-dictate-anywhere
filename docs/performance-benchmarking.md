@@ -22,7 +22,7 @@ The command runs the following deterministic or opt-in scenarios:
 
 | Component | Coverage |
 | --- | --- |
-| Offline ASR | Replays the bundled speech fixture through installed Parakeet and available Apple Speech engines. |
+| Offline ASR | Replays the bundled speech fixture through installed Parakeet and available Apple Speech engines. Reports latency, duration, median real-time factor, and beginning/end recognition sentinels. |
 | Mandarin ASR quality | Replays the four bundled, referenced Mandarin fixtures through installed SenseVoice. Reports CER and per-fixture p50/p95; skips if the model is not installed. |
 | User audio quality | If both `PIPELINE_BENCHMARK_AUDIO_PATH` and `PIPELINE_BENCHMARK_REFERENCE_PATH` are provided, replays a local 16 kHz mono fixture and reports WER. No audio or reference content is uploaded or logged by the harness. |
 | Pending audio workload | Models the non-streaming preview's repeated sample processing; no model inference or audio quality is measured. |

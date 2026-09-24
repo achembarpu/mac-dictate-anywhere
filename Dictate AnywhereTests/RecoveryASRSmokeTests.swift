@@ -130,6 +130,8 @@ final class RecoveryASRSmokeTests: XCTestCase {
         let preserved = try await store.preserve(capture, preview: "", completedTranscript: nil)
         let entry = try XCTUnwrap(preserved)
         let audioURL = store.audioURL(id: entry.id)
+        let audioFile = try AVAudioFile(forReading: audioURL)
+        let audioSeconds = Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
         let settings = Settings.shared
         let oldModel = settings.parakeetModelChoice
@@ -170,6 +172,7 @@ final class RecoveryASRSmokeTests: XCTestCase {
                 name: "parakeet",
                 model: model.rawValue,
                 audioURL: audioURL,
+                audioSeconds: audioSeconds,
                 iterations: iterations
             )
             didRun = true
@@ -188,6 +191,7 @@ final class RecoveryASRSmokeTests: XCTestCase {
                     name: "appleSpeech",
                     model: "english",
                     audioURL: audioURL,
+                    audioSeconds: audioSeconds,
                     iterations: iterations
                 )
                 didRun = true
@@ -356,6 +360,7 @@ final class RecoveryASRSmokeTests: XCTestCase {
         name: String,
         model: String,
         audioURL: URL,
+        audioSeconds: Double,
         iterations: Int
     ) async throws {
         var latencies: [Double] = []
@@ -381,7 +386,11 @@ final class RecoveryASRSmokeTests: XCTestCase {
             XCTAssertTrue(text.localizedCaseInsensitiveContains("cancellation"), "\(name) lost the fixture ending")
             print("REPRO_ASR_BENCHMARK engine=\(name) model=\(model) iteration=\(iteration) elapsed_ms=\(elapsed)")
         }
-        BenchmarkStatistics(latencies).report(component: "offline_asr", details: "engine=\(name) model=\(model)")
+        BenchmarkStatistics(latencies).report(
+            component: "offline_asr",
+            details: "engine=\(name) model=\(model) audio_seconds=\(String(format: "%.3f", audioSeconds)) "
+                + "median_rtf=\(String(format: "%.3f", BenchmarkStatistics(latencies).p50 / 1_000 / audioSeconds))"
+        )
     }
 
     private func checkRecovery(using engine: TranscriptionEngine) async throws {

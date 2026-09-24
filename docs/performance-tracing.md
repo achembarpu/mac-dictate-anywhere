@@ -10,6 +10,8 @@ snapshot their session labels when they begin, so an async operation finishing
 after a new dictation starts retains its original session ID. Tracing is on in
 Debug and Release builds. Set
 `DICTATE_ANYWHERE_PERF_TRACE=0` before launch to disable it.
+Aborted recording starts clear their session labels; resumed recovery dictations
+create a new session so their capture and insertion spans can be correlated.
 
 ## Capture a dictation
 
