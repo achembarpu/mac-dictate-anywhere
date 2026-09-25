@@ -790,9 +790,9 @@ final class TextInserter {
                 end tell
                 """
                 var error: NSDictionary?
-                let compileTrace = PerfTrace.begin("insertion.pasteCompile")
+                let createTrace = PerfTrace.begin("insertion.pasteScriptCreate")
                 let scriptObject = NSAppleScript(source: script)
-                compileTrace.end(outcome: scriptObject == nil ? "failed" : "success")
+                createTrace.end(outcome: scriptObject == nil ? "failed" : "success")
                 if let scriptObject {
                     scriptObject.executeAndReturnError(&error)
                     continuation.resume(returning: error == nil)

@@ -1071,17 +1071,14 @@ enum OllamaPostProcessingService {
             throw ServiceError.emptyResponse
         }
 
-        logger.notice(
-            """
-            generate request kind=full-transcript \
-            total_duration_ns=\(decoded.totalDuration ?? -1, privacy: .public) \
-            load_duration_ns=\(decoded.loadDuration ?? -1, privacy: .public) \
-            prompt_eval_duration_ns=\(decoded.promptEvalDuration ?? -1, privacy: .public) \
-            eval_duration_ns=\(decoded.evalDuration ?? -1, privacy: .public) \
-            prompt_eval_count=\(decoded.promptEvalCount ?? -1, privacy: .public) \
-            eval_count=\(decoded.evalCount ?? -1, privacy: .public)
-            """
-        )
+        PerfTrace.event("cleanup.ollamaServerTimings", counts: [
+            "total_duration_ns": Int(decoded.totalDuration ?? -1),
+            "load_duration_ns": Int(decoded.loadDuration ?? -1),
+            "prompt_eval_duration_ns": Int(decoded.promptEvalDuration ?? -1),
+            "eval_duration_ns": Int(decoded.evalDuration ?? -1),
+            "prompt_eval_count": decoded.promptEvalCount ?? -1,
+            "eval_count": decoded.evalCount ?? -1
+        ])
 
         return responseText
     }

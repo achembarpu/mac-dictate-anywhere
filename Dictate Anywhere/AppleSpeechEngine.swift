@@ -566,13 +566,16 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
 
     func append(samples: [Float]) {
         guard !samples.isEmpty else { return }
+        var countedInput = false
         do {
             let sourceBuffer = try makePCMBuffer(from: samples)
             let buffer = try conversionLock.withLock {
                 inputBufferCount += 1
                 inputSampleCount += samples.count
+                countedInput = true
+                let converted = try convertIfNeeded(sourceBuffer)
                 if sourceBuffer.format != analyzerFormat { convertedBufferCount += 1 }
-                return try convertIfNeeded(sourceBuffer)
+                return converted
             }
             if case .enqueued = inputContinuation.yield(AnalyzerInput(buffer: buffer)) {
                 // The unbounded stream accepted this buffer.
@@ -580,6 +583,13 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
                 conversionLock.withLock { rejectedInputBufferCount += 1 }
             }
         } catch {
+            conversionLock.withLock {
+                if !countedInput {
+                    inputBufferCount += 1
+                    inputSampleCount += samples.count
+                }
+                rejectedInputBufferCount += 1
+            }
             inputContinuation.finish()
         }
     }
