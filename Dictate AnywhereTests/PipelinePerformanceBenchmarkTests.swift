@@ -92,7 +92,7 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         )
     }
 
-    func testPasteScriptCacheBenchmark() throws {
+    func testPasteScriptCacheBenchmark() async throws {
         try requireBenchmark()
         let source = """
             tell application "System Events"
@@ -100,14 +100,24 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
             end tell
             """
         let compileCount = max(1, iterations * 10)
-        let uncachedStartedAt = ContinuousClock.now
-        for _ in 0..<compileCount {
-            var error: NSDictionary?
-            let script = NSAppleScript(source: source)
-            XCTAssertNotNil(script)
-            XCTAssertTrue(script?.compileAndReturnError(&error) == true, "AppleScript compile failed: \(String(describing: error))")
+        // Match the paste path's worker queue; compiling on the main thread
+        // triggers a responsiveness diagnostic and skews the baseline.
+        let (uncachedElapsed, compileError) = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let startedAt = ContinuousClock.now
+                var failure: String?
+                for _ in 0..<compileCount {
+                    var error: NSDictionary?
+                    guard let script = NSAppleScript(source: source),
+                          script.compileAndReturnError(&error) else {
+                        failure = String(describing: error)
+                        break
+                    }
+                }
+                continuation.resume(returning: (startedAt.duration(to: .now), failure))
+            }
         }
-        let uncachedElapsed = uncachedStartedAt.duration(to: .now)
+        XCTAssertNil(compileError, "AppleScript compile failed: \(compileError ?? "unknown")")
 
         #if PIPELINE_CHILD_BENCHMARK
         let inserter = TextInserter()
