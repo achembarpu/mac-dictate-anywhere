@@ -12,8 +12,9 @@ create the ignored local signing configuration. The default `benchmark` command
 instead runs Debug and is useful for relative comparisons, not absolute
 production latency. Repeat with `DICTATE_ANYWHERE_PERF_TRACE=0` to measure
 instrumentation overhead. Preserve the device, OS, model revision, and build
-configuration with results; the trace records device, OS, and build
-configuration, while model revision must be recorded separately. The app and
+configuration with results; local Release benchmarks trace by default even
+though distributed Release archives do not. The trace records device, OS, and
+build configuration, while model revision must be recorded separately. The app and
 dependencies are Release-optimized; Xcode compiles the XCTest benchmark
 harness without optimization, so synthetic test-loop timings are not
 production absolute timings.

@@ -31,11 +31,9 @@
 //  Kill switch (both signposts and log lines): launch with
 //  `DICTATE_ANYWHERE_PERF_TRACE=0` in the environment.
 //
-//  Release builds: tracing stays enabled. This is deliberate — improvements
-//  must be measured on release-representative builds. Signposts cost
-//  ~nothing unless Instruments is recording, and log volume is bounded
-//  (no user content). The kill switch works
-//  identically in Release and Debug.
+//  Local Debug and Release builds trace by default. The distribution archive
+//  defines DISTRIBUTION_BUILD, which defaults tracing off in the shipped app.
+//  DICTATE_ANYWHERE_PERF_TRACE=0 or 1 overrides either default at launch.
 //
 
 import Foundation
@@ -114,12 +112,20 @@ enum PerfTrace {
         ]
     }()
 
-    /// Read once at launch: the documented kill switch is a launch-time
-    /// setting, and checking the process environment on every span is costly.
+    /// Read once at launch; checking the process environment on every span is costly.
     nonisolated static let isEnabled = isEnabled(in: ProcessInfo.processInfo.environment)
 
     nonisolated static func isEnabled(in environment: [String: String]) -> Bool {
-        environment["DICTATE_ANYWHERE_PERF_TRACE"] != "0"
+        switch environment["DICTATE_ANYWHERE_PERF_TRACE"] {
+        case "0": return false
+        case "1": return true
+        default:
+            #if DISTRIBUTION_BUILD
+            return false
+            #else
+            return true
+            #endif
+        }
     }
 
     /// Measures a synchronous closure. Returns the closure's value.

@@ -42,8 +42,12 @@ final class PerfTraceTests: XCTestCase {
         PerfTrace.event("test.event")
     }
 
-    func testKillSwitchIsReadFromLaunchEnvironment() {
+    func testBuildDefaultAndLaunchOverride() {
+        #if DISTRIBUTION_BUILD
+        XCTAssertFalse(PerfTrace.isEnabled(in: [:]))
+        #else
         XCTAssertTrue(PerfTrace.isEnabled(in: [:]))
+        #endif
         XCTAssertTrue(PerfTrace.isEnabled(in: ["DICTATE_ANYWHERE_PERF_TRACE": "1"]))
         XCTAssertFalse(PerfTrace.isEnabled(in: ["DICTATE_ANYWHERE_PERF_TRACE": "0"]))
         XCTAssertEqual(PerfTrace.isEnabled, PerfTrace.isEnabled(in: ProcessInfo.processInfo.environment))
