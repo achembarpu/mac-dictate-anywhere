@@ -134,9 +134,9 @@ final class AppleSpeechEngine: TranscriptionEngine {
             let session = try await AppleSpeechSession(
                 requestedLocale: Self.locale(for: language),
                 contextualVocabulary: vocabulary,
-                onTranscript: { [weak self] text in
+                onTranscript: { [weak self] text, isPartial in
                     self?.setTranscript(text)
-                    self?.markFirstPartialIfNeeded(text: text)
+                    if isPartial { self?.markFirstPartialIfNeeded(text: text) }
                 }
             )
             preparedSession = session
@@ -277,7 +277,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
         guard #available(macOS 26.0, *), Self.isSupported else { throw TranscriptionError.appleSpeechUnavailable }
         let session = try await AppleSpeechSession(
             requestedLocale: Self.locale(for: Settings.shared.appleSpeechLanguage),
-            contextualVocabulary: appleContextualVocabulary(), onTranscript: { _ in }
+            contextualVocabulary: appleContextualVocabulary(), onTranscript: { _, _ in }
         )
         return try await session.transcribeFile(at: url)
     }
@@ -408,7 +408,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
     static func makeInstalledLivePreviewSession(
         languageCode: String,
         contextualVocabulary: [String],
-        onTranscript: @escaping @Sendable (String) -> Void
+        onTranscript: @escaping @Sendable (String, Bool) -> Void
     ) async throws -> (any AppleSpeechSessionProtocol)? {
         guard #available(macOS 26.0, *), Self.isSupported else { return nil }
         let requestedLocale = locale(forLanguageCode: languageCode)
@@ -436,7 +436,7 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
     private let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
     private let analyzerFormat: AVAudioFormat
-    private let onTranscript: @Sendable (String) -> Void
+    private let onTranscript: @Sendable (String, Bool) -> Void
     private let inputStream: AsyncStream<AnalyzerInput>
     private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
     private let conversionLock = NSLock()
@@ -451,7 +451,7 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
         requestedLocale: Locale,
         contextualVocabulary: [String],
         allowsAssetInstallation: Bool = true,
-        onTranscript: @escaping @Sendable (String) -> Void
+        onTranscript: @escaping @Sendable (String, Bool) -> Void
     ) async throws {
         guard let locale = await SpeechTranscriber.supportedLocale(
             equivalentTo: requestedLocale
@@ -526,7 +526,10 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
                 } else {
                     volatile = text
                 }
-                onTranscript(finalized + volatile)
+                onTranscript(
+                    finalized + volatile,
+                    !result.isFinal && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
             }
             return finalized + volatile
         }

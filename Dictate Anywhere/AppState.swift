@@ -1602,6 +1602,7 @@ final class AppState {
                 guard let self, !Task.isCancelled, !self.isShuttingDown,
                       self.contextCaptureID == id else { return }
                 self.sessionDictationContext = context
+                self.updatePerformanceContextLabels()
                 engine.setSessionDictationContext(context)
                 await engine.updateSessionContextualVocabulary(context?.lexicalHints ?? [])
                 self.logger.info("contextCapture: completed alongside recording in \(String(describing: started.duration(to: .now)), privacy: .public)")

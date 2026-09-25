@@ -33,9 +33,9 @@ The command runs the following deterministic or opt-in scenarios:
 | Recovery I/O | Enqueues 30 s of synthetic audio through the real recovery writer, preserves it, reloads, and reads bounded chunks. Reports save and read p50/p95. |
 | Long transcript | Joins 300 disjoint transcript segments and normalizes the result. XCTest records clock, CPU, and memory. |
 | Insertion preparation | Replays whitespace, list, CJK, and boundary fixtures through insertion formatting. |
-| Paste script cache | Compares repeated AppleScript compilation with the cached preparation path. Compilation sends no keystrokes. |
-| S1-mini policy | Exercises the startup-prewarm decision matrix. |
-| S1-mini model load | Runs only when `S1_MINI_MODEL_PATH` points to an installed model. |
+| Paste script compilation | Times repeated AppleScript compilation without sending keystrokes. The child optimization branch additionally compares its cached preparation path. |
+| S1-mini policy | Exercises the startup-prewarm decision matrix; the child optimization branch exercises its production policy. |
+| S1-mini model load | Available in the child optimization branch when `S1_MINI_MODEL_PATH` points to an installed model. |
 | S1-mini cleanup | With the app's validated installed model, or `S1_MINI_MODEL_PATH`, runs short and long text through the real local cleanup service and reports cold/warm request timings. |
 | Apple Intelligence cleanup | Runs a fixed cleanup prompt through the on-device Foundation Models service when available. Schema success and fallback are visible in performance traces. |
 | Model switching | With `RUN_MODEL_SWITCH_BENCHMARK=1` and at least two installed models, times a fixed model-switch sequence. |
@@ -48,8 +48,9 @@ XCTest host using Xcode's `TEST_RUNNER_` convention
 setting them on a bare `xcodebuild` invocation does not have the same effect.
 Use `PIPELINE_BENCHMARK_ITERATIONS=5` for longer runs (default 3), and save the
 `.xcresult` bundle for XCTest's per-iteration CPU/memory/clock measurements.
-For a meaningful p95 comparison, use at least 20 iterations; with three
-samples, nearest-rank p95 is simply the slowest observation.
+For a meaningful offline ASR p95 comparison, use at least 20 iterations; with
+three samples, nearest-rank p95 is simply the slowest observation. The workload
+tests cap their iteration count at 10, so their p95 values are exploratory.
 S1-mini's first request after unload measures model initialization, but the
 operating system's file and Metal shader caches may already be warm; restart
 the test host for a truly cold-process comparison.

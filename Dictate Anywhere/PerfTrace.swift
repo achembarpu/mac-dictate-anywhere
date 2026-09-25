@@ -7,7 +7,7 @@
 //  Approach (Apple-recommended, verified against developer documentation):
 //  - `OSSignposter` intervals (macOS 12+) make every span visible in
 //    Instruments via the os_signpost instrument. Signposts are designed for
-//    near-zero overhead, so they stay enabled in all builds.
+//    near-zero overhead when enabled; the distribution build defaults off.
 //  - Matching `Logger` notice lines record interval durations and point
 //    events, visible live in Console.app / `log stream` and historically via
 //    `log show` (notice persists to disk; info would stay memory-only).

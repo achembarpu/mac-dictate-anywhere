@@ -663,12 +663,12 @@ final class AssemblyAIEngine: TranscriptionEngine {
             return try await AppleSpeechEngine.makeInstalledLivePreviewSession(
                 languageCode: settings.assemblyAILanguage.rawValue,
                 contextualVocabulary: vocabulary
-            ) { [weak self] text in
+            ) { [weak self] text, isPartial in
                 guard let self else { return }
                 let shouldEmit = self.stateLock.withLock { () -> Bool in
                     guard self.livePreviewSessionID == id else { return false }
                     self.transcript = text
-                    guard !self.firstPartialEmitted,
+                    guard isPartial, !self.firstPartialEmitted,
                           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
                     self.firstPartialEmitted = true
                     return true

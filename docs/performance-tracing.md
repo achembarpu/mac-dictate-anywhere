@@ -38,10 +38,10 @@ Instruments and in historical logs.
 Filter by `session_id` to compare one dictation. `input_samples`, `new_samples`,
 and `reprocessed_samples` on `stt.batchPreview` describe each call, not the
 entire recording. `stt.transcribe` nests beneath preview, commit, or final-tail
-spans. The first-partial event means recognition produced nonempty live text;
-it is not a UI-render or audio-callback timestamp. A missing event means no
-live partial appeared. `audio.captureSummary` records captured and dropped
-pending samples for Parakeet; it does not measure Core Audio hardware overruns.
+spans. The first-partial event means recognition produced nonempty, non-final
+live text; it is not a UI-render or audio-callback timestamp. A missing event
+means no live partial appeared. `audio.captureSummary` records captured and
+dropped pending samples for Parakeet; it does not measure Core Audio hardware overruns.
 `stt.appleSpeechInputSummary` records attempted, converted, and rejected input
 buffers but not analyzer queue depth or processing lag.
 S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local;
