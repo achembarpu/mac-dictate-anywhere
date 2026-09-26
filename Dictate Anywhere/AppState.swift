@@ -81,6 +81,8 @@ final class AppState {
     private var continuationTargetBundleIdentifier: String?
     private let engineOverride: TranscriptionEngine?
     private let transcriptDeliveryOverride: ((String) async -> TextInsertionResult)?
+    private let inputSourceIDOverride: (() -> String?)?
+    private let profileModelAvailableOverride: ((ParakeetModelChoice) -> Bool)?
 
     var canCancelDictation: Bool {
         (status == .recording || status == .processing)
@@ -158,7 +160,9 @@ final class AppState {
         recoveryStore: DictationRecoveryStore? = nil,
         engine: TranscriptionEngine? = nil,
         transcriptDelivery: ((String) async -> TextInsertionResult)? = nil,
-        contextCapture: (@Sendable (pid_t?) async -> DictationContext?)? = nil
+        contextCapture: (@Sendable (pid_t?) async -> DictationContext?)? = nil,
+        inputSourceID: (() -> String?)? = nil,
+        profileModelAvailable: ((ParakeetModelChoice) -> Bool)? = nil
     ) {
         self.permissions = permissions ?? Permissions()
         self.microphonePermissionRequester = microphonePermissionRequester
@@ -166,6 +170,8 @@ final class AppState {
         self.engineOverride = engine
         self.transcriptDeliveryOverride = transcriptDelivery
         self.contextCaptureOverride = contextCapture
+        self.inputSourceIDOverride = inputSourceID
+        self.profileModelAvailableOverride = profileModelAvailable
         setupHotkeyCallbacks()
         setupPermissionCallbacks()
         setupInputSourceCallbacks()
@@ -516,7 +522,10 @@ final class AppState {
             appleSpeechSupported: AppleSpeechEngine.isSupported,
             // Availability = on disk AND runnable by this process (FluidAudio
             // hard-fails Nemotron multilingual under Rosetta/x86_64).
-            isModelDownloaded: { parakeetEngine.checkModelOnDisk(for: $0) && $0.isAvailableOnThisMac },
+            isModelDownloaded: { [self] in
+                profileModelAvailableOverride?($0)
+                    ?? (parakeetEngine.checkModelOnDisk(for: $0) && $0.isAvailableOnThisMac)
+            },
             isAppleSpeechAssetInstalled: { installedAppleSpeechLanguages.contains($0) }
         )
 
@@ -665,6 +674,16 @@ final class AppState {
     // MARK: - Dictation Flow
 
     private func beginPerformanceSession(mode: HotkeyMode?) {
+        PerfTrace.setSessionMetadata(
+            performanceConfigurationLabels().merging([
+                "session_id": UUID().uuidString,
+                "audio_tap_buffer_frames": "4096",
+                "hotkey_mode": mode?.rawValue ?? "none"
+            ]) { _, session in session }
+        )
+    }
+
+    private func performanceConfigurationLabels() -> [String: String] {
         let engine = settings.engineChoice
         let model: String
         let language: String
@@ -680,13 +699,10 @@ final class AppState {
             language = settings.assemblyAILanguage.rawValue
         }
 
-        PerfTrace.setSessionMetadata([
-            "session_id": UUID().uuidString,
+        return [
             "engine": engine.rawValue,
             "model": model,
             "language": language,
-            "audio_tap_buffer_frames": "4096",
-            "hotkey_mode": mode?.rawValue ?? "none",
             "eou_enabled": String(engine == .parakeet
                 && settings.parakeetModelChoice.supportsEndOfUtterance
                 && settings.autoStopAfterSpeechEndsEnabled),
@@ -699,7 +715,11 @@ final class AppState {
             "microphone_boost_enabled": String(settings.boostMicrophoneVolumeEnabled),
             "input_auto_switch_enabled": String(settings.inputSourceAutoSwitchEnabled),
             "custom_vocabulary_enabled": String(!settings.customVocabulary.isEmpty)
-        ])
+        ]
+    }
+
+    private func updatePerformanceConfigurationLabels() {
+        PerfTrace.updateSessionMetadata(performanceConfigurationLabels())
     }
 
     private func updatePerformanceContextLabels() {
@@ -738,19 +758,23 @@ final class AppState {
         guard !isShuttingDown else { return }
         beginPerformanceSession(mode: mode)
         let requestTrace = PerfTrace.begin("dictation.requestToRecording")
+        var requestCompleted = false
         defer {
-            if requestTrace.end(outcome: "aborted") {
+            if !requestCompleted {
+                requestTrace.end(outcome: "aborted")
                 PerfTrace.clearSessionMetadata()
             }
         }
         if settings.engineChoice != .assemblyAI,
            settings.inputSourceAutoSwitchEnabled,
-           let inputSourceID = inputSourceMonitor.currentInputSourceID() {
+           let inputSourceID = inputSourceIDOverride?() ?? inputSourceMonitor.currentInputSourceID() {
             // Backstop: the eager pre-warm usually already did this; going
             // through the queue serializes against an apply still in flight.
             await PerfTrace.measure("dictation.inputSourceApply") {
                 await enqueueInputSourceProfileApply(for: inputSourceID, showLoadingOverlay: true).value
             }
+            updatePerformanceConfigurationLabels()
+            requestTrace.refreshSessionMetadata()
         }
         guard !isShuttingDown else { return }
         let engine = activeEngine
@@ -763,11 +787,16 @@ final class AppState {
                 return
             }
 
-            if !(await parakeetEngine.refreshSelectedModelReadiness()) {
-                await prepareActiveEngine()
+            var modelReady = true
+            if engineOverride == nil {
+                modelReady = await parakeetEngine.refreshSelectedModelReadiness()
+                if !modelReady {
+                    await prepareActiveEngine()
+                    modelReady = await parakeetEngine.refreshSelectedModelReadiness()
+                }
             }
 
-            guard await parakeetEngine.refreshSelectedModelReadiness(), engine.isReady else {
+            guard modelReady, engine.isReady else {
                 logger.warning("startDictation: FluidAudio engine not ready, aborting")
                 if settings.legacyAppleSpeechMigrationPending && !parakeetEngine.checkModelOnDisk() {
                     showLegacyAppleSpeechUnavailableAlert()
@@ -798,17 +827,22 @@ final class AppState {
         captureInsertionTargetAppAndContext(engine: engine)
         updatePerformanceContextLabels()
         guard !isShuttingDown else { return }
-        await beginRecording(engine: engine, mode: mode, requestTrace: requestTrace)
+        await beginRecording(engine: engine, mode: mode, requestTrace: requestTrace) {
+            requestCompleted = true
+        }
     }
 
     private func beginRecording(
         engine: TranscriptionEngine,
         mode: HotkeyMode?,
-        requestTrace: PerfInterval? = nil
+        requestTrace: PerfInterval? = nil,
+        onCompleted: () -> Void = {}
     ) async {
         let trace = PerfTrace.begin("dictation.start")
+        var completed = false
         defer {
-            if trace.end(outcome: "aborted") {
+            if !completed {
+                trace.end(outcome: "aborted")
                 PerfTrace.clearSessionMetadata()
             }
         }
@@ -960,6 +994,8 @@ final class AppState {
         isTransitioning = false
         trace.end(outcome: "completed")
         requestTrace?.end(outcome: "completed")
+        completed = true
+        onCompleted()
 
         // If the user released a hold-to-record key while we were starting up, stop now.
         if pendingHoldRelease {

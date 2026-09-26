@@ -7,14 +7,17 @@ file paths, or the target application's identity. Session labels include the
 selected engine/model/language, a random session ID, device model, OS version,
 and build configuration; treat exported logs as diagnostic data. Intervals
 snapshot their session labels when they begin, so an async operation finishing
-after a new dictation starts retains its original session ID. Tracing defaults
-on in local Debug and Release builds, including Release benchmarks. The
-distributed app archived by `scripts/release-macos.sh` defaults it off via
-`DISTRIBUTION_BUILD`. At launch, `DICTATE_ANYWHERE_PERF_TRACE=1` enables tracing
-or `DICTATE_ANYWHERE_PERF_TRACE=0` disables it in either build; an unset value
-uses the build default. This is a launch-time developer diagnostic, not a
-Settings toggle. The packaged app still contains the lightweight call sites
-when emission is off.
+after a new dictation starts retains its original session ID. A request-to-recording
+span explicitly refreshes its configuration labels after an awaited input-profile
+apply without changing its start time or session ID. Tracing defaults on in local
+Debug and Release builds, including Release benchmarks. The distributed app
+archived by `scripts/release-macos.sh` defaults it off via `DISTRIBUTION_BUILD`.
+At launch, `DICTATE_ANYWHERE_PERF_TRACE=1` enables tracing or
+`DICTATE_ANYWHERE_PERF_TRACE=0` disables it in either build; an unset value uses
+the build default. This is a launch-time developer diagnostic, not a Settings
+toggle. When disabled, spans reuse an inert token and skip signposts, clocks,
+interval locks, and lazily supplied count dictionaries and session labels.
+Ending an inert token returns false; it must not gate cleanup of an aborted session.
 
 Aborted recording starts clear their session labels; resumed recovery dictations
 create a new session so their capture and insertion spans can be correlated.
