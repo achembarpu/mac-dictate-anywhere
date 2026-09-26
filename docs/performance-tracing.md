@@ -31,10 +31,12 @@ Use Instruments with the `os_signpost` instrument and filter to the app's
 log show --style compact --predicate 'category == "Performance" AND composedMessage CONTAINS "trace "' --last 15m
 ```
 
-An interval produces `trace <name> duration_ms=<milliseconds> outcome=<ended|completed|failed|cancelled|aborted>`.
+An interval produces `trace <name> duration_ms=<milliseconds> outcome=<value>`.
 Durations use a monotonic clock. Manually scoped spans default to `ended`,
 which does not imply success; measured throwing operations report `completed`,
-`failed`, or `cancelled`. A point marker
+`failed`, or `cancelled`. `dictation.stopToInsertion` reports `success`,
+`copiedOnly`, or `failed` for delivery, `noText` for an empty result, and
+`cancelled` or `aborted` for an interrupted stop. A point marker
 produces `trace <name> event=observed` and is therefore visible both in
 Instruments and in historical logs.
 
@@ -69,8 +71,10 @@ S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local
 
 Compare one trace at a time: `dictation.stopToInsertion` ends when delivery
 returns (including copied-only or failed delivery), before post-delivery audio
-restoration and recovery discard. Use `dictation.teardown` for that subsequent
-cleanup. Then inspect the nested ASR, cleanup, activation, and insertion spans
+restoration and recovery discard. For an empty transcript or recognition failure,
+it ends before the corresponding cleanup. A delivery attempt has a separate
+`dictation.teardown` span. Then inspect the nested ASR, cleanup, activation,
+and insertion spans
 to identify the largest cost. For recording-start regressions, start from
 `dictation.requestToRecording` and distinguish context capture, audio routing,
 audio-controller creation, and engine session startup before changing behavior.

@@ -219,6 +219,30 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testEmptyTranscriptStopsTimingBeforeAudioRestoration() async throws {
+        try XCTSkipUnless(PerfTrace.isEnabled, "Requires enabled trace emission")
+        let events = TraceCompletions()
+        PerfTrace.onIntervalCompleted = { name, _, metadata in
+            events.record(name: name, metadata: metadata)
+        }
+        let engine = StartupContextEngine()
+        engine.finalTranscript = ""
+        let app = app(engine: engine, capture: { _ in nil })
+        await app.startDictation()
+        Settings.shared.muteSystemAudioDuringRecordingEnabled = true
+        await app.stopDictation()
+        let names = events.names
+        guard let insertion = names.firstIndex(of: "dictation.stopToInsertion"),
+              let restoration = names.firstIndex(of: "audio.microphoneRestore") else {
+            XCTFail("Missing stop-to-insertion or microphone-restoration interval")
+            await app.shutdown()
+            return
+        }
+        XCTAssertLessThan(insertion, restoration)
+        XCTAssertEqual(app.status, .idle)
+        await app.shutdown()
+    }
+
     #endif
     private static func context(pid: pid_t, word: String) -> DictationContext {
         DictationContext(
@@ -288,6 +312,7 @@ private final class StartupContextEngine: TranscriptionEngine {
     var vocabularyAtFinalization: [String] = []
     var appliedContexts: [DictationContext] = []
     var finalizationCount = 0
+    var finalTranscript = "Recorded words."
     var onCaptureStopped: (() -> Void)?
 
     func levelSamples(count: Int) -> [Float] { [] }
@@ -298,7 +323,7 @@ private final class StartupContextEngine: TranscriptionEngine {
         finalizationCount += 1
         contextAtFinalization = context
         vocabularyAtFinalization = vocabulary
-        return "Recorded words."
+        return finalTranscript
     }
     func cancel() async { capturing = false }
     func transcribeRecording(at url: URL) async throws -> String { "Restored words." }

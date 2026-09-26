@@ -1023,7 +1023,7 @@ final class AppState {
     private func finishDictation() async {
         let trace = PerfTrace.begin("dictation.stopToInsertion")
         defer {
-            trace.end()
+            trace.end(outcome: Task.isCancelled ? "cancelled" : "aborted")
             PerfTrace.clearSessionMetadata()
         }
         stopAudioLevelPolling()
@@ -1051,6 +1051,7 @@ final class AppState {
             ? assemblyAIEngine.lastInsertionPlan : nil
         let preserveModelFormatting = usesAssemblyAI && assemblyAIEngine.lastResultWasPolished
         if let error = engine.lastTranscriptionError {
+            trace.end(outcome: "failed")
             await handleTranscriptionFailure(error, engine: engine)
             return
         }
@@ -1084,6 +1085,7 @@ final class AppState {
         normalizeTrace.end()
 
         guard !finalText.isEmpty else {
+            trace.end(outcome: "noText")
             currentTranscript = ""
             volumeController.restoreMicrophoneVolume()
             // Restore recording audio state (brief pause lets BT audio routing settle)
@@ -1271,12 +1273,14 @@ final class AppState {
         switch result {
         case .success:
             insertionOrchestrationTrace.end(outcome: "success")
+            trace.end(outcome: "success")
         case .copiedOnly:
             insertionOrchestrationTrace.end(outcome: "copiedOnly")
+            trace.end(outcome: "copiedOnly")
         case .failed:
             insertionOrchestrationTrace.end(outcome: "failed")
+            trace.end(outcome: "failed")
         }
-        trace.end()
         insertionTargetApp = nil
         sessionDictationContext = nil
 
