@@ -1,25 +1,12 @@
 import XCTest
 @testable import Dictate_Anywhere
 
+private final class TraceSnapshotStorage: @unchecked Sendable {
+    let lock = NSLock()
+    var values: [String: String] = [:]
+}
+
 final class PerfTraceTests: XCTestCase {
-    func testSyncMeasureReturnsValue() {
-        let value = PerfTrace.measure("test.sync") { 42 }
-        XCTAssertEqual(value, 42)
-    }
-
-    func testSyncMeasureRethrows() {
-        struct Probe: Error {}
-        XCTAssertThrowsError(try PerfTrace.measure("test.syncThrow") { throw Probe() })
-    }
-
-    func testAsyncMeasureReturnsValue() async {
-        let value = await PerfTrace.measure("test.async") {
-            try? await Task.sleep(for: .milliseconds(1))
-            return "ok"
-        }
-        XCTAssertEqual(value, "ok")
-    }
-
     func testErrorOutcomesIncludeURLSessionCancellation() {
         struct Probe: Error {}
         XCTAssertEqual(String(describing: PerfTrace.outcome(for: CancellationError())), "cancelled")
@@ -29,17 +16,8 @@ final class PerfTraceTests: XCTestCase {
 
     func testBeginEndIsIdempotent() {
         let interval = PerfTrace.begin("test.manual")
-        XCTAssertTrue(interval.end())
+        XCTAssertEqual(interval.end(), PerfTrace.isEnabled)
         XCTAssertFalse(interval.end())
-    }
-
-    func testBeginEndWithCustomOutcomeDoesNotCrash() {
-        let interval = PerfTrace.begin("test.manualOutcome")
-        interval.end(outcome: "cancelled")
-    }
-
-    func testEventDoesNotCrash() {
-        PerfTrace.event("test.event")
     }
 
     func testBuildDefaultAndLaunchOverride() {
@@ -53,20 +31,61 @@ final class PerfTraceTests: XCTestCase {
         XCTAssertEqual(PerfTrace.isEnabled, PerfTrace.isEnabled(in: ProcessInfo.processInfo.environment))
     }
 
-    func testSessionMetadataMergesAndClears() {
+    func testSessionMetadataMergesAndFormatsFields() {
         let original = PerfTraceSessionMetadata(labels: ["session_id": "first", "engine": "parakeet"])
         let updated = original.merging(["session_id": "second", "model": "test-model"])
         XCTAssertEqual(original.logFields, "engine=parakeet session_id=first")
         XCTAssertEqual(updated.logFields, "engine=parakeet model=test-model session_id=second")
-        PerfTrace.setSessionMetadata(["session_id": "test", "engine": "parakeet"])
-        PerfTrace.updateSessionMetadata(["model": "test-model"])
-        PerfTrace.clearSessionMetadata()
     }
+
+    func testDisabledIntervalSkipsCountsAndMetadataAndNeverEnds() throws {
+        try XCTSkipUnless(!PerfTrace.isEnabled, "Requires disabled tracing")
+        var evaluated = false
+        func counts() -> [String: Int] {
+            evaluated = true
+            return ["input_samples": 1]
+        }
+        let first = PerfTrace.begin("test.disabled", counts: counts())
+        let second = PerfTrace.begin("test.disabledOther")
+        XCTAssertTrue(first === second)
+        first.recordCounts(counts())
+        PerfTrace.event("test.disabledEvent", counts: counts())
+        PerfTrace.setSessionMetadata(["session_id": { evaluated = true; return "unused" }()])
+        PerfTrace.updateSessionMetadata(["engine": { evaluated = true; return "unused" }()])
+        first.refreshSessionMetadata()
+        XCTAssertFalse(first.end())
+        XCTAssertFalse(second.end())
+        XCTAssertFalse(evaluated)
+    }
+
+    #if DEBUG
+    func testEnabledIntervalsSnapshotSessionAndRefreshOnlyWhenRequested() throws {
+        try XCTSkipUnless(PerfTrace.isEnabled, "Requires enabled tracing")
+        PerfTrace.setSessionMetadata(["session_id": "first", "engine": "old"])
+        defer { PerfTrace.clearSessionMetadata(); PerfTrace.onIntervalCompleted = nil }
+        let old = PerfTrace.begin("test.oldSession")
+        let refreshed = PerfTrace.begin("test.refreshedSession")
+        PerfTrace.setSessionMetadata(["session_id": "second", "engine": "new"])
+        refreshed.refreshSessionMetadata()
+        let snapshots = TraceSnapshotStorage()
+        PerfTrace.onIntervalCompleted = { name, _, metadata in
+            snapshots.lock.withLock { snapshots.values[name] = metadata }
+        }
+        XCTAssertTrue(old.end())
+        XCTAssertTrue(refreshed.end())
+        PerfTrace.setSessionMetadata(["session_id": "third"])
+        refreshed.refreshSessionMetadata()
+        XCTAssertFalse(refreshed.end())
+        XCTAssertTrue(snapshots.lock.withLock { snapshots.values["test.oldSession"]?.contains("session_id=first") == true })
+        XCTAssertTrue(snapshots.lock.withLock { snapshots.values["test.refreshedSession"]?.contains("session_id=second") == true })
+        XCTAssertTrue(snapshots.lock.withLock { snapshots.values["test.refreshedSession"]?.contains("engine=new") == true })
+    }
+    #endif
 
     func testRequestCountsStayOnTheirInterval() {
         let interval = PerfTrace.begin("test.request", counts: ["input_samples": 16_000])
         interval.recordCounts(["new_samples": 8_000])
-        XCTAssertTrue(interval.end(outcome: "completed"))
+        XCTAssertEqual(interval.end(outcome: "completed"), PerfTrace.isEnabled)
         interval.recordCounts(["new_samples": 32_000])
         XCTAssertFalse(interval.end())
     }

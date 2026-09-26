@@ -94,7 +94,6 @@ enum PerfTrace {
     nonisolated private static let logger = Logger(subsystem: subsystem, category: "Performance")
 
     nonisolated private static let signposter = OSSignposter(logger: logger)
-    nonisolated private static let disabledSignposter = OSSignposter.disabled
     nonisolated private static let metadataStorage = PerfTraceMetadataStorage()
     #if DEBUG
     nonisolated private static let observerStorage = PerfTraceObserverStorage()
@@ -183,20 +182,31 @@ enum PerfTrace {
     /// Sets privacy-safe labels for the active dictation session. Values must
     /// describe configuration or lifecycle state, never transcript or target
     /// application content.
-    nonisolated static func setSessionMetadata(_ labels: [String: String]) {
+    nonisolated static func setSessionMetadata(_ labels: @autoclosure () -> [String: String]) {
+        guard isEnabled else { return }
         metadataStorage.lock.withLock {
-            metadataStorage.value = PerfTraceSessionMetadata(labels: environmentLabels.merging(labels) { _, new in new })
+            metadataStorage.value = PerfTraceSessionMetadata(labels: environmentLabels.merging(labels()) { _, new in new })
         }
     }
 
-    nonisolated static func updateSessionMetadata(_ labels: [String: String]) {
+    nonisolated static func updateSessionMetadata(_ labels: @autoclosure () -> [String: String]) {
+        guard isEnabled else { return }
         metadataStorage.lock.withLock {
-            metadataStorage.value = metadataStorage.value?.merging(labels)
+            metadataStorage.value = metadataStorage.value?.merging(labels())
         }
     }
 
     nonisolated static func clearSessionMetadata() {
+        guard isEnabled else { return }
         metadataStorage.lock.withLock { metadataStorage.value = nil }
+    }
+
+    nonisolated fileprivate static func sessionMetadataFields() -> String {
+        currentSessionMetadata()?.logFields ?? "session_id=none"
+    }
+
+    nonisolated fileprivate static func endSignpost(_ name: StaticString, state: OSSignpostIntervalState) {
+        signposter.endInterval(name, state)
     }
 
     nonisolated private static func currentSessionMetadata() -> PerfTraceSessionMetadata? {
@@ -206,18 +216,15 @@ enum PerfTrace {
     /// Starts a manually-scoped interval. Pair with `end(outcome:)` on the
     /// returned token — `defer { token.end() }` covers every return/throw path.
     /// An early explicit end is safe: subsequent deferred ends are ignored.
-    nonisolated static func begin(_ name: StaticString, counts: [String: Int] = [:]) -> PerfInterval {
-        let enabled = isEnabled
-        let poster = enabled ? signposter : disabledSignposter
-        let state = poster.beginInterval(name, id: poster.makeSignpostID())
+    nonisolated static func begin(_ name: StaticString, counts: @autoclosure () -> [String: Int] = [:]) -> PerfInterval {
+        guard isEnabled else { return .disabled }
+        let state = signposter.beginInterval(name, id: signposter.makeSignpostID())
         return PerfInterval(
             name: name,
             state: state,
-            signposter: poster,
             startTime: ProcessInfo.processInfo.systemUptime,
-            enabled: enabled,
-            metadata: enabled ? currentSessionMetadata()?.logFields ?? "session_id=none" : "",
-            counts: counts
+            metadata: currentSessionMetadata()?.logFields ?? "session_id=none",
+            counts: counts()
         )
     }
 
@@ -225,11 +232,11 @@ enum PerfTrace {
     ///
     /// The matching notice makes the marker available in historical Console
     /// queries too, not only during a live Instruments recording.
-    nonisolated static func event(_ name: StaticString, counts: [String: Int] = [:]) {
+    nonisolated static func event(_ name: StaticString, counts: @autoclosure () -> [String: Int] = [:]) {
         guard isEnabled else { return }
         signposter.emitEvent(name, id: signposter.makeSignpostID())
         let metadata = currentSessionMetadata()?.logFields ?? "session_id=none"
-        let facts = numericFields(counts)
+        let facts = numericFields(counts())
         logger.notice("trace \(String(describing: name), privacy: .public) event=observed \(metadata, privacy: .public) \(facts, privacy: .public)")
     }
 
@@ -248,41 +255,58 @@ enum PerfTrace {
 
 /// An in-flight timing interval. Obtain via `PerfTrace.begin(_:)`.
 nonisolated final class PerfInterval: @unchecked Sendable {
+    /// Shared inert token: disabled spans require no allocation or synchronization.
+    nonisolated fileprivate static let disabled = PerfInterval()
+
     private let name: StaticString
-    private let state: OSSignpostIntervalState
-    private let signposter: OSSignposter
+    private let state: OSSignpostIntervalState?
     private let startTime: TimeInterval
-    private let enabled: Bool
-    private let metadata: String
-    private let lock = NSLock()
+    private let lock: NSLock?
+    private var metadata: String
     private var didEnd = false
     private var counts: [String: Int]
+
+    nonisolated private init() {
+        name = "trace.disabled"
+        state = nil
+        startTime = 0
+        lock = nil
+        metadata = ""
+        counts = [:]
+    }
 
     nonisolated fileprivate init(
         name: StaticString,
         state: OSSignpostIntervalState,
-        signposter: OSSignposter,
         startTime: TimeInterval,
-        enabled: Bool,
         metadata: String,
         counts: [String: Int]
     ) {
         self.name = name
         self.state = state
-        self.signposter = signposter
         self.startTime = startTime
-        self.enabled = enabled
+        self.lock = NSLock()
         self.metadata = metadata
         self.counts = counts
     }
 
     /// Attach request-specific numeric facts to this interval, not to the
     /// process-wide session. Call before end; later sessions cannot inherit them.
-    nonisolated func recordCounts(_ values: [String: Int]) {
-        guard enabled else { return }
+    nonisolated func recordCounts(_ values: @autoclosure () -> [String: Int]) {
+        guard let lock else { return }
         lock.withLock {
             guard !didEnd else { return }
-            counts.merge(values) { _, new in new }
+            counts.merge(values()) { _, new in new }
+        }
+    }
+
+    /// Refresh configuration labels explicitly after an awaited profile change.
+    /// The interval's start timestamp and signpost remain unchanged.
+    nonisolated func refreshSessionMetadata() {
+        guard let lock else { return }
+        lock.withLock {
+            guard !didEnd else { return }
+            metadata = PerfTrace.sessionMetadataFields()
         }
     }
 
@@ -290,25 +314,24 @@ nonisolated final class PerfInterval: @unchecked Sendable {
     /// The default "ended" does not claim success for a manually scoped span.
     /// Outcome must be a static literal (e.g. "completed", "cancelled").
     /// Nonisolated so `defer { token.end() }` works from any executor
-    /// without hopping.
+    /// without hopping. Disabled and previously ended spans return false.
     @discardableResult
     nonisolated func end(outcome: StaticString = "ended") -> Bool {
-        let recordedCounts = lock.withLock { () -> [String: Int]? in
+        guard let lock, let state else { return false }
+        let recorded = lock.withLock { () -> ([String: Int], String)? in
             guard !didEnd else { return nil }
             didEnd = true
-            return counts
+            return (counts, metadata)
         }
-        guard let recordedCounts else { return false }
+        guard let (recordedCounts, recordedMetadata) = recorded else { return false }
         let milliseconds = max(0, Int((ProcessInfo.processInfo.systemUptime - startTime) * 1_000))
-        signposter.endInterval(name, state)
-        if enabled {
-            PerfTrace.logCompletion(
-                name: name, milliseconds: milliseconds, outcome: outcome,
-                metadata: metadata, counts: recordedCounts
-            )
-        }
+        PerfTrace.endSignpost(name, state: state)
+        PerfTrace.logCompletion(
+            name: name, milliseconds: milliseconds, outcome: outcome,
+            metadata: recordedMetadata, counts: recordedCounts
+        )
         #if DEBUG
-        PerfTrace.onIntervalCompleted?(String(describing: name), milliseconds, metadata)
+        PerfTrace.onIntervalCompleted?(String(describing: name), milliseconds, recordedMetadata)
         #endif
         return true
     }
