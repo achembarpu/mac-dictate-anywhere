@@ -16,6 +16,8 @@ final class DictationStartupContextTests: XCTestCase {
         let mute = settings.muteSystemAudioDuringRecordingEnabled
         let preserve = settings.preserveCancelledSessions
         let microphone = settings.selectedMicrophoneUID
+        let localLanguage = settings.selectedLanguage
+        let cloudLanguage = settings.assemblyAILanguage
         let processing = settings.transcriptPostProcessingMode
         let history = settings.transcriptHistory
         restoreSettings = {
@@ -27,6 +29,8 @@ final class DictationStartupContextTests: XCTestCase {
             settings.selectedMicrophoneUID = microphone
             settings.transcriptPostProcessingMode = processing
             settings.transcriptHistory = history
+            settings.selectedLanguage = localLanguage
+            settings.assemblyAILanguage = cloudLanguage
         }
         settings.engineChoice = .assemblyAI
         settings.soundEffectsEnabled = false
@@ -39,6 +43,7 @@ final class DictationStartupContextTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        PerfTrace.onIntervalCompleted = nil
         restoreSettings()
         if FileManager.default.fileExists(atPath: directory.path) {
             try FileManager.default.removeItem(at: directory)
@@ -171,6 +176,44 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testAssemblyAISessionUsesCloudLanguageWhenLocalLanguageDiffers() async {
+        let events = TraceCompletions()
+        PerfTrace.onIntervalCompleted = { name, _, metadata in
+            events.record(name: name, metadata: metadata)
+        }
+        Settings.shared.selectedLanguage = .english
+        Settings.shared.assemblyAILanguage = .spanish
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil })
+        await app.startDictation()
+        let request = events.metadata(for: "dictation.requestToRecording")
+        XCTAssertTrue(request?.contains("engine=assemblyAI") == true, request ?? "missing request trace")
+        XCTAssertTrue(request?.contains("language=es") == true, request ?? "missing request trace")
+        await app.cancelDictation()
+        await app.shutdown()
+    }
+
+    func testStopToInsertionEndsBeforePostDeliveryRestoration() async {
+        let events = TraceCompletions()
+        PerfTrace.onIntervalCompleted = { name, _, metadata in
+            events.record(name: name, metadata: metadata)
+        }
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil })
+        await app.startDictation()
+        // Enable the post-delivery settle without muting any system output during startup.
+        Settings.shared.muteSystemAudioDuringRecordingEnabled = true
+        await app.stopDictation()
+        let names = events.names
+        guard let insertion = names.firstIndex(of: "dictation.stopToInsertion"),
+              let restoration = names.firstIndex(of: "dictation.teardown") else {
+            XCTFail("Missing stop-to-insertion or restoration interval")
+            await app.shutdown()
+            return
+        }
+        XCTAssertLessThan(insertion, restoration)
+        XCTAssertEqual(app.status, .idle)
+        await app.shutdown()
+    }
+
     private static func context(pid: pid_t, word: String) -> DictationContext {
         DictationContext(
             processIdentifier: pid, bundleIdentifier: "test.\(pid)", appName: "Editor",
@@ -179,6 +222,23 @@ final class DictationStartupContextTests: XCTestCase {
             textBeforeCursor: "\(word) ", selectedText: "", textAfterCursor: "next",
             isSecureField: false, isContextExcluded: false
         )
+    }
+}
+
+private final class TraceCompletions: @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [(name: String, metadata: String)] = []
+
+    func record(name: String, metadata: String) {
+        lock.withLock { records.append((name, metadata)) }
+    }
+
+    var names: [String] {
+        lock.withLock { records.map(\.name) }
+    }
+
+    func metadata(for name: String) -> String? {
+        lock.withLock { records.first { $0.name == name }?.metadata }
     }
 }
 

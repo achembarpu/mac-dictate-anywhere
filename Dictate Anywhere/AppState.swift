@@ -677,7 +677,7 @@ final class AppState {
             language = settings.appleSpeechLanguage.rawValue
         case .assemblyAI:
             model = "assemblyAI"
-            language = settings.selectedLanguage.rawValue
+            language = settings.assemblyAILanguage.rawValue
         }
 
         PerfTrace.setSessionMetadata([
@@ -1240,6 +1240,7 @@ final class AppState {
         case .failed:
             insertionOrchestrationTrace.end(outcome: "failed")
         }
+        trace.end()
         insertionTargetApp = nil
         sessionDictationContext = nil
 

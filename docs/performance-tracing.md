@@ -55,7 +55,7 @@ S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local
 | Accepted hotkey request to confirmed microphone capture | `dictation.requestToRecording`, `dictation.inputSourceApply`, `dictation.capture`, `dictation.contextCapture`, `dictation.start`, `audio.startup`, `audio.controllerWait`, `audio.controllerCreate`, `audio.microphoneBoost`, `audio.systemMute` |
 | Live recognition availability | `stt.firstPartial`, `stt.batchPreview`, `stt.chunkCommit`, `stt.streamingProcess`, `stt.transcribe`, `audio.captureSummary`; Apple Speech reports `stt.appleSpeechSessionStart`, `stt.appleSpeechAssetInstall`, `stt.appleSpeechAnalyzerPrepare`, `stt.appleSpeechInputSummary`; AssemblyAI also reports `stt.livePreviewStart` and `stt.assemblyAIWarmConnection` |
 | Automatic end-of-utterance | `eou.detected`, `eou.stop`, followed by the regular stop path |
-| Stop recording to final transcript | `dictation.stopToInsertion`, `stt.stopToFinal`, `audio.teardown`, `stt.finalize`, `stt.finalTail`, `stt.streamingFinish`, `stt.finalVocabulary`, `stt.transcribe` |
+| Stop recording to final transcript | `dictation.stopToInsertion`, `stt.stopToFinal`, `audio.teardown` (first controller shutdown), `stt.livePreviewStop` (AssemblyAI preview), `stt.finalize`, `stt.finalTail`, `stt.streamingFinish`, `stt.finalVocabulary`, `stt.transcribe` |
 | FluidAudio vocabulary final pass | `stt.vocabularyBoost`, `stt.ctcModelLoad`, `stt.ctcTokenizerLoad`, `stt.vocabularyEncode`, `stt.vocabularyManagerSetup`, `stt.vocabularyInference`, `stt.vocabularyCleanup` |
 | AssemblyAI final request | `stt.assemblyAIFinal`, `stt.assemblyAIRequestBuild`, `stt.assemblyAIRequest`, `stt.assemblyAIResponseDecode`, `stt.warmConnectionWait` |
 | Local cleanup | `cleanup.validate`, `cleanup.request`, `cleanup.modelLoad`, `cleanup.tokenize`, `cleanup.promptEval`, `cleanup.decode`, `cleanup.generate` |
@@ -64,9 +64,11 @@ S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local
 | Delivery and restoration | `transcript.normalize`, `transcript.history`, `insertion.targetActivation`, `insertion.deliver`, `insertion.prepare`, `insertion.listEdit`, `insertion.clipboard`, `insertion.pasteScript`, `insertion.pasteScriptCreate`, `insertion.pasteEvent`, `insertion.listEditVerify`, `dictation.teardown`, `audio.microphoneRestore`, `audio.systemRestore` |
 | Cancel and recovery paths | `dictation.cancel`, `recovery.captureStart`, `recovery.preserve`, `recovery.discard`, `recovery.reload`, `recovery.transcribe`, `recovery.continue` |
 
-Compare one trace at a time: start with `dictation.stopToInsertion`, then use its
-nested ASR, cleanup, activation, and insertion spans to identify the largest
-child cost. For recording-start regressions, start from
+Compare one trace at a time: `dictation.stopToInsertion` ends when delivery
+returns (including copied-only or failed delivery), before post-delivery audio
+restoration and recovery discard. Use `dictation.teardown` for that subsequent
+cleanup. Then inspect the nested ASR, cleanup, activation, and insertion spans
+to identify the largest cost. For recording-start regressions, start from
 `dictation.requestToRecording` and distinguish context capture, audio routing,
 audio-controller creation, and engine session startup before changing behavior.
 `audio.controllerWait` includes queueing and the caller's timeout; `audio.controllerCreate`
