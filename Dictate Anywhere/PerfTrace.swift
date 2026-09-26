@@ -73,6 +73,13 @@ private nonisolated final class PerfTraceMetadataStorage: @unchecked Sendable {
     var value: PerfTraceSessionMetadata?
 }
 
+#if DEBUG
+private nonisolated final class PerfTraceObserverStorage: @unchecked Sendable {
+    let lock = NSLock()
+    var completion: (@Sendable (String, Int, String) -> Void)?
+}
+#endif
+
 /// Central entry point for hot-path timing traces.
 ///
 /// Deliberately actor-independent: every member is `nonisolated` so tracing
@@ -89,6 +96,16 @@ enum PerfTrace {
     nonisolated private static let signposter = OSSignposter(logger: logger)
     nonisolated private static let disabledSignposter = OSSignposter.disabled
     nonisolated private static let metadataStorage = PerfTraceMetadataStorage()
+    #if DEBUG
+    nonisolated private static let observerStorage = PerfTraceObserverStorage()
+
+    /// Test-only completion hook for asserting trace boundaries without querying logd.
+    nonisolated static var onIntervalCompleted: (@Sendable (String, Int, String) -> Void)? {
+        get { observerStorage.lock.withLock { observerStorage.completion } }
+        set { observerStorage.lock.withLock { observerStorage.completion = newValue } }
+    }
+    #endif
+
     nonisolated private static let environmentLabels: [String: String] = {
         let version = ProcessInfo.processInfo.operatingSystemVersion
         var size = 0
@@ -290,6 +307,9 @@ nonisolated final class PerfInterval: @unchecked Sendable {
                 metadata: metadata, counts: recordedCounts
             )
         }
+        #if DEBUG
+        PerfTrace.onIntervalCompleted?(String(describing: name), milliseconds, metadata)
+        #endif
         return true
     }
 }

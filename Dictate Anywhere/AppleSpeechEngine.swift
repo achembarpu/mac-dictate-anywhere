@@ -235,17 +235,28 @@ final class AppleSpeechEngine: TranscriptionEngine {
         }
     }
 
+    #if DEBUG
+    func installAudioCaptureControllerForTesting(_ controller: AudioCaptureController) {
+        audioCaptureController = controller
+    }
+    #endif
+
     func stopAudioCapture() {
-        audioCaptureController?.stop()
+        stopAudioCapture(outcome: "completed")
+    }
+
+    private func stopAudioCapture(outcome: StaticString) {
+        guard let captureController = audioCaptureController else { return }
         audioCaptureController = nil
+        let trace = PerfTrace.begin("audio.teardown")
+        captureController.stop()
+        trace.end(outcome: outcome)
     }
 
     func stopRecording() async -> String {
         let trace = PerfTrace.begin("stt.stopToFinal")
         defer { trace.end() }
-        let audioTeardownTrace = PerfTrace.begin("audio.teardown")
         stopAudioCapture()
-        audioTeardownTrace.end()
 
         guard let session = activeSession else { return currentTranscript }
         let finalTranscript = await PerfTrace.measure("stt.finalize") {
@@ -260,8 +271,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
     func cancel() async {
         audioCaptureStartupCancellation?.cancel()
         audioCaptureStartupCancellation = nil
-        audioCaptureController?.stop()
-        audioCaptureController = nil
+        stopAudioCapture(outcome: "cancelled")
         await activeSession?.cancel()
         activeSession = nil
         setTranscript("")

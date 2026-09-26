@@ -245,18 +245,29 @@ final class AssemblyAIEngine: TranscriptionEngine {
         }
     }
 
+    #if DEBUG
+    func installAudioCaptureControllerForTesting(_ controller: AudioCaptureController) {
+        audioCaptureController = controller
+    }
+    #endif
+
     func stopAudioCapture() {
-        audioCaptureController?.stop()
+        stopAudioCapture(outcome: "completed")
+    }
+
+    private func stopAudioCapture(outcome: StaticString) {
+        guard let captureController = audioCaptureController else { return }
         audioCaptureController = nil
+        let trace = PerfTrace.begin("audio.teardown")
+        captureController.stop()
+        trace.end(outcome: outcome)
     }
 
     func stopRecording() async -> String {
         let trace = PerfTrace.begin("stt.stopToFinal")
         defer { trace.end() }
-        let audioTeardownTrace = PerfTrace.begin("audio.teardown")
         stopAudioCapture()
         await stopLivePreview()
-        audioTeardownTrace.end()
         let warmUpTrace = PerfTrace.begin("stt.warmConnectionWait")
         await warmUpTask?.value
         warmUpTask = nil
@@ -288,9 +299,8 @@ final class AssemblyAIEngine: TranscriptionEngine {
     func cancel() async {
         audioCaptureStartupCancellation?.cancel()
         audioCaptureStartupCancellation = nil
-        audioCaptureController?.stop()
-        audioCaptureController = nil
-        await stopLivePreview()
+        stopAudioCapture(outcome: "cancelled")
+        await stopLivePreview(outcome: "cancelled")
         warmUpTask?.cancel()
         warmUpTask = nil
         lastTranscriptionError = nil
@@ -687,10 +697,13 @@ final class AssemblyAIEngine: TranscriptionEngine {
         }
     }
 
-    private func stopLivePreview() async {
+    private func stopLivePreview(outcome: StaticString = "completed") async {
         let session = livePreviewSession
         livePreviewSession = nil
         stateLock.withLock { livePreviewSessionID = nil }
-        await session?.cancel()
+        guard let session else { return }
+        let trace = PerfTrace.begin("stt.livePreviewStop")
+        await session.cancel()
+        trace.end(outcome: outcome)
     }
 }

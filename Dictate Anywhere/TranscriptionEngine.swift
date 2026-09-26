@@ -1011,6 +1011,12 @@ final class ParakeetEngine: TranscriptionEngine {
         }
     }
 
+    #if DEBUG
+    func installAudioCaptureControllerForTesting(_ controller: AudioCaptureController) {
+        audioCaptureController = controller
+    }
+    #endif
+
     func stopAudioCapture() async {
         await teardownAudioEngineIfNeeded()
     }
@@ -1022,9 +1028,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
         // Stop capture before awaiting recognition so a finishing request cannot
         // keep recording the user's microphone in the background.
-        let audioTeardownTrace = PerfTrace.begin("audio.teardown")
         await teardownAudioEngineIfNeeded()
-        audioTeardownTrace.end()
         let audioCounts = sampleLock.withLock {
             ["captured_samples": totalSampleCount, "dropped_pending_samples": droppedPendingSamples]
         }
@@ -1050,7 +1054,7 @@ final class ParakeetEngine: TranscriptionEngine {
         audioCaptureStartupCancellation = nil
         isTranscribing = false
         transcriptionTask?.cancel()
-        await teardownAudioEngineIfNeeded()
+        await teardownAudioEngineIfNeeded(outcome: "cancelled")
         let task = transcriptionTask
         await task?.value
         transcriptionTask = nil
@@ -1495,11 +1499,13 @@ final class ParakeetEngine: TranscriptionEngine {
     /// Maximum number of retired engines kept alive (prevents unbounded growth from rapid start/stop)
     private let maxRetiredEngines = 3
 
-    private func teardownAudioEngineIfNeeded() async {
+    private func teardownAudioEngineIfNeeded(outcome: StaticString = "completed") async {
         guard let captureController = audioCaptureController else {
             logger.info("teardownAudioEngine: no capture controller to tear down")
             return
         }
+        let audioTeardownTrace = PerfTrace.begin("audio.teardown")
+        defer { audioTeardownTrace.end(outcome: outcome) }
         let engineRef = (captureController as? AVAudioEngineCaptureController).map { SendableAudioEngineRef($0.engine) }
         if let engineRef {
             logger.info("teardownAudioEngine: engine.isRunning=\(engineRef.engine.isRunning, privacy: .public)")
