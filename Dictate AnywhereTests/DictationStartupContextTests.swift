@@ -43,7 +43,9 @@ final class DictationStartupContextTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        #if DEBUG
         PerfTrace.onIntervalCompleted = nil
+        #endif
         restoreSettings()
         if FileManager.default.fileExists(atPath: directory.path) {
             try FileManager.default.removeItem(at: directory)
@@ -176,7 +178,9 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
-    func testAssemblyAISessionUsesCloudLanguageWhenLocalLanguageDiffers() async {
+    #if DEBUG
+    func testAssemblyAISessionUsesCloudLanguageWhenLocalLanguageDiffers() async throws {
+        try XCTSkipUnless(PerfTrace.isEnabled, "Requires enabled trace emission")
         let events = TraceCompletions()
         PerfTrace.onIntervalCompleted = { name, _, metadata in
             events.record(name: name, metadata: metadata)
@@ -192,7 +196,8 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
-    func testStopToInsertionEndsBeforePostDeliveryRestoration() async {
+    func testStopToInsertionEndsBeforePostDeliveryRestoration() async throws {
+        try XCTSkipUnless(PerfTrace.isEnabled, "Requires enabled trace emission")
         let events = TraceCompletions()
         PerfTrace.onIntervalCompleted = { name, _, metadata in
             events.record(name: name, metadata: metadata)
@@ -214,6 +219,7 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    #endif
     private static func context(pid: pid_t, word: String) -> DictationContext {
         DictationContext(
             processIdentifier: pid, bundleIdentifier: "test.\(pid)", appName: "Editor",
@@ -225,6 +231,7 @@ final class DictationStartupContextTests: XCTestCase {
     }
 }
 
+#if DEBUG
 private final class TraceCompletions: @unchecked Sendable {
     private let lock = NSLock()
     private var records: [(name: String, metadata: String)] = []
@@ -241,6 +248,7 @@ private final class TraceCompletions: @unchecked Sendable {
         lock.withLock { records.first { $0.name == name }?.metadata }
     }
 }
+#endif
 
 private actor StartupContextGate {
     private let started: XCTestExpectation

@@ -6,7 +6,8 @@ Run the repeatable benchmark suite from the repository root:
 ./scripts/dev.sh benchmark --release
 ```
 
-The Release command uses native arm64, local Team ID development signing and
+The Release command targets the host's native macOS architecture (arm64 on
+Apple Silicon, x86_64 on Intel) with local Team ID development signing and
 testable Release optimization. Run `./scripts/dev.sh signing TEAM_ID` once to
 create the ignored local signing configuration. The default `benchmark` command
 instead runs Debug and is useful for relative comparisons, not absolute
