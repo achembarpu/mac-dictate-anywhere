@@ -122,7 +122,7 @@ configure_xcodebuild_args() {
     -scheme "$SCHEME"
     -configuration "$CONFIGURATION"
     -derivedDataPath "$DERIVED_DATA_PATH"
-    -destination 'platform=macOS,arch=arm64'
+    -destination 'platform=macOS'
   )
 
   if [[ "$CONFIGURATION" == "Debug" && -f "$SIGNING_CONFIG_PATH" ]]; then
