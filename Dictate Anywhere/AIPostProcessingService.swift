@@ -153,20 +153,22 @@ fileprivate func stripMarkdownCodeFences(from text: String) -> String {
     return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+nonisolated private enum TranscriptNormalizationExpressions {
+    static let hanDash = try? NSRegularExpression(pattern: #"(?<=\p{Han})\s*\u2014+\s*"#)
+    static let emDash = try? NSRegularExpression(pattern: #"\s*\u2014\s*"#)
+}
+
 func normalizePostProcessedTranscript(_ text: String) -> String {
     // Em dash flanked by Han characters becomes a fullwidth comma; elsewhere
     // it becomes ", " as before.
     var working = text
-    if let hanDashRegex = try? NSRegularExpression(
-        pattern: #"(?<=\p{Han})\s*\u2014+\s*"#
-    ) {
+    if let hanDashRegex = TranscriptNormalizationExpressions.hanDash {
         let range = NSRange(working.startIndex..<working.endIndex, in: working)
         working = hanDashRegex.stringByReplacingMatches(
             in: working, range: range, withTemplate: "\u{FF0C}")
     }
 
-    let pattern = #"\s*\u2014\s*"#
-    guard let regex = try? NSRegularExpression(pattern: pattern) else {
+    guard let regex = TranscriptNormalizationExpressions.emDash else {
         return working.replacingOccurrences(of: "\u{2014}", with: ", ")
     }
 
