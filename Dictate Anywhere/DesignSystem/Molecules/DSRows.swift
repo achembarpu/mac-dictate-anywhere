@@ -77,9 +77,7 @@ struct DSStackedRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Toggle(label, isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.dsSwitch)
+            DSSwitch(accessibilityName: label, isOn: $isOn)
         }
         .padding(.vertical, 14)
         .padding(.horizontal, DS.Spacing.rowHorizontal)

@@ -8,24 +8,33 @@ struct DSToggleStyle: ToggleStyle {
         Button {
             configuration.isOn.toggle()
         } label: {
-            HStack {
-                configuration.label
-                ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(configuration.isOn ? DS.Colors.accent : DS.Colors.toggleOff)
-                        .frame(width: 46, height: 28)
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 22, height: 22)
-                        .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
-                        .padding(3)
-                }
-                .animation(reduceMotion ? nil : .spring(duration: 0.2), value: configuration.isOn)
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(configuration.isOn ? DS.Colors.accent : DS.Colors.toggleOff)
+                    .frame(width: 46, height: 28)
+                Circle()
+                    .fill(.white)
+                    .frame(width: 22, height: 22)
+                    .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
+                    .padding(3)
             }
+            .animation(reduceMotion ? nil : .spring(duration: 0.2), value: configuration.isOn)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityValue(configuration.isOn ? "On" : "Off")
+    }
+}
+
+/// The design switch has no visible inline label; callers supply its accessible name.
+struct DSSwitch: View {
+    let accessibilityName: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle("", isOn: $isOn)
+            .toggleStyle(.dsSwitch)
+            .accessibilityLabel(accessibilityName)
     }
 }
 

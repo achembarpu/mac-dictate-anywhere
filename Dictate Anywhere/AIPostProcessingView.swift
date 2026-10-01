@@ -429,13 +429,13 @@ struct AIPostProcessingView: View {
                 title: \.displayName,
                 accessibilityName: "Category for \(rule.appName)"
             )
-            Toggle(
-                "Read field context",
+            Text("Read field context")
+                .font(DS.Fonts.ui(13.5, .medium))
+                .foregroundStyle(DS.Colors.ink)
+            DSSwitch(
+                accessibilityName: "Read field context for \(rule.appName)",
                 isOn: appRuleContextBinding(settings: settings, index: index)
             )
-            .toggleStyle(.dsSwitch)
-            .fixedSize()
-            .accessibilityLabel("Read field context for \(rule.appName)")
             DSIconButton(
                 systemImage: "trash",
                 tint: DS.Colors.destructive,

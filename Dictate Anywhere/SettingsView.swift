@@ -23,9 +23,7 @@ struct SettingsView: View {
 
             DSSection(overline: "Startup") {
                 DSInfoRow(label: "Launch at login") {
-                    Toggle("Launch at login", isOn: $settings.launchAtLogin)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Launch at login", isOn: $settings.launchAtLogin)
                 }
                 if let error = settings.launchAtLoginError {
                     DSFieldMessage(text: error, tone: .error)
@@ -46,9 +44,7 @@ struct SettingsView: View {
                     label: "Prewarm models at startup",
                     caption: "Load the selected speech model and eligible S1-mini cleanup model before first use."
                 ) {
-                    Toggle("Prewarm models at startup", isOn: $settings.prewarmEnginesAtStartup)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Prewarm models at startup", isOn: $settings.prewarmEnginesAtStartup)
                 }
             }
 
@@ -132,21 +128,15 @@ struct SettingsView: View {
                 }
                 DSDivider()
                 DSInfoRow(label: "Boost microphone volume during recording") {
-                    Toggle("Boost microphone volume during recording", isOn: $settings.boostMicrophoneVolumeEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Boost microphone volume during recording", isOn: $settings.boostMicrophoneVolumeEnabled)
                 }
                 DSDivider()
                 DSInfoRow(label: "Mute system audio during recording") {
-                    Toggle("Mute system audio during recording", isOn: $settings.muteSystemAudioDuringRecordingEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Mute system audio during recording", isOn: $settings.muteSystemAudioDuringRecordingEnabled)
                 }
                 DSDivider()
                 DSInfoRow(label: "Sound effects") {
-                    Toggle("Sound effects", isOn: $settings.soundEffectsEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Sound effects", isOn: $settings.soundEffectsEnabled)
                 }
                 if settings.soundEffectsEnabled {
                     DSDivider()

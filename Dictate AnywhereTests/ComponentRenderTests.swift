@@ -75,8 +75,20 @@ final class ComponentRenderTests: XCTestCase {
     }
 
     func testToggleRenders() {
-        assertRenders(Toggle("", isOn: .constant(true)).labelsHidden().toggleStyle(.dsSwitch))
-        assertRenders(Toggle("", isOn: .constant(false)).labelsHidden().toggleStyle(.dsSwitch))
+        assertRenders(DSSwitch(accessibilityName: "Prewarm models at startup", isOn: .constant(true)))
+        assertRenders(DSSwitch(accessibilityName: "Prewarm models at startup", isOn: .constant(false)))
+    }
+
+    func testSwitchDoesNotRenderItsAccessibilityNameBesideTheControl() {
+        let renderer = ImageRenderer(content: DSSwitch(
+            accessibilityName: "Prewarm models at startup",
+            isOn: .constant(true)
+        ).fixedSize())
+
+        guard let image = renderer.nsImage else {
+            return XCTFail("switch failed to render")
+        }
+        XCTAssertLessThanOrEqual(image.size.width, 50, "switch label must remain accessibility-only")
     }
 
     func testSliderRenders() {
@@ -120,7 +132,7 @@ final class ComponentRenderTests: XCTestCase {
     func testRowsRender() {
         assertRenders(DSInfoRow(label: "Languages", value: "English only"))
         assertRenders(DSInfoRow(label: "Launch at login") {
-            Toggle("", isOn: .constant(true)).labelsHidden().toggleStyle(.dsSwitch)
+            DSSwitch(accessibilityName: "Launch at login", isOn: .constant(true))
         })
         assertRenders(DSDetailRow(label: "Variant", caption: "Streaming English dictation.") {
             DSDropdownLabel(text: "Nemotron Streaming (2240 ms)")

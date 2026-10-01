@@ -86,9 +86,7 @@ struct ModelsView: View {
                     if selectedModel.supportsEndOfUtterance {
                         DSDivider()
                         DSInfoRow(label: "Stop hands-free dictation after speech ends") {
-                            Toggle("Stop hands-free dictation after speech ends", isOn: $settings.autoStopAfterSpeechEndsEnabled)
-                                .labelsHidden()
-                                .toggleStyle(.dsSwitch)
+                            DSSwitch(accessibilityName: "Stop hands-free dictation after speech ends", isOn: $settings.autoStopAfterSpeechEndsEnabled)
                         }
                     }
                     DSDivider()
