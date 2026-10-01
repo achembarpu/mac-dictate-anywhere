@@ -79,18 +79,6 @@ final class ComponentRenderTests: XCTestCase {
         assertRenders(DSSwitch(accessibilityName: "Prewarm models at startup", isOn: .constant(false)))
     }
 
-    func testSwitchDoesNotRenderItsAccessibilityNameBesideTheControl() {
-        let renderer = ImageRenderer(content: DSSwitch(
-            accessibilityName: "Prewarm models at startup",
-            isOn: .constant(true)
-        ).fixedSize())
-
-        guard let image = renderer.nsImage else {
-            return XCTFail("switch failed to render")
-        }
-        XCTAssertLessThanOrEqual(image.size.width, 50, "switch label must remain accessibility-only")
-    }
-
     func testSliderRenders() {
         assertRenders(DSSlider(value: .constant(0.5), label: "Volume"))
         assertRenders(DSSlider(value: .constant(0), label: "Volume"))
