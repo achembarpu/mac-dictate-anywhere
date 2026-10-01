@@ -331,25 +331,41 @@ final class AppState {
         await PerfTrace.measure("app.permissionCheck") { await permissions.check() }
         guard !isShuttingDown else { return }
         updateAccessibilityIntegration(granted: permissions.accessibilityGranted, promptIfNeeded: true)
-        await prepareActiveEngine(prewarmModel: settings.prewarmEnginesAtStartup)
-        guard !isShuttingDown else { return }
-        await prewarmCleanupEngineIfNeeded()
-        guard !isShuttingDown else { return }
         await PerfTrace.measure("app.appleSpeechAssetRefresh") {
             await refreshAppleSpeechAssetState()
         }
         guard !isShuttingDown else { return }
-        inputSourceMonitor.startMonitoring()
+        let startupInputSourceID = inputSourceIDOverride?() ?? inputSourceMonitor.currentInputSourceID()
         if settings.engineChoice != .assemblyAI,
            settings.inputSourceAutoSwitchEnabled,
-           let inputSourceID = inputSourceMonitor.currentInputSourceID() {
+           let startupInputSourceID {
             await PerfTrace.measure("app.inputSourceApply") {
                 await enqueueInputSourceProfileApply(
-                    for: inputSourceID,
+                    for: startupInputSourceID,
+                    prewarmModel: false
+                ).value
+            }
+        }
+        guard !isShuttingDown else { return }
+        await prepareActiveEngine(prewarmModel: settings.prewarmEnginesAtStartup)
+        guard !isShuttingDown else { return }
+        inputSourceMonitor.startMonitoring()
+        // A source can change during model loading. Reconcile it once after
+        // installing the observer so a change during startup is not missed.
+        let currentInputSourceID = inputSourceIDOverride?() ?? inputSourceMonitor.currentInputSourceID()
+        if settings.engineChoice != .assemblyAI,
+           settings.inputSourceAutoSwitchEnabled,
+           let currentInputSourceID,
+           currentInputSourceID != startupInputSourceID {
+            await PerfTrace.measure("app.inputSourceApply") {
+                await enqueueInputSourceProfileApply(
+                    for: currentInputSourceID,
                     prewarmModel: settings.prewarmEnginesAtStartup
                 ).value
             }
         }
+        guard !isShuttingDown else { return }
+        await prewarmCleanupEngineIfNeeded()
     }
 
     /// Warms the S1-mini cleanup model in the background so the first
