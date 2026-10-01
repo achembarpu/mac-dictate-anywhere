@@ -164,13 +164,15 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         XCTAssertEqual(enabledCount, 1)
         print("PIPELINE_BENCHMARK component=s1_mini_prewarm_policy enabled_cases=\(enabledCount)")
 
-        guard let path = ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"],
-              !path.isEmpty else {
-            print("PIPELINE_BENCHMARK component=s1_mini_model_load skipped=no_model_path")
-            return
+        let modelURL: URL
+        if let path = ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"], !path.isEmpty {
+            modelURL = URL(fileURLWithPath: path)
+            try XCTSkipUnless(FileManager.default.fileExists(atPath: modelURL.path), "S1-mini model path does not exist")
+        } else {
+            let manager = S1MiniModelManager()
+            try XCTSkipUnless(manager.isModelDownloaded, "S1-mini is not installed")
+            modelURL = try await manager.validatedModelURL()
         }
-        let modelURL = URL(fileURLWithPath: path)
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: modelURL.path), "S1-mini model path does not exist")
 
         let startedAt = ContinuousClock.now
         let modelReady = await S1MiniPostProcessingService.prewarm(modelURL: modelURL)
