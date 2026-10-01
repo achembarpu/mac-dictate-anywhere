@@ -309,16 +309,15 @@ final class RecoveryASRSmokeTests: XCTestCase {
         #if !PIPELINE_BENCHMARK
         throw XCTSkip("Run scripts/dev.sh benchmark to enable pipeline benchmarks")
         #else
-        // Mirror the non-streaming loop's current 500 ms cadence, 300 ms
-        // minimum delta, 30 s commit threshold, and 20 s commit chunk. This
-        // deterministic fixture measures buffer work without microphone or
-        // model availability, and is reused by E1 candidates.
-        let sampleRate = 16_000
-        let callbackSamples = sampleRate / 2
-        let minimumDelta = 4_800
-        let commitThreshold = sampleRate * 30
-        let commitChunk = sampleRate * 20
-        let callbackCount = 120
+        // Use the production batch-preview policy. This deterministic fixture
+        // models continuous speech and buffer work without microphone or model
+        // availability; it does not measure inference time or transcript quality.
+        let sampleRate = ParakeetEngine.transcriptionSampleRate
+        let intervalMilliseconds = Int(ParakeetEngine.batchPreviewIntervalMilliseconds)
+        let callbackSamples = sampleRate * intervalMilliseconds / 1_000
+        let commitThreshold = ParakeetEngine.batchCommitThresholdSamples
+        let commitChunk = ParakeetEngine.chunkTranscriptionSampleCount
+        let callbackCount = 60_000 / intervalMilliseconds
         var pendingSamples = 0
         var totalCapturedSamples = 0
         var lastObservedSampleCount = 0
@@ -334,7 +333,7 @@ final class RecoveryASRSmokeTests: XCTestCase {
             }
 
             let newSampleCount = totalCapturedSamples - lastObservedSampleCount
-            guard newSampleCount > minimumDelta else { continue }
+            guard ParakeetEngine.hasEnoughNewSamplesForBatchPreview(newSampleCount) else { continue }
             reprocessedSamples += pendingSamples
             newlyCapturedSamples += newSampleCount
             transcriptionCount += 1
@@ -342,8 +341,9 @@ final class RecoveryASRSmokeTests: XCTestCase {
         }
 
         let ratio = Double(reprocessedSamples) / Double(newlyCapturedSamples)
-        XCTAssertGreaterThan(ratio, 1.0)
-        XCTAssertGreaterThan(transcriptionCount, 1)
+        XCTAssertEqual(transcriptionCount, 120)
+        XCTAssertEqual(reprocessedSamples, 31_840_000)
+        XCTAssertEqual(newlyCapturedSamples, 960_000)
         let ratioText = String(format: "%.2f", ratio)
         print(
             "PIPELINE_BENCHMARK component=non_streaming_pending_audio "

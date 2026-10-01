@@ -477,13 +477,18 @@ final class ParakeetEngine: TranscriptionEngine {
     private let minAudioEnergy: Float = 0.005
     private let minimumSpeechPeak: Float = 0.02
     private let minimumSpeechSampleRatio: Float = 0.015
-    private let transcriptionIntervalMs: UInt64 = 500
     private let sampleRate: Int = ParakeetEngine.transcriptionSampleRate
-    private let minTranscriptionDeltaSamples: Int = 4_800
     private let speechCheckWindowSamples: Int = 8_000
 
     static let transcriptionSampleRate = 16_000
     static let chunkTranscriptionSeconds = 20
+    static let batchPreviewIntervalMilliseconds: UInt64 = 500
+    static let batchPreviewMinimumDeltaSamples = 4_800
+    static let batchCommitThresholdSamples = transcriptionSampleRate * 30
+
+    static func hasEnoughNewSamplesForBatchPreview(_ sampleCount: Int) -> Bool {
+        sampleCount > batchPreviewMinimumDeltaSamples
+    }
 
     /// Keep acoustic vocabulary rescue from replacing unrelated dictation
     /// phrases (for example, "the weather is lovely" with "cancellation").
@@ -517,7 +522,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
     /// Keeps pending Parakeet context bounded for long recordings.
     private var chunkTranscriptionSamples: Int { Self.chunkTranscriptionSampleCount }
-    private var maxPendingSamplesBeforeCommit: Int { sampleRate * 30 }
+    private var maxPendingSamplesBeforeCommit: Int { Self.batchCommitThresholdSamples }
     private var hardPendingSampleCap: Int { sampleRate * 120 }
 
     /// Serial queue for audio engine lifecycle
@@ -1127,7 +1132,7 @@ final class ParakeetEngine: TranscriptionEngine {
         var loopIteration = 0
 
         while isTranscribing && !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(transcriptionIntervalMs))
+            try? await Task.sleep(for: .milliseconds(Self.batchPreviewIntervalMilliseconds))
             guard isTranscribing else { break }
 
             await commitBufferedChunksIfNeeded(force: false)
@@ -1149,7 +1154,7 @@ final class ParakeetEngine: TranscriptionEngine {
             }
 
             let newSampleCount = totalSamples - lastObservedSampleCount
-            guard newSampleCount > minTranscriptionDeltaSamples else {
+            guard Self.hasEnoughNewSamplesForBatchPreview(newSampleCount) else {
                 continue
             }
 

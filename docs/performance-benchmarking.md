@@ -33,6 +33,12 @@ and are not production absolute timings.
 
 The command runs the following deterministic or opt-in scenarios:
 
+The pending-audio workload shares the production preview interval, delta
+predicate, commit threshold, and chunk size. Its 60-second continuous-speech
+fixture requests 120 previews and processes 31,840,000 pending samples for
+960,000 captured samples (33.17x). These counts describe the current policy's
+repeated buffer work; they do not measure inference time or transcript quality.
+
 Use registered groups to run focused benchmarks:
 
 ```sh
