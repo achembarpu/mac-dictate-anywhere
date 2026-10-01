@@ -38,6 +38,7 @@ struct DSSectionHeader: View {
             Text(title)
                 .font(DS.Fonts.display(27))
                 .foregroundStyle(DS.Colors.ink)
+                .accessibilityAddTraits(.isHeader)
             Text(subtitle)
                 .font(DS.Fonts.ui(13.5))
                 .foregroundStyle(DS.Colors.textSecondary)

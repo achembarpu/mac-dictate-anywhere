@@ -23,6 +23,7 @@ struct DSToggleStyle: ToggleStyle {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
     }
 }
 
@@ -34,6 +35,7 @@ extension ToggleStyle where Self == DSToggleStyle {
 struct DSSlider: View {
     @Binding var value: Double
     var range: ClosedRange<Double> = 0...1
+    let label: String
 
     private let knobSize: CGFloat = 16
     private let trackHeight: CGFloat = 5
@@ -70,13 +72,21 @@ struct DSSlider: View {
             )
         }
         .frame(height: knobSize)
+        .focusable()
+        .onMoveCommand { direction in
+            switch direction {
+            case .left, .down: adjust(by: -1)
+            case .right, .up: adjust(by: 1)
+            default: break
+            }
+        }
         .accessibilityElement()
+        .accessibilityLabel(label)
         .accessibilityValue("\(Int(fractionOfRange * 100)) percent")
         .accessibilityAdjustableAction { direction in
-            let step = (range.upperBound - range.lowerBound) / 10
             switch direction {
-            case .increment: value = min(range.upperBound, value + step)
-            case .decrement: value = max(range.lowerBound, value - step)
+            case .increment: adjust(by: 1)
+            case .decrement: adjust(by: -1)
             @unknown default: break
             }
         }
@@ -85,6 +95,11 @@ struct DSSlider: View {
     private var fractionOfRange: Double {
         guard range.upperBound > range.lowerBound else { return 0 }
         return ((value - range.lowerBound) / (range.upperBound - range.lowerBound)).clamped(to: 0...1)
+    }
+
+    private func adjust(by steps: Double) {
+        let step = (range.upperBound - range.lowerBound) / 10
+        value = (value + steps * step).clamped(to: range)
     }
 }
 
@@ -175,13 +190,16 @@ struct DSTextField: View {
     let placeholder: String
     @Binding var text: String
     var isSecure: Bool = false
+    let accessibilityName: String
 
     var body: some View {
         Group {
             if isSecure {
                 SecureField(placeholder, text: $text)
+                    .accessibilityLabel(accessibilityName)
             } else {
                 TextField(placeholder, text: $text)
+                    .accessibilityLabel(accessibilityName)
             }
         }
         .textFieldStyle(.plain)

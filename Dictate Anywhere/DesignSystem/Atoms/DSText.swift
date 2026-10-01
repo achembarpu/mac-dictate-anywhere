@@ -9,6 +9,7 @@ struct DSOverline: View {
             .font(DS.Fonts.ui(12, .semibold))
             .tracking(0.4)
             .foregroundStyle(DS.Colors.textSecondary)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 

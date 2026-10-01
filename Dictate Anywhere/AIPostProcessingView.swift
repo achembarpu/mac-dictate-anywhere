@@ -612,7 +612,10 @@ struct AIPostProcessingView: View {
                     }
 
                     HStack(spacing: 8) {
-                        DSTextField(placeholder: "Add word…", text: $newFillerWord)
+                        DSTextField(
+                            placeholder: "Add word…", text: $newFillerWord,
+                            accessibilityName: "Add filler word"
+                        )
                             .frame(width: 220)
                             .onSubmit { addFillerWord() }
 
@@ -671,9 +674,9 @@ struct AIPostProcessingView: View {
                     cardPadded {
                         SettingsMultilineTextArea(
                             text: $settings.aiPostProcessingPrompt,
+                            label: "Apple Intelligence prompt",
                             placeholder: "Enter your prompt, e.g. \"Break into sentences, fix grammar, and remove filler words.\""
                         )
-                        .labelsHidden()
                     }
                     DSDivider()
                     cardCaption("This prompt tells Apple Intelligence how to transform your transcribed text. The transcript is appended after your prompt.")
@@ -901,7 +904,8 @@ struct AIPostProcessingView: View {
                     text: Binding(
                         get: { settings.ollamaBaseURL },
                         set: { settings.ollamaBaseURL = $0 }
-                    )
+                    ),
+                    accessibilityName: "Ollama server URL"
                 )
             }
             DSDivider()
@@ -911,7 +915,8 @@ struct AIPostProcessingView: View {
                     text: Binding(
                         get: { settings.ollamaModel },
                         set: { settings.ollamaModel = $0 }
-                    )
+                    ),
+                    accessibilityName: "Ollama model"
                 )
             }
             DSDivider()
@@ -994,9 +999,9 @@ struct AIPostProcessingView: View {
                             get: { settings.ollamaPostProcessingPrompt },
                             set: { settings.ollamaPostProcessingPrompt = $0 }
                         ),
+                        label: "Ollama prompt",
                         placeholder: "Optional: add style or cleanup instructions for Ollama."
                     )
-                    .labelsHidden()
                 }
                 DSDivider()
                 cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for Ollama.")
@@ -1023,7 +1028,8 @@ struct AIPostProcessingView: View {
                         get: { settings.openRouterAPIKey },
                         set: { settings.openRouterAPIKey = $0 }
                     ),
-                    isSecure: true
+                    isSecure: true,
+                    accessibilityName: "OpenRouter API key"
                 )
             }
             if let error = settings.openRouterAPIKeyError {
@@ -1038,7 +1044,8 @@ struct AIPostProcessingView: View {
                     text: Binding(
                         get: { settings.openRouterAPIKeyEnvironmentVariable },
                         set: { settings.openRouterAPIKeyEnvironmentVariable = $0 }
-                    )
+                    ),
+                    accessibilityName: "OpenRouter API key environment variable"
                 )
             }
             DSDivider()
@@ -1048,7 +1055,8 @@ struct AIPostProcessingView: View {
                     text: Binding(
                         get: { settings.openRouterModel },
                         set: { settings.openRouterModel = $0 }
-                    )
+                    ),
+                    accessibilityName: "OpenRouter model"
                 )
             }
             DSDivider()
@@ -1098,9 +1106,9 @@ struct AIPostProcessingView: View {
                             get: { settings.openRouterPostProcessingPrompt },
                             set: { settings.openRouterPostProcessingPrompt = $0 }
                         ),
+                        label: "OpenRouter prompt",
                         placeholder: "Optional: add style or cleanup instructions for OpenRouter."
                     )
-                    .labelsHidden()
                 }
                 DSDivider()
                 cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for OpenRouter.")
@@ -1126,7 +1134,8 @@ struct AIPostProcessingView: View {
                     text: Binding(
                         get: { settings.openAICompatibleBaseURL },
                         set: { settings.openAICompatibleBaseURL = $0 }
-                    )
+                    ),
+                    accessibilityName: "OpenAI-compatible server URL"
                 )
             }
             DSDivider()
@@ -1137,7 +1146,8 @@ struct AIPostProcessingView: View {
                         get: { settings.openAICompatibleAPIKey },
                         set: { settings.openAICompatibleAPIKey = $0 }
                     ),
-                    isSecure: true
+                    isSecure: true,
+                    accessibilityName: "OpenAI-compatible API key"
                 )
             }
             if let error = settings.openAICompatibleAPIKeyError {
@@ -1152,7 +1162,8 @@ struct AIPostProcessingView: View {
                     text: Binding(
                         get: { settings.openAICompatibleModel },
                         set: { settings.openAICompatibleModel = $0 }
-                    )
+                    ),
+                    accessibilityName: "OpenAI-compatible model"
                 )
             }
             DSDivider()
@@ -1210,9 +1221,9 @@ struct AIPostProcessingView: View {
                             get: { settings.openAICompatiblePostProcessingPrompt },
                             set: { settings.openAICompatiblePostProcessingPrompt = $0 }
                         ),
+                        label: "OpenAI-compatible prompt",
                         placeholder: "Optional: add style or cleanup instructions for this server."
                     )
-                    .labelsHidden()
                 }
                 DSDivider()
                 cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for this server.")

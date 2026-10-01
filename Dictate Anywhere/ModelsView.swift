@@ -84,7 +84,7 @@ struct ModelsView: View {
                     if selectedModel.supportsEndOfUtterance {
                         DSDivider()
                         DSInfoRow(label: "Stop hands-free dictation after speech ends") {
-                            Toggle("", isOn: $settings.autoStopAfterSpeechEndsEnabled)
+                            Toggle("Stop hands-free dictation after speech ends", isOn: $settings.autoStopAfterSpeechEndsEnabled)
                                 .labelsHidden()
                                 .toggleStyle(.dsSwitch)
                         }
@@ -182,7 +182,8 @@ struct ModelsView: View {
                             get: { settings.assemblyAIAPIKey },
                             set: { appState.updateAssemblyAIAPIKey($0) }
                         ),
-                        isSecure: true
+                        isSecure: true,
+                        accessibilityName: "AssemblyAI API key"
                     )
                     .frame(width: 280)
                     if !settings.assemblyAIAPIKey.isEmpty {

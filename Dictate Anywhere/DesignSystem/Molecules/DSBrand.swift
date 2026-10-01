@@ -98,5 +98,7 @@ struct DSNavItem: View {
             .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

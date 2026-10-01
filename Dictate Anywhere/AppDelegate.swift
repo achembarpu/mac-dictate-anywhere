@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var mainWindow: NSWindow?
     private var customVocabularyMenuItem: NSMenuItem?
+    private var copyLastTranscriptMenuItem: NSMenuItem?
     private var cancelDictationMenuItem: NSMenuItem?
     private var stopDictationMenuItem: NSMenuItem?
     private var isTerminating = false
@@ -96,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        Settings.shared.refreshLoginItemStatus()
         Task {
             await appState.refreshPermissionsAfterActivation()
         }
@@ -118,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let copyItem = NSMenuItem(title: "Copy Last Transcript", action: #selector(copyLastTranscript), keyEquivalent: "")
         copyItem.target = self
+        copyLastTranscriptMenuItem = copyItem
         menu.addItem(copyItem)
 
         let stopItem = NSMenuItem(title: "Stop Dictation", action: #selector(stopDictation), keyEquivalent: "")
@@ -292,6 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         if let statusMenu = statusItem?.menu, menu === statusMenu {
+            copyLastTranscriptMenuItem?.isEnabled = !AppState.lastTranscriptForMenuBar.isEmpty
             stopDictationMenuItem?.isHidden = !appState.canStopDictation
             cancelDictationMenuItem?.isHidden = !appState.canCancelDictation
             customVocabularyMenuItem?.isHidden =

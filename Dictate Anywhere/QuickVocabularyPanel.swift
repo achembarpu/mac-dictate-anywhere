@@ -69,7 +69,11 @@ private struct QuickVocabularyView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 8) {
-                    TextField("", text: $newTerm, prompt: Text("e.g. Kubernetes, ChatGPT..."))
+                    TextField(
+                        "Custom vocabulary word or phrase",
+                        text: $newTerm,
+                        prompt: Text("e.g. Kubernetes, ChatGPT...")
+                    )
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { addTerm() }
 

@@ -12,6 +12,7 @@ struct SettingsMultilineTextArea: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @Binding var text: String
+    let label: String
     let placeholder: String
     let minHeight: CGFloat
     let maxHeight: CGFloat
@@ -23,12 +24,14 @@ struct SettingsMultilineTextArea: View {
 
     init(
         text: Binding<String>,
+        label: String,
         placeholder: String,
         minHeight: CGFloat = 80,
         maxHeight: CGFloat = 240,
         showsResizeHandle: Bool = true
     ) {
         _text = text
+        self.label = label
         self.placeholder = placeholder
         self.minHeight = minHeight
         self.maxHeight = maxHeight
@@ -52,7 +55,7 @@ struct SettingsMultilineTextArea: View {
                     )
                 )
 
-            AppKitMultilineTextView(text: $text, isFocused: $isFocused)
+            AppKitMultilineTextView(text: $text, isFocused: $isFocused, label: label)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .padding(.trailing, showsResizeHandle ? 10 : 0)
@@ -84,10 +87,29 @@ struct SettingsMultilineTextArea: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if showsResizeHandle {
-                ResizeGrip(color: isFocused ? Color.accentColor.opacity(0.85) : Color.secondary.opacity(0.7))
+                ResizeGrip(
+                    label: label,
+                    color: isFocused ? Color.accentColor.opacity(0.85) : Color.secondary.opacity(0.7)
+                )
                     .padding(.trailing, 7)
                     .padding(.bottom, 7)
                     .gesture(resizeGesture)
+                    .focusable()
+                    .onMoveCommand { direction in
+                        switch direction {
+                        case .up: adjustHeight(by: -20)
+                        case .down: adjustHeight(by: 20)
+                        default: break
+                        }
+                    }
+                    .accessibilityValue("\(Int(height)) points")
+                    .accessibilityAdjustableAction { direction in
+                        switch direction {
+                        case .increment: adjustHeight(by: 20)
+                        case .decrement: adjustHeight(by: -20)
+                        @unknown default: break
+                        }
+                    }
             }
         }
         .shadow(
@@ -113,11 +135,16 @@ struct SettingsMultilineTextArea: View {
                 dragStartHeight = nil
             }
     }
+
+    private func adjustHeight(by change: CGFloat) {
+        height = min(max(height + change, minHeight), maxHeight)
+    }
 }
 
 private struct AppKitMultilineTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    let label: String
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text, isFocused: $isFocused)
@@ -149,6 +176,7 @@ private struct AppKitMultilineTextView: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 4, height: 7)
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         textView.string = text
+        textView.setAccessibilityLabel(label)
 
         guard let textContainer = textView.textContainer else {
             scrollView.documentView = textView
@@ -171,6 +199,7 @@ private struct AppKitMultilineTextView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? FocusAwareTextView else { return }
+        textView.setAccessibilityLabel(label)
         if textView.string != text {
             textView.string = text
             textView.clearUndoHistory()
@@ -234,6 +263,7 @@ private final class FocusAwareTextView: NSTextView {
 }
 
 private struct ResizeGrip: View {
+    let label: String
     let color: Color
 
     var body: some View {
@@ -252,6 +282,6 @@ private struct ResizeGrip: View {
         .frame(width: 12, height: 12)
         .padding(4)
         .contentShape(Rectangle())
-        .accessibilityLabel("Resize text area")
+        .accessibilityLabel("Resize \(label) text area")
     }
 }

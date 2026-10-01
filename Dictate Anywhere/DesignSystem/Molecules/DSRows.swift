@@ -77,7 +77,7 @@ struct DSStackedRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Toggle("", isOn: $isOn)
+            Toggle(label, isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.dsSwitch)
         }

@@ -77,9 +77,9 @@ final class ComponentRenderTests: XCTestCase {
     }
 
     func testSliderRenders() {
-        assertRenders(DSSlider(value: .constant(0.5)))
-        assertRenders(DSSlider(value: .constant(0)))
-        assertRenders(DSSlider(value: .constant(1)))
+        assertRenders(DSSlider(value: .constant(0.5), label: "Volume"))
+        assertRenders(DSSlider(value: .constant(0), label: "Volume"))
+        assertRenders(DSSlider(value: .constant(1), label: "Volume"))
     }
 
     func testDropdownLabelRenders() {
@@ -88,8 +88,13 @@ final class ComponentRenderTests: XCTestCase {
 
     func testSearchAndTextFieldsRender() {
         assertRenders(DSSearchField(placeholder: "Search your dictations", text: .constant("")))
-        assertRenders(DSTextField(placeholder: "Add word…", text: .constant("")))
-        assertRenders(DSTextField(placeholder: "API key", text: .constant("secret"), isSecure: true))
+        assertRenders(DSTextField(
+            placeholder: "Add word…", text: .constant(""), accessibilityName: "Custom vocabulary word"
+        ))
+        assertRenders(DSTextField(
+            placeholder: "API key", text: .constant("secret"), isSecure: true,
+            accessibilityName: "API key"
+        ))
     }
 
     // MARK: - Molecules

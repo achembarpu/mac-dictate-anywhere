@@ -23,7 +23,7 @@ struct SettingsView: View {
 
             DSSection(overline: "Startup") {
                 DSInfoRow(label: "Launch at login") {
-                    Toggle("", isOn: $settings.launchAtLogin)
+                    Toggle("Launch at login", isOn: $settings.launchAtLogin)
                         .labelsHidden()
                         .toggleStyle(.dsSwitch)
                 }
@@ -45,7 +45,7 @@ struct SettingsView: View {
                     label: "Prewarm models at startup",
                     caption: "Load the selected speech model and eligible S1-mini cleanup model before first use."
                 ) {
-                    Toggle("", isOn: $settings.prewarmEnginesAtStartup)
+                    Toggle("Prewarm models at startup", isOn: $settings.prewarmEnginesAtStartup)
                         .labelsHidden()
                         .toggleStyle(.dsSwitch)
                 }
@@ -127,19 +127,19 @@ struct SettingsView: View {
                 }
                 DSDivider()
                 DSInfoRow(label: "Boost microphone volume during recording") {
-                    Toggle("", isOn: $settings.boostMicrophoneVolumeEnabled)
+                    Toggle("Boost microphone volume during recording", isOn: $settings.boostMicrophoneVolumeEnabled)
                         .labelsHidden()
                         .toggleStyle(.dsSwitch)
                 }
                 DSDivider()
                 DSInfoRow(label: "Mute system audio during recording") {
-                    Toggle("", isOn: $settings.muteSystemAudioDuringRecordingEnabled)
+                    Toggle("Mute system audio during recording", isOn: $settings.muteSystemAudioDuringRecordingEnabled)
                         .labelsHidden()
                         .toggleStyle(.dsSwitch)
                 }
                 DSDivider()
                 DSInfoRow(label: "Sound effects") {
-                    Toggle("", isOn: $settings.soundEffectsEnabled)
+                    Toggle("Sound effects", isOn: $settings.soundEffectsEnabled)
                         .labelsHidden()
                         .toggleStyle(.dsSwitch)
                 }
@@ -149,13 +149,15 @@ struct SettingsView: View {
                         Image(systemName: "speaker.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(DS.Colors.textSecondary)
+                            .accessibilityHidden(true)
                         DSSlider(value: Binding(
                             get: { Double(settings.soundEffectsVolume) },
                             set: { settings.soundEffectsVolume = Float($0) }
-                        ))
+                        ), label: "Sound effects volume")
                         Image(systemName: "speaker.wave.3.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(DS.Colors.textSecondary)
+                            .accessibilityHidden(true)
                     }
                     .padding(.vertical, 14)
                     .padding(.horizontal, DS.Spacing.rowHorizontal)

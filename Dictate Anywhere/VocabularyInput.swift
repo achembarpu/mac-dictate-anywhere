@@ -83,7 +83,10 @@ struct CustomVocabularySection: View {
                 }
 
                 HStack(spacing: 8) {
-                    DSTextField(placeholder: "Add word or phrase…", text: $pendingTerm)
+                    DSTextField(
+                        placeholder: "Add word or phrase…", text: $pendingTerm,
+                        accessibilityName: "Add custom vocabulary word or phrase"
+                    )
                         .frame(width: 260)
                         .onSubmit { addTerms() }
 

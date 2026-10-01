@@ -2045,11 +2045,24 @@ final class Settings {
             launchAtLoginError = "Could not update Launch at Login. \(error.localizedDescription)"
             return
         }
-        if launchAtLogin && service.status == .requiresApproval {
-            launchAtLoginError = "Allow Dictate Anywhere to launch at login in System Settings."
+        refreshLoginItemStatus()
+    }
+
+    /// Read-only refresh after returning from System Settings.
+    func refreshLoginItemStatus() {
+        guard launchAtLogin else {
+            launchAtLoginError = nil
             return
         }
-        launchAtLoginError = nil
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtLoginError = nil
+        case .requiresApproval:
+            launchAtLoginError = "Allow Dictate Anywhere to launch at login in System Settings."
+        default:
+            launchAtLoginError = launchAtLoginError
+                ?? "Launch at Login is not active. Turn it off and on to retry."
+        }
     }
 
     // MARK: - Filler Word Removal

@@ -149,7 +149,7 @@ struct TranscriptHistoryView: View {
                         }
                         TranscriptHistoryRow(
                             entry: entry,
-                            onCopy: { copyToPasteboard(entry.text) },
+                            onCopy: copyToPasteboard,
                             onDelete: { settings.removeTranscriptHistoryEntry(id: entry.id) }
                         )
                     }
@@ -172,16 +172,20 @@ struct TranscriptHistoryView: View {
         }
     }
 
-    private func copyToPasteboard(_ text: String) {
+    private func copyToPasteboard(_ text: String) -> Bool {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        return NSPasteboard.general.setString(text, forType: .string)
     }
 }
 
 private struct TranscriptHistoryRow: View {
+    private enum CopiedKind { case transcript, raw }
+
     let entry: TranscriptHistoryEntry
-    let onCopy: () -> Void
+    let onCopy: (String) -> Bool
     let onDelete: () -> Void
+    @State private var copiedKind: CopiedKind?
+    @State private var copyResetTask: Task<Void, Never>?
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -205,9 +209,11 @@ private struct TranscriptHistoryRow: View {
                                 .foregroundStyle(DS.Colors.textSecondary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            DSInsetButton(title: "Copy raw", systemImage: "doc.on.doc") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(rawText, forType: .string)
+                            DSInsetButton(
+                                title: copiedKind == .raw ? "Copied raw" : "Copy raw",
+                                systemImage: "doc.on.doc"
+                            ) {
+                                copy(rawText, kind: .raw)
                             }
                         }
                         .padding(.top, 6)
@@ -217,12 +223,29 @@ private struct TranscriptHistoryRow: View {
             }
 
             HStack(spacing: 6) {
-                DSInsetButton(title: "Copy", systemImage: "doc.on.doc", action: onCopy)
+                DSInsetButton(
+                    title: copiedKind == .transcript ? "Copied" : "Copy",
+                    systemImage: "doc.on.doc"
+                ) {
+                    copy(entry.text, kind: .transcript)
+                }
                 DSIconButton(systemImage: "trash", accessibilityLabel: "Delete transcript", action: onDelete)
                     .help("Delete transcript")
             }
         }
         .padding(.vertical, 14)
         .padding(.horizontal, DS.Spacing.rowHorizontal)
+        .onDisappear { copyResetTask?.cancel() }
+    }
+
+    private func copy(_ text: String, kind: CopiedKind) {
+        guard onCopy(text) else { return }
+        copiedKind = kind
+        copyResetTask?.cancel()
+        copyResetTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            copiedKind = nil
+        }
     }
 }
