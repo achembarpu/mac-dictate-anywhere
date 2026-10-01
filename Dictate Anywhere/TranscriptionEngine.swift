@@ -725,6 +725,8 @@ final class ParakeetEngine: TranscriptionEngine {
             }
             progressTask.cancel()
 
+            await prepareVocabularyIfNeeded()
+
             self.modelOnDiskCached[modelChoice] = true
             await MainActor.run {
                 self.isModelDownloaded = true
@@ -762,6 +764,7 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         if await asrCoordinator.isInitialized(for: modelChoice) {
+            await prepareVocabularyIfNeeded()
             await asrCoordinator.cleanup()
             loadedModels = nil
         }
@@ -870,6 +873,20 @@ final class ParakeetEngine: TranscriptionEngine {
         await MainActor.run {
             self.isReady = true
             self.isModelDownloaded = true
+        }
+        await prepareVocabularyIfNeeded()
+    }
+
+    /// Vocabulary models must be resident before Stop, including when cleanup
+    /// is enabled after the speech model has already been prepared.
+    func prepareVocabularyIfNeeded() async {
+        guard Settings.shared.transcriptPostProcessingMode == .fluidAudioVocabulary,
+              selectedModelChoice.supportsFluidAudioVocabulary,
+              await asrCoordinator.isInitialized(for: selectedModelChoice) else { return }
+        do {
+            try await asrCoordinator.prepareVocabulary()
+        } catch {
+            logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -1508,6 +1525,10 @@ private actor AsrManagerCoordinator {
             textNorm: 14
         )
         batchVad = vad
+        try await PerfTrace.measure("stt.modelWarmup") {
+            _ = try await senseVoiceManager?.transcribe(audio: Self.warmupAudio)
+            try await warmVad(vad)
+        }
         logger.info("initializeSenseVoice: completed")
     }
 
@@ -1524,6 +1545,11 @@ private actor AsrManagerCoordinator {
         manager = m
         self.models = models
         batchVad = vad
+        try await PerfTrace.measure("stt.modelWarmup") {
+            var state = TdtDecoderState.make(decoderLayers: await m.decoderLayerCount)
+            _ = try await m.transcribe(Self.warmupAudio, decoderState: &state)
+            try await warmVad(vad)
+        }
         logger.info("initialize: completed successfully")
     }
 
@@ -1584,7 +1610,41 @@ private actor AsrManagerCoordinator {
             throw TranscriptionError.engineNotReady
         }
 
+        // Multilingual Nemotron already warms every graph in loadModels(). The
+        // other native managers need a first decode as well as model loading.
+        if let streamingManager {
+            try await PerfTrace.measure("stt.modelWarmup") {
+                let warmup = [Float](repeating: 0, count: BatchTranscriptionPolicy.sampleRate * 3)
+                try await streamingManager.appendAudio(makePCMBuffer(from: warmup))
+                try await streamingManager.processBufferedAudio()
+                _ = try await streamingManager.finish()
+                try await streamingManager.reset()
+            }
+        }
+        pendingEndOfUtterance = false
         logger.info("initializeStreaming: completed for \(modelChoice.displayName, privacy: .public)")
+    }
+
+    private static var warmupAudio: [Float] {
+        [Float](repeating: 0, count: BatchTranscriptionPolicy.sampleRate)
+    }
+
+    private func warmVad(_ vad: VadManager) async throws {
+        // Discard the warmup state: each real recording starts at .initial().
+        _ = try await vad.processStreamingChunk(
+            [Float](repeating: 0, count: VadManager.chunkSize), state: .initial()
+        )
+    }
+
+    func prepareVocabulary() async throws {
+        guard ctcModels == nil else { return }
+        let trace = PerfTrace.begin("stt.ctcModelLoad")
+        defer { trace.end() }
+        let loaded = try await CtcModels.downloadAndLoad(variant: .ctc110m)
+        _ = try await CtcKeywordSpotter(models: loaded).spotKeywordsWithLogProbs(
+            audioSamples: Self.warmupAudio, customVocabulary: CustomVocabularyContext(terms: [])
+        )
+        ctcModels = loaded
     }
 
     func resetSession(for modelChoice: ParakeetModelChoice) async throws {
@@ -1674,11 +1734,7 @@ private actor AsrManagerCoordinator {
         let terms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         guard !terms.isEmpty else { return original }
         do {
-            if ctcModels == nil {
-                ctcModels = try await PerfTrace.measure("stt.ctcModelLoad") {
-                    try await CtcModels.downloadAndLoad(variant: .ctc110m)
-                }
-            }
+            try await prepareVocabulary()
             guard let ctcModels else { return original }
             let boosting = try await VocabularyBoostingSession(
                 vocabulary: CustomVocabularyContext(terms: terms.map { CustomVocabularyTerm(text: $0) }),

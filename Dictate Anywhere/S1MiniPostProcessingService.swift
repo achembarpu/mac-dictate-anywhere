@@ -119,7 +119,7 @@ enum S1MiniModelSpec {
     )!
 }
 
-enum S1MiniPromptBuilder {
+nonisolated enum S1MiniPromptBuilder {
     static let systemPrompt = "You are a text normalizer for speech-to-text transcripts. The input begins with a control line specifying the styling, structure, and context settings; clean the transcript to match those settings and output only the cleaned text."
 
     static func controlLine(
@@ -198,6 +198,7 @@ actor S1MiniInferenceEngine {
     )
     private var model: OpaquePointer?
     private var loadedModelPath: String?
+    private var warmedModelPath: String?
     private var backendInitialized = false
 
     deinit {
@@ -215,6 +216,22 @@ actor S1MiniInferenceEngine {
             self.model = nil
         }
         loadedModelPath = nil
+        warmedModelPath = nil
+    }
+
+    /// Exercise context creation, prompt evaluation and generation, not just
+    /// weight loading. The synthetic result and request context are discarded.
+    func prewarm(from url: URL) throws {
+        let trace = PerfTrace.begin("cleanup.prewarm")
+        defer { trace.end() }
+        _ = try loadModelIfNeeded(from: url)
+        guard warmedModelPath != loadedModelPath else { return }
+        let text = "Hello."
+        _ = try generate(
+            prompt: S1MiniPromptBuilder.prompt(transcript: text, styling: .semiFormal,
+                                               structure: .prose, context: "general"),
+            transcript: text, modelURL: url
+        )
     }
 
     func transcriptChunks(_ text: String, modelURL: URL) throws -> [String] {
@@ -308,6 +325,7 @@ actor S1MiniInferenceEngine {
         logger.info(
             "generate: promptTokens=\(promptTokens.count, privacy: .public), inputTokens=\(transcriptTokenCount, privacy: .public), outputChars=\(decoded.count, privacy: .public)"
         )
+        warmedModelPath = loadedModelPath
         return decoded
     }
 
@@ -380,8 +398,7 @@ actor S1MiniInferenceEngine {
         throw S1MiniServiceError.outputLimitReached
     }
 
-    /// Loads the cached model or the model at `url`. Internal (not private)
-    /// so startup prewarm can reuse it without going through a cleanup call.
+    /// Loads the cached model or the model at `url`.
     func loadModelIfNeeded(from url: URL) throws -> OpaquePointer {
         let trace = PerfTrace.begin("cleanup.modelLoad")
         defer { trace.end() }
@@ -567,7 +584,7 @@ enum S1MiniPostProcessingService {
     @discardableResult
     static func prewarm(modelURL: URL) async -> Bool {
         do {
-            _ = try await S1MiniInferenceEngine.shared.loadModelIfNeeded(from: modelURL)
+            try await S1MiniInferenceEngine.shared.prewarm(from: modelURL)
             return true
         } catch {
             return false

@@ -43,6 +43,15 @@ classification. Recognition receives the original samples, with no amplification
 or silence trimming. Native streaming models retain their existing behavior.
 The shared Silero model lives in the app's normal FluidAudio cache.
 
+Preparation now exercises the selected model's first inference, not only weight
+loading. Batch models decode one second of synthetic silence and VAD receives
+one independent zero-input block. Native English managers process and finish
+three seconds of silence, then reset; multilingual Nemotron already warms its
+graphs in the SDK loader. Warmup outputs never enter the recording, and every
+real recording starts with fresh decoder/VAD state. Repeated preparation reuses
+the resident models. Vocabulary mode additionally loads and warms its CTC models
+before finalization, retaining the lazy path if preparation fails.
+
 Opt-in vocabulary finalization decodes the full recording once with the SDK
 batch decoder, then applies `VocabularyBoostingSession` to its token timings and
 the matching original audio. The CTC spotter handles long audio internally.
@@ -112,6 +121,11 @@ Highly repetitive input can keep generating past even the recommended budget;
 the service returns the whole original input in that case, never a truncated
 prefix. The repetitive invoice fixture checks this safety behavior separately
 from a varied long fixture that must perform its final self-correction.
+
+S1-mini preparation performs a short synthetic cleanup to warm context creation,
+prompt evaluation and generation. It discards that request's context and output;
+subsequent real requests still have independent contexts. Already-warm models
+skip this synthetic inference, and unloading clears the warmup marker.
 
 llama.swift 2.10549.0 is already the latest published wrapper tag checked on
 2026-10-01. No dependency or weight-quantization change is warranted without

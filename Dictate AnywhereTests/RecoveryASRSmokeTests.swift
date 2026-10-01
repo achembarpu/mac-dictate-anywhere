@@ -3,6 +3,7 @@ import XCTest
 import Speech
 import FluidAudio
 import CoreML
+import os
 @testable import Dictate_Anywhere
 
 /// Exercises the actual file-recovery paths with a known speech fixture and
@@ -34,6 +35,41 @@ final class RecoveryASRSmokeTests: XCTestCase {
 
     func testNemotronModelRecoversSavedAudio() async throws {
         try await checkFluidAudioRecovery(model: .nemotron1120)
+    }
+
+    func testEveryInstalledModelIsPreparedOnceAndWarmupCannotLeakIntoDictation() async throws {
+        let settings = Settings.shared
+        let oldChoice = settings.parakeetModelChoice
+        let oldMode = settings.transcriptPostProcessingMode
+        defer { settings.parakeetModelChoice = oldChoice; settings.transcriptPostProcessingMode = oldMode }
+        settings.transcriptPostProcessingMode = .none
+        for model in ParakeetModelChoice.availableCases {
+            let engine = ParakeetEngine()
+            guard hasInstalledBenchmarkModel(model, engine: engine) else { continue }
+            settings.parakeetModelChoice = model
+            try await engine.prepare()
+            XCTAssertTrue(engine.isReady, model.rawValue)
+            #if DEBUG
+            let events = OSAllocatedUnfairLock(initialState: [String]())
+            PerfTrace.onIntervalCompleted = { name, _, _ in
+                if name == "stt.modelLoad" || name == "stt.modelWarmup" {
+                    events.withLock { $0.append(name) }
+                }
+            }
+            #endif
+            try await engine.prepare()
+            #if DEBUG
+            PerfTrace.onIntervalCompleted = nil
+            XCTAssertTrue(events.withLock { $0.isEmpty }, "Repeated preparation reloaded or rewarmed \(model.rawValue)")
+            #endif
+            XCTAssertEqual(engine.currentTranscript, "", model.rawValue)
+            let id = model == .senseVoice ? "golden-zh-1" : "golden-en-1"
+            let fixture = try XCTUnwrap(GoldenSpeechFixture.all().first { $0.id == id })
+            let output = try await engine.transcribeRecording(at: fixture.audioURL)
+            XCTAssertFalse(output.isEmpty, model.rawValue)
+            XCTAssertLessThan(try fixture.errorRate(hypothesis: output), 0.5, "Warmup contaminated \(model.rawValue): \(output)")
+            await engine.cancel()
+        }
     }
 
     /// Explicit opt-in only. Uses the app's downloader and its persistent cache,

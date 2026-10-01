@@ -1,7 +1,34 @@
 import XCTest
+import os
 @testable import Dictate_Anywhere
 
 final class S1MiniPostProcessingTests: XCTestCase {
+    func testRealPrewarmRunsInferenceOnceAndKeepsTheNextRequestIndependent() async throws {
+        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check inference prewarm") }
+        let url = URL(fileURLWithPath: path)
+        await S1MiniPostProcessingService.unload()
+        let firstReady = await S1MiniPostProcessingService.prewarm(modelURL: url)
+        XCTAssertTrue(firstReady)
+        #if DEBUG
+        let events = OSAllocatedUnfairLock(initialState: [String]())
+        PerfTrace.onIntervalCompleted = { name, _, _ in
+            if name == "cleanup.generate" { events.withLock { $0.append(name) } }
+        }
+        #endif
+        let secondReady = await S1MiniPostProcessingService.prewarm(modelURL: url)
+        XCTAssertTrue(secondReady)
+        #if DEBUG
+        PerfTrace.onIntervalCompleted = nil
+        XCTAssertTrue(events.withLock { $0.isEmpty }, "An already-warm model must not repeat synthetic inference")
+        #endif
+        let output = try await process("Send invoice 43 on Friday no sorry Thursday.", modelURL: url)
+        XCTAssertTrue(output.contains("43"))
+        XCTAssertTrue(output.lowercased().contains("thursday"))
+        XCTAssertFalse(output.lowercased().contains("hello"))
+        XCTAssertFalse(output.lowercased().contains("friday"))
+        await S1MiniPostProcessingService.unload()
+    }
+
     func testLongTranscriptChunksPreserveSentencesAndEveryCharacter() throws {
         let text = "Please send the report.\nWe need it tomorrow. Keep the invoice for 23 dollars."
         let chunks = try S1MiniTranscriptChunker.chunks(text, maximumTokens: 7) {

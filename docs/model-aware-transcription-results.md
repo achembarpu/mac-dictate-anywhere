@@ -66,7 +66,9 @@ memory claim.
 The [machine-readable report](benchmarks/model-aware-transcription-2026-10-02.json)
 retains per-trial comparisons, all quality cases, source hashes, installed weight
 hashes, SDK pins and measurement limits. The containing commit provides the
-source snapshot. Fixtures and licensing are in the
+source snapshot at `fa15e64`. Later model-readiness commits retain these measured
+policy results as historical evidence rather than rewriting their source hashes.
+Fixtures and licensing are in the
 [golden inventory](../Dictate%20AnywhereTests/Fixtures/Golden/README.md).
 
 ```sh
