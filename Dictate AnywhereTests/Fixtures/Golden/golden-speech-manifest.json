@@ -1,0 +1,275 @@
+[
+  {
+    "id": "golden-en-1",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-1.wav",
+    "reference": "golden-en-1.txt",
+    "sampleCount": 93680,
+    "source": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/tree/5be9148/clean",
+    "sourceId": "1272-128104-0000",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "proper-names"
+    ],
+    "audioSHA256": "799f78ed4beb4de7ceae3a809262d4ce242394342ccd1d58cef7d49dbc2def46",
+    "referenceSHA256": "c1a46943d4665aac8d39edfa6aed9f345141a9894e352fce1ff540f7725d5506"
+  },
+  {
+    "id": "golden-en-2",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-2.wav",
+    "reference": "golden-en-2.txt",
+    "sampleCount": 77040,
+    "source": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/tree/5be9148/clean",
+    "sourceId": "1272-128104-0001",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "proper-names"
+    ],
+    "audioSHA256": "473b1bb573e8f7cdcd639c6e318036236190107b66bfe6892286121a92d464c1",
+    "referenceSHA256": "57fd5069e26a0368445eccc756f50ce2250bcfb5e54ead36f4a1e53b19f6d0a8"
+  },
+  {
+    "id": "golden-en-3",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-3.wav",
+    "reference": "golden-en-3.txt",
+    "sampleCount": 199760,
+    "source": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/tree/5be9148/clean",
+    "sourceId": "1272-128104-0002",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "proper-names"
+    ],
+    "audioSHA256": "5f4d8f7331acffc3d2efbe0f764b9eb3447911dc17f9843e38e1083eb1685b9c",
+    "referenceSHA256": "89dead1f9103b9011014a693ef94ef7d23a4e265d15a3b960f1d88f59731c4c9"
+  },
+  {
+    "id": "golden-en-4",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-4.wav",
+    "reference": "golden-en-4.txt",
+    "sampleCount": 158400,
+    "source": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/tree/5be9148/clean",
+    "sourceId": "1272-128104-0003",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "proper-names"
+    ],
+    "audioSHA256": "fc23353b884061a5c5784b0cf6b5c539680c50cfae993882822ebdd4a06ddf8c",
+    "referenceSHA256": "14b4bd22e1c19a9a0e1c005ef2768ce29ee34fb34e6453d753cc7139eb493704"
+  },
+  {
+    "id": "golden-en-5",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-5.wav",
+    "reference": "golden-en-5.txt",
+    "sampleCount": 470400,
+    "source": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/tree/5be9148/clean",
+    "sourceId": "1272-128104-0004",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "proper-names"
+    ],
+    "audioSHA256": "4798e34d9a323ed835ae6055172236f8965dd5ccf146c25758711023ecc8b2e6",
+    "referenceSHA256": "6dcce93e8565255340eb3fdbbc78144f045d184792f0f5b54b05eebed692ff32"
+  },
+  {
+    "id": "golden-en-6",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-6.wav",
+    "reference": "golden-en-6.txt",
+    "sampleCount": 144160,
+    "source": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/tree/5be9148/clean",
+    "sourceId": "1272-128104-0005",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "proper-names"
+    ],
+    "audioSHA256": "abd89d9a5108f87f03d03875272e1f3f18bef61ea4c271a0ec5bbc3a5bfc223a",
+    "referenceSHA256": "f49c7c48bf6ec19057fc833f74f9ee66e5d55e9f2dc3cb491c6b09f361df6231"
+  },
+  {
+    "id": "golden-en-boundaries",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-boundaries.wav",
+    "reference": "golden-en-boundaries.txt",
+    "sampleCount": 1162640,
+    "source": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/tree/5be9148/clean",
+    "sourceId": "1272-128104-0000,1272-128104-0001,1272-128104-0002,1272-128104-0003,1272-128104-0004,1272-128104-0005",
+    "tags": [
+      "human",
+      "derived",
+      "long",
+      "boundary-words",
+      "200ms-between-clips"
+    ],
+    "audioSHA256": "103d49ae4964c1b0d1ab6b7bd69ac0ea398eaf11c868e29cac4da15e0ce49281",
+    "referenceSHA256": "b91814308ce49522bb0039308113254086d50b5a6eabf1707f4a0a002a078267"
+  },
+  {
+    "id": "golden-zh-1",
+    "language": "zh",
+    "metric": "cer",
+    "audio": "golden-zh-1.wav",
+    "reference": "golden-zh-1.txt",
+    "sampleCount": 166080,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/cmn_hans_cn",
+    "sourceId": "1906:10026684690566417990.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "male"
+    ],
+    "audioSHA256": "5214e16584b6498ddbd22f321738c0f62b19117ab1880b21e405fba983986b6a",
+    "referenceSHA256": "19487866dd1876c1c74dad86f3d2aa1db8cbc75bdd9d86b8d1a6a98f755c5f7d"
+  },
+  {
+    "id": "golden-zh-2",
+    "language": "zh",
+    "metric": "cer",
+    "audio": "golden-zh-2.wav",
+    "reference": "golden-zh-2.txt",
+    "sampleCount": 109440,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/cmn_hans_cn",
+    "sourceId": "1965:10134195680525011353.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "female"
+    ],
+    "audioSHA256": "e86c5fd3203f2de1bb5140b9606ed11e4596eee00e658d6ed7dc178a562869df",
+    "referenceSHA256": "522b48517acec6016cd8ef31e91f2c7387e5a61b433d477348d53d335059dde2"
+  },
+  {
+    "id": "golden-nl-1",
+    "language": "nl",
+    "metric": "wer",
+    "audio": "golden-nl-1.wav",
+    "reference": "golden-nl-1.txt",
+    "sampleCount": 103680,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/nl_nl",
+    "sourceId": "1927:10042455874761876908.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "male"
+    ],
+    "audioSHA256": "ec8db57b89a679fc211e0daf300f6f5d8fa5dec38109071b24de5c26dba9aaa7",
+    "referenceSHA256": "5d3b30b5542cf6f854e9d7378576c9617a7f9506755a21f1e34b72ac5b2ffb5b"
+  },
+  {
+    "id": "golden-nl-2",
+    "language": "nl",
+    "metric": "wer",
+    "audio": "golden-nl-2.wav",
+    "reference": "golden-nl-2.txt",
+    "sampleCount": 154560,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/nl_nl",
+    "sourceId": "1823:10152288169439514825.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "male"
+    ],
+    "audioSHA256": "2c8f7937bd19d9e0b8edb4d8f1681a4c58f3fcb574ab40fa596ec3eac9c5b723",
+    "referenceSHA256": "b31dfff03743f96a3b31e79769948d9f847affcea3573f73c639be3f32380951"
+  },
+  {
+    "id": "golden-de-1",
+    "language": "de",
+    "metric": "wer",
+    "audio": "golden-de-1.wav",
+    "reference": "golden-de-1.txt",
+    "sampleCount": 287040,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/de_de",
+    "sourceId": "2003:10004059102127011984.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "male"
+    ],
+    "audioSHA256": "7131c007c5c5c7b72c2fae333c9bccf5e2c02a4abb32b740f314e58b1488f149",
+    "referenceSHA256": "99203fc574ecb019d814c1a7ed72e63d8e5c73e8bad49a0e77a1e87e34bf78ab"
+  },
+  {
+    "id": "golden-de-2",
+    "language": "de",
+    "metric": "wer",
+    "audio": "golden-de-2.wav",
+    "reference": "golden-de-2.txt",
+    "sampleCount": 178560,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/de_de",
+    "sourceId": "1738:10009182821551087671.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "short",
+      "male"
+    ],
+    "audioSHA256": "5ced4640ec223bd9f59601722534acbb2f47087c71167529c513741a86cdae01",
+    "referenceSHA256": "13f6e2c0ecbc8291e4288845959c07b72f68c240a715c51caf85126844c1a239"
+  },
+  {
+    "id": "golden-zh-en-switch",
+    "language": "zh-en",
+    "metric": "cer",
+    "audio": "golden-zh-en-switch.wav",
+    "reference": "golden-zh-en-switch.txt",
+    "sampleCount": 375600,
+    "source": "derived from golden-zh-1, golden-en-1, golden-zh-2",
+    "sourceId": "derived",
+    "tags": [
+      "human",
+      "derived",
+      "code-switch",
+      "different-speakers",
+      "200ms-between-clips"
+    ],
+    "audioSHA256": "b06a11bc6075fadcd564f35b287b1fc9fa7c147df39c9ed90ca7fe1fe38046c1",
+    "referenceSHA256": "30bf5d3b0ad32125bbfe2779274f75661a52b0974393a5a5fdf24397fcafa05a"
+  },
+  {
+    "id": "golden-zh-boundaries",
+    "language": "zh",
+    "metric": "cer",
+    "audio": "golden-zh-boundaries.wav",
+    "reference": "golden-zh-boundaries.txt",
+    "sampleCount": 599040,
+    "source": "derived from golden-zh-1, golden-zh-2",
+    "sourceId": "derived",
+    "tags": [
+      "human",
+      "derived",
+      "long",
+      "repeated-utterances",
+      "750ms-between-clips"
+    ],
+    "audioSHA256": "94f11900e501c375327de3db034d88b6e814a754ee44c56b1181bc8b14aa6b39",
+    "referenceSHA256": "3ddd21e3c575ff51e5e2f50ac908c099cce306961be62423203ebe8cd35a0a02"
+  }
+]

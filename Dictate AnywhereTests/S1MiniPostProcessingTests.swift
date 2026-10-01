@@ -2,6 +2,58 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class S1MiniPostProcessingTests: XCTestCase {
+    func testLongTranscriptChunksPreserveSentencesAndEveryCharacter() throws {
+        let text = "Please send the report.\nWe need it tomorrow. Keep the invoice for 23 dollars."
+        let chunks = try S1MiniTranscriptChunker.chunks(text, maximumTokens: 7) {
+            $0.split(whereSeparator: \.isWhitespace).count
+        }
+        XCTAssertEqual(chunks.joined(), text)
+        XCTAssertGreaterThan(chunks.count, 1)
+        XCTAssertTrue(chunks[0].hasSuffix(".\n"))
+        XCTAssertTrue(chunks.allSatisfy { $0.split(whereSeparator: \.isWhitespace).count <= 7 })
+    }
+
+    func testLongSentenceChunksAtWordBoundariesAndShortTextStaysWhole() throws {
+        let text = "one two three four five six seven eight nine ten"
+        let count: (String) -> Int = { $0.split(whereSeparator: \.isWhitespace).count }
+        let chunks = try S1MiniTranscriptChunker.chunks(text, maximumTokens: 4, tokenCount: count)
+        XCTAssertEqual(chunks.joined(), text)
+        XCTAssertTrue(chunks.dropLast().allSatisfy { $0.last?.isWhitespace == true })
+        XCTAssertTrue(chunks.allSatisfy { count($0) <= 4 })
+        XCTAssertEqual(try S1MiniTranscriptChunker.chunks("Keep 43.", maximumTokens: 4, tokenCount: count), ["Keep 43."])
+        XCTAssertThrowsError(try S1MiniTranscriptChunker.chunks("unbroken", maximumTokens: 3, tokenCount: { $0.count }))
+    }
+
+    func testRealRepeatedLongTranscriptCannotLoseNumbersWhenModelIsAvailable() async throws {
+        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check real long-input cleanup") }
+        let text = (1...110).map { "Please keep invoice \($0) and send the report tomorrow." }.joined(separator: " ")
+        let url = URL(fileURLWithPath: path)
+        let chunks = try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: url)
+        XCTAssertGreaterThan(chunks.count, 1)
+        XCTAssertEqual(chunks.joined(), text)
+        let output = try await process(text, modelURL: url)
+        XCTAssertFalse(output.isEmpty)
+        XCTAssertTrue(output.lowercased().contains("invoice"))
+        XCTAssertTrue(output.lowercased().contains("tomorrow"))
+        let numbers = output.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        XCTAssertEqual(Set(numbers), Set(1...110), "Cleanup lost an invoice number around a chunk boundary")
+        await S1MiniPostProcessingService.unload()
+    }
+
+    func testRealVariedLongTranscriptCleansFinalCorrectionWhenModelIsAvailable() async throws {
+        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check real long-input cleanup") }
+        let reference = try XCTUnwrap(GoldenSpeechFixture.all().first { $0.id == "golden-en-boundaries" }).referenceText
+        let text = Array(repeating: reference, count: 5).joined(separator: "\n\n")
+            + "\nUm please send the final report to Utrecht on Friday no sorry Thursday."
+        let url = URL(fileURLWithPath: path)
+        let chunks = try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: url)
+        XCTAssertGreaterThan(chunks.count, 1)
+        let output = try await process(text, modelURL: url)
+        XCTAssertTrue(output.lowercased().contains("utrecht"))
+        XCTAssertTrue(output.lowercased().contains("thursday"))
+        XCTAssertFalse(output.lowercased().contains("friday"), "Long input fell back to uncorrected text")
+        await S1MiniPostProcessingService.unload()
+    }
     func testPromptMatchesRequiredNonThinkingTrainingFormat() {
         let prompt = S1MiniPromptBuilder.prompt(
             transcript: "so um send it friday",

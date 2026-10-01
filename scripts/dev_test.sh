@@ -21,6 +21,11 @@ EOF
 cat > "$MOCK_BIN/xcodebuild" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$XCODEBUILD_ARGS_LOG"
+printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_FIXTURE:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_GOLDEN:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_METRIC:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_DOWNLOAD_MODELS:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_ENCODER:-}" > "$XCODEBUILD_ENV_LOG"
 EOF
 cat > "$MOCK_BIN/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -46,6 +51,7 @@ chmod +x "$MOCK_BIN/pgrep" "$MOCK_BIN/rm" "$MOCK_BIN/xcodebuild" "$MOCK_BIN/unam
 
 PATH="$MOCK_BIN:$PATH"
 export HOME="$TEST_HOME" PATH RM_LOG XCODEBUILD_ARGS_LOG="$TEST_ROOT/xcodebuild-args.log"
+export XCODEBUILD_ENV_LOG="$TEST_ROOT/xcodebuild-env.log"
 
 unset DERIVED_DATA_PATH
 default_path="$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"
@@ -135,7 +141,7 @@ assert_benchmark_selector_count() {
 /bin/rm -f "$XCODEBUILD_ARGS_LOG"
 "$SCRIPT" benchmark --list > "$TEST_ROOT/benchmark-list.log"
 [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: --list invoked Xcode\n' >&2; exit 1; }
-for group in all asr preview audio overlay transcript insertion cloud-request recovery cleanup model-switch; do
+for group in all asr asr-quality preview audio overlay transcript insertion cloud-request recovery cleanup model-switch; do
   /usr/bin/grep -Eq "^$group +" "$TEST_ROOT/benchmark-list.log" || {
     printf 'FAIL: group %s missing from --list\n' "$group" >&2
     exit 1
@@ -156,7 +162,7 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 18
+assert_benchmark_selector_count 22
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 
@@ -184,6 +190,23 @@ if "$SCRIPT" benchmark --only >/dev/null 2>&1 || \
   exit 1
 fi
 
+PIPELINE_BENCHMARK_FIXTURE=golden-zh-boundaries PIPELINE_BENCHMARK_GOLDEN=1 \
+  PIPELINE_BENCHMARK_METRIC=cer PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1 \
+  PIPELINE_BENCHMARK_ENCODER=1 "$SCRIPT" benchmark --only asr-quality >/dev/null
+assert_benchmark_selector_count 4
+expected_environment=$'golden-zh-boundaries\n1\ncer\n1\n1'
+if [[ "$(<"$XCODEBUILD_ENV_LOG")" != "$expected_environment" ]]; then
+  printf 'FAIL: golden fixture benchmark settings were not forwarded to the test host\n' >&2
+  exit 1
+fi
+for scenario in testDownloadModelsIntoApplicationCache testGoldenSpeechReferenceBenchmark testModelAwareBatchComparisonBenchmark testTDTEncoderPlacementBenchmark; do
+  if ! /usr/bin/grep -Fxq -- "-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/$scenario" "$XCODEBUILD_ARGS_LOG"; then
+    printf 'FAIL: benchmark omitted %s\n' "$scenario" >&2
+    exit 1
+  fi
+done
+
 printf 'Development script architecture selection tests passed.\n'
 printf 'Development script clean safety tests passed.\n'
 printf 'Benchmark discovery, focused/combined/default selection, signing and invalid-input tests passed.\n'
+printf 'Golden speech benchmark forwarding tests passed.\n'

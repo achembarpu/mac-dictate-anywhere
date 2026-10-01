@@ -254,6 +254,7 @@ enum AssemblyAILanguage: String, CaseIterable, Codable, Identifiable {
 
 enum ParakeetModelChoice: String, CaseIterable, Codable {
     case multilingual = "multilingual"
+    case multilingualUltra = "multilingualUltra"
     case englishOnly = "englishOnly"
     case compactEnglish = "compactEnglish"
     case parakeetEou320 = "parakeetEou320"
@@ -266,6 +267,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     nonisolated var displayName: String {
         switch self {
         case .multilingual: return "Multilingual"
+        case .multilingualUltra: return "Multilingual Ultra"
         case .englishOnly: return "English Only"
         case .compactEnglish: return "English Compact (110M)"
         case .parakeetEou320: return "Parakeet EOU Streaming"
@@ -281,6 +283,8 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         switch self {
         case .multilingual:
             return "25 European languages with automatic language detection."
+        case .multilingualUltra:
+            return "Updated Parakeet model for stronger multilingual accuracy across 25 European languages."
         case .englishOnly:
             return "English-only vocabulary tuned for stronger English accuracy."
         case .compactEnglish:
@@ -304,6 +308,8 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         switch self {
         case .multilingual:
             return "parakeet-tdt-0.6b-v3-coreml"
+        case .multilingualUltra:
+            return "parakeet-ultra-coreml"
         case .englishOnly:
             return "parakeet-tdt-0.6b-v2-coreml"
         case .compactEnglish:
@@ -325,7 +331,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
 
     nonisolated var isEnglishOnly: Bool {
         switch self {
-        case .multilingual, .senseVoice, .nemotronMultilingual:
+        case .multilingual, .multilingualUltra, .senseVoice, .nemotronMultilingual:
             return false
         case .englishOnly, .compactEnglish, .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
             return true
@@ -334,7 +340,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
 
     nonisolated var usesTrueStreaming: Bool {
         switch self {
-        case .multilingual, .englishOnly, .compactEnglish, .senseVoice:
+        case .multilingual, .multilingualUltra, .englishOnly, .compactEnglish, .senseVoice:
             return false
         case .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240, .nemotronMultilingual:
             return true
@@ -345,7 +351,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         switch self {
         case .parakeetEou320:
             return true
-        case .multilingual, .englishOnly, .compactEnglish, .nemotron560, .nemotron1120, .nemotron2240,
+        case .multilingual, .multilingualUltra, .englishOnly, .compactEnglish, .nemotron560, .nemotron1120, .nemotron2240,
              .senseVoice, .nemotronMultilingual:
             return false
         }
@@ -353,7 +359,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
 
     nonisolated var languageSummary: String {
         switch self {
-        case .multilingual: return "25 European languages"
+        case .multilingual, .multilingualUltra: return "25 European languages"
         case .senseVoice: return "Chinese (Simplified) + English; also Cantonese, Japanese, Korean"
         case .nemotronMultilingual: return "40+ languages including Chinese"
         case .englishOnly, .compactEnglish, .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
@@ -365,6 +371,8 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         switch self {
         case .multilingual, .englishOnly:
             return "~500 MB"
+        case .multilingualUltra:
+            return "~630 MB"
         case .compactEnglish:
             return "~220 MB"
         case .parakeetEou320:
@@ -381,7 +389,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
 
     nonisolated var languageSettingsFooter: String {
         switch self {
-        case .multilingual:
+        case .multilingual, .multilingualUltra:
             return "The multilingual Parakeet model auto-detects among 25 supported European languages."
         case .englishOnly:
             return "The English-only Parakeet model is optimized for English dictation."
@@ -400,6 +408,8 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         switch self {
         case .multilingual:
             return "Choose Multilingual for automatic language detection across 25 supported languages."
+        case .multilingualUltra:
+            return "Choose Multilingual Ultra for stronger multilingual accuracy with a larger download."
         case .englishOnly:
             return "Choose English Only for stronger English accuracy when you never dictate in other languages."
         case .compactEnglish:
@@ -423,7 +433,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     /// language handling is fixed (picker hidden, `fixedLanguageLabel` shown).
     nonisolated var selectableLanguages: [SupportedLanguage]? {
         switch self {
-        case .multilingual:
+        case .multilingual, .multilingualUltra:
             return SupportedLanguage.allCases.filter { $0 != .chinese }
         case .nemotronMultilingual:
             return SupportedLanguage.allCases
@@ -440,7 +450,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         case .englishOnly, .compactEnglish, .parakeetEou320,
              .nemotron560, .nemotron1120, .nemotron2240:
             return "English"
-        case .multilingual, .nemotronMultilingual:
+        case .multilingual, .multilingualUltra, .nemotronMultilingual:
             return nil
         }
     }
@@ -449,7 +459,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         switch self {
         case .senseVoice, .nemotronMultilingual:
             return true
-        case .multilingual:
+        case .multilingual, .multilingualUltra:
             return language != .chinese
         case .englishOnly, .compactEnglish, .parakeetEou320,
              .nemotron560, .nemotron1120, .nemotron2240:
@@ -457,13 +467,13 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         }
     }
 
-    /// FluidAudio vocabulary rescoring runs terms through the English-only
-    /// ctc110m tokenizer — unusable for Han text, so the Mandarin-capable
-    /// models opt out.
+    /// Only TDT batch models use the app's CTC vocabulary finalizer. Native
+    /// streaming decoders must not advertise a mode their finish path ignores.
     nonisolated var supportsFluidAudioVocabulary: Bool {
         switch self {
-        case .senseVoice, .nemotronMultilingual: return false
-        default: return true
+        case .multilingual, .multilingualUltra, .englishOnly, .compactEnglish: return true
+        case .senseVoice, .parakeetEou320, .nemotron560, .nemotron1120,
+             .nemotron2240, .nemotronMultilingual: return false
         }
     }
 
@@ -484,7 +494,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         switch self {
         case .nemotronMultilingual:
             return true
-        case .multilingual, .englishOnly, .compactEnglish, .parakeetEou320,
+        case .multilingual, .multilingualUltra, .englishOnly, .compactEnglish, .parakeetEou320,
              .nemotron560, .nemotron1120, .nemotron2240, .senseVoice:
             return false
         }

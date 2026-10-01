@@ -33,12 +33,6 @@ and are not production absolute timings.
 
 The command runs the following deterministic or opt-in scenarios:
 
-The pending-audio workload shares the production preview interval, delta
-predicate, commit threshold, and chunk size. Its 60-second continuous-speech
-fixture requests 120 previews and processes 31,840,000 pending samples for
-960,000 captured samples (33.17x). These counts describe the current policy's
-repeated buffer work; they do not measure inference time or transcript quality.
-
 Use registered groups to run focused benchmarks:
 
 ```sh
@@ -52,15 +46,28 @@ Use registered groups to run focused benchmarks:
 are deduplicated. The default is `all`; unknown or empty groups fail before
 building. Groups are registered with their descriptions and Xcode test
 selectors in one catalog in `scripts/dev.sh`. Add new benchmark selectors
-there to make them available through `--list` and focused runs. Benchmarks
+there to make them available through `--list` and focused runs. Use
+`--only asr-quality` for golden quality, paired policies, model setup and encoder
+comparisons; `--only cleanup` runs the local cleanup checks. Benchmarks
 compile both app and tests with `-O` for consistent helper comparisons.
+
+The pending-audio workload shares the production preview predicate and 15-second
+preview bound. Its 60-second speech simulation requests 60 previews, including
+the initial 500 ms guess; it counts SDK overlap windows and the final flush too.
+It compares this work against the parent's 120 previews and 31,840,000 pending
+samples. This overlap count applies to v3-family/110M finalization; v2 uses a
+whole-recording batch finalizer. Counts describe scheduled audio work, not CPU
+time or transcript quality.
 
 | Component | Coverage |
 | --- | --- |
 | Offline ASR | Replays the bundled speech fixture through installed Parakeet and available Apple Speech engines. Reports latency, duration, median real-time factor, and beginning/end recognition sentinels. |
 | Mandarin ASR quality | Replays the four bundled, referenced Mandarin fixtures through installed SenseVoice. Reports CER and per-fixture p50/p95; skips if the model is not installed. |
 | User audio quality | If both `PIPELINE_BENCHMARK_AUDIO_PATH` and `PIPELINE_BENCHMARK_REFERENCE_PATH` are provided, replays a local 16 kHz mono fixture and reports WER. No audio or reference content is uploaded or logged by the harness. |
-| Pending audio workload | Models the non-streaming preview's repeated sample processing; no model inference or audio quality is measured. |
+| Pending audio workload | Counts bounded previews and authoritative overlap windows against the parent workload; no model inference or audio quality is measured. |
+| Model policy comparison | With `PIPELINE_BENCHMARK_FIXTURE` or external audio/reference paths and an installed batch model, alternates parent/candidate order and shifts seams. Reports WER/CER, total processing time, Stop time and first-visible audio position using production candidate paths. Gates mean error and total time against the parent policy. |
+| Golden human speech | Opt in with `PIPELINE_BENCHMARK_GOLDEN=1` or select `PIPELINE_BENCHMARK_FIXTURE`. Replays bundled human English, Mandarin, Dutch, German and derived boundary/language-switch cases. Uses live batch iteration/Stop or native streaming recovery. Reports per-model/fixture error and timing; missing models and unsupported languages skip. |
+| Encoder placement | Opt in with `PIPELINE_BENCHMARK_ENCODER=1` and `multilingual` or `multilingualUltra`. Alternates ANE/GPU order on the supported golden clips and reports exact errors and per-trial decode times. First-use compilation is visible; compare warm trials separately. |
 | Audio polling | Processes fixed sample windows and measures RMS/smoothing plus meaningful-display-change decisions. |
 | PCM buffer creation | Repeatedly calls the app's 4096-frame 16 kHz buffer builder. XCTest records clock, CPU, and memory metrics. |
 | Cloud request encoding | Converts 60 s of synthetic samples to PCM16 and builds AssemblyAI's multipart body, without network access. XCTest records clock, CPU, and memory. |
@@ -70,12 +77,17 @@ compile both app and tests with `-O` for consistent helper comparisons.
 | Paste script compilation | Compares repeated AppleScript compilation with the production precompile and cached path, without sending keystrokes. |
 | S1-mini policy | Exercises the production startup-prewarm decision matrix. |
 | S1-mini model load | Measures production prewarm with the app's validated installed model, or an explicit `S1_MINI_MODEL_PATH`; never downloads. |
-| S1-mini cleanup | With the app's validated installed model, or `S1_MINI_MODEL_PATH`, runs short and long text through the real local cleanup service and reports cold/warm request timings. |
+| S1-mini cleanup | With the app's validated installed model, or `S1_MINI_MODEL_PATH`, runs short, long and over-limit text through the real local cleanup service and reports cold/warm request timings. |
 | Apple Intelligence cleanup | Runs a fixed cleanup prompt through the on-device Foundation Models service when available. Schema success and fallback are visible in performance traces. |
 | Model switching | With `RUN_MODEL_SWITCH_BENCHMARK=1` and at least two installed models, times a fixed model-switch sequence. |
 
 Set `PIPELINE_BENCHMARK_MODEL=all` to sweep models already installed on this
-Mac; the default is `parakeetEou320`. The suite does not download models.
+Mac; the default is `parakeetEou320`. Ordinary benchmark runs do not download
+models. Explicitly set `PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1` to run the app's
+downloader for the selected model(s) first. Downloads go into the persistent
+`~/Library/Application Support/FluidAudio/Models` cache used by the app; this is
+not a separate benchmark cache. With `PIPELINE_BENCHMARK_MODEL=all`, the setup
+step installs each local model supported by the host. It can require several GB.
 The benchmark command forwards the documented environment variables to the
 XCTest host using Xcode's `TEST_RUNNER_` convention
 ([Xcode 13 release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-13-release-notes));
@@ -88,12 +100,35 @@ tests cap their iteration count at 10, so their p95 values are exploratory.
 S1-mini's first request after unload measures model initialization, but the
 operating system's file and Metal shader caches may already be warm; restart
 the test host for a truly cold-process comparison.
+FluidAudio is pinned to 0.17.5; llama.swift is pinned to 2.10549.0. SDK speech
+debug logging is disabled unless explicitly enabled in a local Debug build.
+Use a separate stable `DERIVED_DATA_PATH` for each worktree to avoid sharing
+Xcode build products.
+
+The bundled [golden reference inventory](../Dictate%20AnywhereTests/Fixtures/Golden/README.md)
+includes exact references, license, source IDs, hashes and reproduction commands.
+For example, select `PIPELINE_BENCHMARK_MODEL=multilingual` and
+`PIPELINE_BENCHMARK_FIXTURE=golden-en-boundaries` for the paired TDT comparison;
+select `senseVoice` and `golden-zh-boundaries` for pause segmentation. The paired
+comparison replays 500 ms blocks without real-time sleeps. Its total time measures
+recognition work, and its Stop time measures the remaining flush; neither measures
+real microphone UI latency. The parent reference implementation retains the old
+30/20-second commit policy, 500 ms previews and longest-text final choice.
+Default paired runs shift seams by 0, 500 and 1000 ms, alternate execution order,
+and report mean error/time; these are small regression probes, not population WER.
+If a bundled public golden regresses, the paired harness prints both final
+transcripts for that trial to help locate the failed seam. External recordings
+never have their transcript or reference printed by the harness.
+First-visible audio position is the amount fed when text appears, not wall-clock
+user latency. Golden quality inventory uses the manifest's supported languages
+and WER/CER metric, and deliberately has no uncalibrated model-independent gate.
+
 When supplying your own audio, optionally set `PIPELINE_BENCHMARK_MAX_WER=0.3`
-to enforce an agreed quality gate. An external real-voice fixture is useful
-because the bundled Mandarin recordings are synthetic speech; see the
-[LibriSpeech corpus](https://openslr.org/12) (CC BY 4.0) for a source with
-reference transcripts. Keep any separately sourced fixture's license and
-provenance with that fixture.
+to enforce an agreed WER gate for the user audio benchmark. The paired comparison
+also accepts `PIPELINE_BENCHMARK_METRIC=cer` for external Mandarin references;
+external paths default to WER. Bundled human recordings supplement the existing
+synthetic Mandarin recordings. Keep separately sourced fixtures' licenses and
+provenance with them.
 
 These benchmarks do not measure real Accessibility activation, target-app paste
 latency, Core Audio or Bluetooth routing, or microphone startup. Those remain

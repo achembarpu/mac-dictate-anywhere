@@ -42,8 +42,11 @@ Instruments and in historical logs.
 
 Filter by `session_id` to compare one dictation. `input_samples`, `new_samples`,
 and `reprocessed_samples` on `stt.batchPreview` describe each call, not the
-entire recording. `stt.transcribe` nests beneath preview, commit, or final-tail
-spans. The first-partial event means recognition produced nonempty, non-final
+entire recording. `stt.batchVAD` measures batch speech qualification and
+SenseVoice pause detection, with input sample counts and explicit outcomes.
+`stt.transcribe` records Apple Speech and AssemblyAI final recognition and local
+vocabulary fallback decodes; batch sessions use the batch intervals. The
+first-partial event means recognition produced nonempty, non-final
 live text; it is not a UI-render or audio-callback timestamp. A missing event
 means no live partial appeared. `audio.captureSummary` records captured and
 dropped pending samples for Parakeet; it does not measure Core Audio hardware overruns.
@@ -58,10 +61,10 @@ S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local
 | --- | --- |
 | Startup and switching | `app.startup`, `app.permissionCheck`, `app.appleSpeechAssetRefresh`, `app.inputSourceApply`, `stt.prepare`, `stt.modelSwitch`, `stt.enginePrepare`, `stt.modelLoad` |
 | Accepted hotkey request to confirmed microphone capture | `dictation.requestToRecording`, `dictation.inputSourceApply`, `dictation.capture`, `dictation.contextCapture`, `dictation.start`, `audio.startup`, `audio.settle`, `audio.controllerWait`, `audio.controllerCreate`, `audio.microphoneBoost`, `audio.systemMute` |
-| Live recognition availability | `stt.firstPartial`, `stt.batchPreview`, `stt.chunkCommit`, `stt.streamingProcess`, `stt.transcribe`, `audio.captureSummary`; Apple Speech reports `stt.appleSpeechSessionStart`, `stt.appleSpeechAssetInstall`, `stt.appleSpeechAnalyzerPrepare`, `stt.appleSpeechInputSummary`; AssemblyAI also reports `stt.livePreviewStart` and `stt.assemblyAIWarmConnection` |
+| Live recognition availability | `stt.firstPartial`, `stt.batchPreview`, `stt.batchVAD`, `stt.streamingProcess`, `stt.transcribe`, `audio.captureSummary`; Apple Speech reports `stt.appleSpeechSessionStart`, `stt.appleSpeechAssetInstall`, `stt.appleSpeechAnalyzerPrepare`, `stt.appleSpeechInputSummary`; AssemblyAI also reports `stt.livePreviewStart` and `stt.assemblyAIWarmConnection` |
 | Automatic end-of-utterance | `eou.detected`, `eou.stop`, followed by the regular stop path |
-| Stop recording to final transcript | `dictation.stopToInsertion`, `stt.stopToFinal`, `audio.teardown` (first controller shutdown), `stt.livePreviewStop` (AssemblyAI preview), `stt.finalize`, `stt.finalTail`, `stt.streamingFinish`, `stt.finalVocabulary`, `stt.transcribe` |
-| FluidAudio vocabulary final pass | `stt.vocabularyBoost`, `stt.ctcModelLoad`, `stt.ctcTokenizerLoad`, `stt.vocabularyEncode`, `stt.vocabularyManagerSetup`, `stt.vocabularyInference`, `stt.vocabularyCleanup` |
+| Stop recording to final transcript | `dictation.stopToInsertion`, `stt.stopToFinal`, `audio.teardown` (first controller shutdown), `stt.livePreviewStop` (AssemblyAI preview), `stt.finalize`, `stt.batchFinish`, `stt.streamingFinish`, `stt.transcribe` |
+| FluidAudio vocabulary final pass | `stt.vocabularyBoost`, `stt.ctcModelLoad`, `stt.vocabularyInference` |
 | AssemblyAI final request | `stt.assemblyAIFinal`, `stt.assemblyAIRequestBuild`, `stt.assemblyAIRequest`, `stt.assemblyAIResponseDecode`, `stt.warmConnectionWait` |
 | Local cleanup | `cleanup.validate`, `cleanup.request`, `cleanup.modelLoad`, `cleanup.tokenize`, `cleanup.promptEval`, `cleanup.decode`, `cleanup.generate` |
 | Apple Intelligence cleanup | `cleanup.appleIntelligenceSchema`, `cleanup.appleIntelligenceSchemaAccepted`, `cleanup.appleIntelligenceToolsFallback`, `cleanup.appleIntelligenceTools` |

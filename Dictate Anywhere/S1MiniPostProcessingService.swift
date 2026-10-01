@@ -162,6 +162,7 @@ enum S1MiniServiceError: LocalizedError {
     case transcriptTooLong(actual: Int, maximum: Int)
     case promptEvaluationFailed(Int32)
     case tokenEvaluationFailed(Int32)
+    case outputLimitReached
     case invalidOutput
 
     var errorDescription: String? {
@@ -180,6 +181,8 @@ enum S1MiniServiceError: LocalizedError {
             return "S1-mini could not evaluate the transcript (code \(code))."
         case .tokenEvaluationFailed(let code):
             return "S1-mini stopped while generating cleaned text (code \(code))."
+        case .outputLimitReached:
+            return "S1-mini reached its output limit before finishing cleanup."
         case .invalidOutput:
             return "S1-mini returned invalid text."
         }
@@ -214,6 +217,16 @@ actor S1MiniInferenceEngine {
         loadedModelPath = nil
     }
 
+    func transcriptChunks(_ text: String, modelURL: URL) throws -> [String] {
+        let model = try loadModelIfNeeded(from: modelURL)
+        guard let vocabulary = llama_model_get_vocab(model) else {
+            throw S1MiniServiceError.modelLoadFailed
+        }
+        return try S1MiniTranscriptChunker.chunks(text, maximumTokens: S1MiniModelSpec.maximumTranscriptTokens) {
+            try tokenize($0, vocabulary: vocabulary, addSpecial: false, parseSpecial: false).count
+        }
+    }
+
     func generate(
         prompt: String,
         transcript: String,
@@ -232,10 +245,7 @@ actor S1MiniInferenceEngine {
             vocabulary: vocabulary
         )
         var promptTokens = initialPromptTokens
-        let maximumOutputTokens = min(
-            1_024,
-            max(32, Int(ceil(Double(transcriptTokenCount) * 1.3)) + 32)
-        )
+        let maximumOutputTokens = max(32, Int(ceil(Double(transcriptTokenCount) * 1.3)) + 32)
         trace.recordCounts([
             "input_tokens": transcriptTokenCount,
             "prompt_tokens": promptTokens.count
@@ -344,11 +354,16 @@ actor S1MiniInferenceEngine {
         defer { trace.end() }
         var output = Data()
         var outputTokenCount = 0
-        for _ in 0..<maximumOutputTokens {
+        for _ in 0...maximumOutputTokens {
             try Task.checkCancellation()
             let token = llama_sampler_sample(sampler, context, -1)
             if llama_vocab_is_eog(vocabulary, token) {
-                break
+                trace.recordCounts(["output_tokens": outputTokenCount])
+                return (output, outputTokenCount)
+            }
+            guard outputTokenCount < maximumOutputTokens else {
+                trace.recordCounts(["output_tokens": outputTokenCount])
+                throw S1MiniServiceError.outputLimitReached
             }
             outputTokenCount += 1
             output.append(try piece(for: token, vocabulary: vocabulary))
@@ -362,8 +377,7 @@ actor S1MiniInferenceEngine {
                 throw S1MiniServiceError.tokenEvaluationFailed(tokenStatus)
             }
         }
-        trace.recordCounts(["output_tokens": outputTokenCount])
-        return (output, outputTokenCount)
+        throw S1MiniServiceError.outputLimitReached
     }
 
     /// Loads the cached model or the model at `url`. Internal (not private)
@@ -485,11 +499,40 @@ enum S1MiniPostProcessingService {
         let trace = PerfTrace.begin("cleanup.request")
         defer { trace.end() }
         let resolvedContext = contextSetting.resolved(for: context)
+        do {
+            return try await processChunk(text, modelURL: modelURL, styling: styling,
+                                          structure: structure, context: resolvedContext)
+        } catch S1MiniServiceError.transcriptTooLong {
+            // The author recommends sentence chunks near 1,000 input tokens.
+            // Short dictation keeps the existing single-request fast path.
+            let chunks = try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: modelURL)
+            var results: [String] = []
+            do {
+                for chunk in chunks {
+                    try Task.checkCancellation()
+                    results.append(try await processChunk(chunk, modelURL: modelURL, styling: styling,
+                                                         structure: structure, context: resolvedContext))
+                }
+            } catch S1MiniServiceError.outputLimitReached {
+                trace.end(outcome: "output_limit_fallback")
+                return text
+            }
+            return results.joined(separator: structure == .lists ? "\n" : " ")
+        } catch S1MiniServiceError.outputLimitReached {
+            trace.end(outcome: "output_limit_fallback")
+            return text
+        }
+    }
+
+    private static func processChunk(
+        _ text: String, modelURL: URL, styling: S1MiniStyling,
+        structure: S1MiniStructure, context: String
+    ) async throws -> String {
         let prompt = S1MiniPromptBuilder.prompt(
             transcript: text,
             styling: styling,
             structure: structure,
-            context: resolvedContext
+            context: context
         )
         let output = try await S1MiniInferenceEngine.shared.generate(
             prompt: prompt,
@@ -529,6 +572,50 @@ enum S1MiniPostProcessingService {
         } catch {
             return false
         }
+    }
+}
+
+/// Preserve every input character and prefer sentence boundaries. The supplied
+/// counter is the installed model's tokenizer, not a word-count approximation.
+nonisolated enum S1MiniTranscriptChunker {
+    static func chunks(_ text: String, maximumTokens: Int, tokenCount: (String) throws -> Int) throws -> [String] {
+        precondition(maximumTokens > 0)
+        var remaining = text
+        var result: [String] = []
+        while !remaining.isEmpty {
+            try Task.checkCancellation()
+            let count = try tokenCount(remaining)
+            if count <= maximumTokens { result.append(remaining); break }
+            let characters = Array(remaining)
+            var low = 0, high = characters.count
+            // Tokenization can merge a suffix. Every selected boundary is
+            // checked again below; binary search only finds a useful bound.
+            while low + 1 < high {
+                let middle = (low + high) / 2
+                if try tokenCount(String(characters.prefix(middle))) <= maximumTokens { low = middle }
+                else { high = middle }
+            }
+            let boundaries = (1...max(1, low)).filter { characters[$0 - 1].isWhitespace }
+            let sentences = boundaries.filter { index in
+                characters[index - 1].isNewline || (index > 1 && ".!?".contains(characters[index - 2]))
+            }
+            let preferred = sentences.last(where: { $0 >= low / 2 }) ?? boundaries.last
+            guard var end = preferred else {
+                // Do not insert a space into an unbroken word that cannot fit.
+                throw S1MiniServiceError.transcriptTooLong(actual: count, maximum: maximumTokens)
+            }
+            var chunk = String(characters.prefix(end))
+            while try tokenCount(chunk) > maximumTokens {
+                guard let earlier = boundaries.last(where: { $0 < end }) else {
+                    throw S1MiniServiceError.transcriptTooLong(actual: count, maximum: maximumTokens)
+                }
+                end = earlier
+                chunk = String(characters.prefix(end))
+            }
+            result.append(chunk)
+            remaining = String(characters.dropFirst(end))
+        }
+        return result
     }
 }
 

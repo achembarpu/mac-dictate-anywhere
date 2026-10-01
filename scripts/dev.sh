@@ -66,6 +66,7 @@ require_command() {
 benchmark_catalog() {
   cat <<'EOF'
 asr|Installed-model speech accuracy and latency|RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark RecoveryASRSmokeTests/testInstalledMandarinASRBenchmark RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark
+asr-quality|Golden speech, model-policy and encoder comparisons|RecoveryASRSmokeTests/testDownloadModelsIntoApplicationCache RecoveryASRSmokeTests/testModelAwareBatchComparisonBenchmark RecoveryASRSmokeTests/testGoldenSpeechReferenceBenchmark RecoveryASRSmokeTests/testTDTEncoderPlacementBenchmark
 preview|Non-streaming pending-audio work|RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark
 audio|Meter polling and PCM buffer construction|PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark PipelineWorkloadBenchmarkTests/testPCMBufferConstruction
 overlay|Preview observation and suffix cost|OverlayContentTests OverlayPerformanceBenchmarkTests
@@ -281,6 +282,8 @@ run_benchmark() {
   for name in DICTATE_ANYWHERE_PERF_TRACE PIPELINE_BENCHMARK_ITERATIONS \
     PIPELINE_BENCHMARK_MODEL PIPELINE_BENCHMARK_AUDIO_PATH \
     PIPELINE_BENCHMARK_REFERENCE_PATH PIPELINE_BENCHMARK_MAX_WER \
+    PIPELINE_BENCHMARK_FIXTURE PIPELINE_BENCHMARK_GOLDEN PIPELINE_BENCHMARK_METRIC \
+    PIPELINE_BENCHMARK_DOWNLOAD_MODELS PIPELINE_BENCHMARK_ENCODER \
     S1_MINI_MODEL_PATH RUN_MODEL_SWITCH_BENCHMARK; do
     if [[ -n "${!name:-}" ]]; then
       benchmark_test_environment+=("TEST_RUNNER_${name}=${!name}")

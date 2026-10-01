@@ -137,7 +137,8 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
             for (name, text) in [
                 ("short", "Um, I think we should send the report tomorrow."),
                 ("long", Array(repeating: "We reviewed the project and agreed on the next steps.", count: 12)
-                    .joined(separator: " "))
+                    .joined(separator: " ")),
+                ("over_limit", (1...110).map { "Please keep invoice \($0) and send the report tomorrow." }.joined(separator: " "))
             ] {
                 var latencies: [Double] = []
                 for iteration in 1...iterations {
@@ -152,6 +153,10 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
                     )
                     latencies.append(BenchmarkStatistics.elapsedMilliseconds(from: start))
                     XCTAssertFalse(output.isEmpty)
+                    if name == "over_limit" {
+                        let numbers = output.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+                        XCTAssertEqual(Set(numbers), Set(1...110), "Long cleanup lost a numbered invoice")
+                    }
                 }
                 print("PIPELINE_BENCHMARK component=s1_mini_cleanup fixture=\(name) first_request_ms=\(latencies[0]) cold_model=\(name == "short")")
                 if latencies.count > 1 {

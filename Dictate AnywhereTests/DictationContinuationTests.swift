@@ -394,13 +394,15 @@ final class DictationContinuationTests: XCTestCase {
         let engineCancelled = expectation(description: "engine cancelled")
         engine.onCancel = { engineCancelled.fulfill() }
         let app = app(engine: engine)
+        var shutdownTask: Task<Void, Never>?
         engine.onSetSessionContextualVocabulary = { [weak app] in
             engine.onSetSessionContextualVocabulary = nil
-            Task { await app?.shutdown() }
+            shutdownTask = Task { if let app { await app.shutdown() } }
         }
 
         await app.startDictation()
         await fulfillment(of: [engineCancelled], timeout: 1)
+        await shutdownTask?.value
 
         XCTAssertEqual(engine.events, ["cancel"])
         XCTAssertEqual(app.status, .idle)

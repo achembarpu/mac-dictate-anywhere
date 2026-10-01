@@ -446,4 +446,15 @@ final class ModelAndModeTests: XCTestCase {
         XCTAssertFalse(ParakeetModelChoice.nemotronMultilingual.supportsFluidAudioVocabulary)
         XCTAssertTrue(ParakeetModelChoice.multilingual.supportsFluidAudioVocabulary)
     }
+
+    func testNativeStreamingDoesNotOfferUnusedCTCVocabularyFinalizer() {
+        for model in ParakeetModelChoice.allCases where model.usesTrueStreaming {
+            XCTAssertFalse(model.supportsFluidAudioVocabulary, model.rawValue)
+        }
+        XCTAssertTrue(ParakeetModelChoice.multilingualUltra.supportsFluidAudioVocabulary)
+        XCTAssertEqual(ParakeetModelChoice.multilingualUltra.selectableLanguages,
+                       ParakeetModelChoice.multilingual.selectableLanguages)
+        XCTAssertFalse(ParakeetModelChoice.multilingualUltra.usesTrueStreaming)
+        XCTAssertTrue(ParakeetModelChoice.multilingualUltra.isAvailable(hasNeuralEngine: false))
+    }
 }
