@@ -14,6 +14,7 @@ enum S1MiniModelManagerError: LocalizedError {
     case unexpectedFileSize(actual: Int64, expected: Int64)
     case checksumMismatch
     case missingLicense
+    case changedDuringValidation
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +28,8 @@ enum S1MiniModelManagerError: LocalizedError {
             return "The S1-mini download failed its integrity check."
         case .missingLicense:
             return "The S1-mini license could not be downloaded."
+        case .changedDuringValidation:
+            return "The S1-mini model changed while its integrity was being checked."
         }
     }
 }
@@ -205,6 +208,12 @@ final class S1MiniModelManager {
         let modificationDate: Date
     }
 
+    private struct InstalledValidation {
+        let id: UUID
+        let fingerprint: Fingerprint
+        let task: Task<Void, Error>
+    }
+
     private(set) var isModelDownloaded: Bool
     private(set) var isDownloading = false
     private(set) var isDeleting = false
@@ -217,9 +226,15 @@ final class S1MiniModelManager {
     let licenseURL: URL
 
     private var verifiedFingerprint: Fingerprint?
+    @ObservationIgnored private var installedValidation: InstalledValidation?
+    @ObservationIgnored private let integrityValidator: @Sendable (URL) throws -> Void
 
-    init(modelDirectory: URL = S1MiniModelManager.defaultModelDirectory) {
+    init(
+        modelDirectory: URL = S1MiniModelManager.defaultModelDirectory,
+        integrityValidator: @escaping @Sendable (URL) throws -> Void = S1MiniModelIntegrity.validate
+    ) {
         self.modelDirectory = modelDirectory
+        self.integrityValidator = integrityValidator
         modelURL = modelDirectory.appendingPathComponent(S1MiniModelSpec.filename)
         licenseURL = modelDirectory.appendingPathComponent("LICENSE")
         isModelDownloaded = Self.hasCompleteInstallation(
@@ -241,17 +256,8 @@ final class S1MiniModelManager {
 
     func refreshInstallationState() async {
         guard !isDownloading, !isDeleting else { return }
-        guard Self.hasCompleteInstallation(modelURL: modelURL, licenseURL: licenseURL) else {
-            isModelDownloaded = false
-            verifiedFingerprint = nil
-            return
-        }
-
-        isVerifying = true
-        defer { isVerifying = false }
         do {
-            try await validateModel(at: modelURL)
-            isModelDownloaded = true
+            _ = try await validatedModelURL()
             lastError = nil
         } catch {
             isModelDownloaded = false
@@ -269,9 +275,7 @@ final class S1MiniModelManager {
         }
         let fingerprint = try Self.fingerprint(at: modelURL)
         if fingerprint != verifiedFingerprint {
-            isVerifying = true
-            defer { isVerifying = false }
-            try await validateModel(at: modelURL)
+            try await validateInstalledModel(fingerprint: fingerprint)
         }
         isModelDownloaded = true
         return modelURL
@@ -322,7 +326,9 @@ final class S1MiniModelManager {
             }
             let response = try await downloader.download(from: S1MiniModelSpec.downloadURL)
             try Self.requireSuccessfulHTTPResponse(response)
-            try await validateModel(at: stagedModelURL, cacheFingerprint: false)
+            try await Task.detached(priority: .utility) {
+                try S1MiniModelIntegrity.validate(stagedModelURL)
+            }.value
 
             let (licenseData, licenseResponse) = try await URLSession.shared.data(
                 from: S1MiniModelSpec.licenseURL
@@ -380,12 +386,38 @@ final class S1MiniModelManager {
         downloadProgress = 0
     }
 
-    private func validateModel(at url: URL, cacheFingerprint: Bool = true) async throws {
-        try await Task.detached(priority: .utility) {
-            try S1MiniModelIntegrity.validate(url)
-        }.value
-        if cacheFingerprint {
-            verifiedFingerprint = try Self.fingerprint(at: url)
+    private func validateInstalledModel(fingerprint: Fingerprint) async throws {
+        let validation: InstalledValidation
+        if let inFlight = installedValidation, inFlight.fingerprint == fingerprint {
+            validation = inFlight
+        } else {
+            let validator = integrityValidator
+            let url = modelURL
+            let task = Task.detached(priority: .utility) {
+                try validator(url)
+            }
+            validation = InstalledValidation(id: UUID(), fingerprint: fingerprint, task: task)
+            installedValidation = validation
+            isVerifying = true
+        }
+
+        do {
+            try await validation.task.value
+            guard try Self.fingerprint(at: modelURL) == fingerprint else {
+                throw S1MiniModelManagerError.changedDuringValidation
+            }
+            verifiedFingerprint = fingerprint
+            if installedValidation?.id == validation.id {
+                installedValidation = nil
+                isVerifying = false
+            }
+        } catch {
+            if installedValidation?.id == validation.id {
+                installedValidation = nil
+                isVerifying = false
+                verifiedFingerprint = nil
+            }
+            throw error
         }
     }
 
