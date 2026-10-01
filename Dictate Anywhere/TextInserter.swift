@@ -124,8 +124,15 @@ final class TextInserter {
             return .copiedOnly
         }
 
-        // Small delay for clipboard to settle
-        try? await Task.sleep(for: .milliseconds(80))
+        // Copying already verified read-back. Only wait if another pasteboard
+        // read cannot yet see the text, with the former delay as a deadline.
+        let clipboardReadyTrace = PerfTrace.begin("insertion.clipboardReady")
+        let clipboardDeadline = ContinuousClock.now + .milliseconds(80)
+        while NSPasteboard.general.string(forType: .string) != insertionText {
+            guard !Task.isCancelled, ContinuousClock.now < clipboardDeadline else { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        clipboardReadyTrace.end()
 
         // Plain-text numbering needs one verified replacement, not a second
         // blind edit after pasting. If the snapshot is stale, leave the text on

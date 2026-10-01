@@ -1809,8 +1809,11 @@ final class AppState {
         let trace = PerfTrace.begin("insertion.targetActivation")
         defer { trace.end() }
         guard let app = insertionTargetApp, !app.isTerminated else { return }
-        if app.activate() {
-            try? await Task.sleep(for: .milliseconds(120))
+        guard app.activate() else { return }
+        let deadline = ContinuousClock.now + .milliseconds(120)
+        while NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
+            guard !Task.isCancelled, ContinuousClock.now < deadline else { break }
+            try? await Task.sleep(for: .milliseconds(8))
         }
     }
 
