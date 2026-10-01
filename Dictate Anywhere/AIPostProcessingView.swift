@@ -71,13 +71,6 @@ struct AIPostProcessingView: View {
                         title: \.displayName
                     )
                 }
-                if settings.engineChoice == .parakeet,
-                   !settings.parakeetModelChoice.supportsFluidAudioVocabulary {
-                    DSDivider()
-                    cardPadded {
-                        DSHint(text: "FluidAudio Vocabulary is unavailable for the selected speech model — its terminology rescoring supports English text only.")
-                    }
-                }
             }
 
             // Setup for the selected method sits directly under the picker, so
@@ -159,10 +152,7 @@ struct AIPostProcessingView: View {
                 appleIntelligenceContent(settings: settings)
             } else {
                 DSSection(overline: "Apple Intelligence") {
-                    cardPanel(
-                        "Apple Intelligence transcript processing requires macOS 26 or later. Choose another cleanup method on this Mac.",
-                        icon: "exclamationmark.triangle"
-                    )
+                    DSInfoRow(label: "Status", value: "Requires macOS 26")
                 }
             }
         case .s1Mini:
@@ -580,15 +570,6 @@ struct AIPostProcessingView: View {
             .padding(.horizontal, DS.Spacing.rowHorizontal)
     }
 
-    /// Blocking notice rendered inside a card, so a warning always reads as
-    /// belonging to the section it sits in rather than floating between two.
-    @ViewBuilder
-    private func cardPanel(_ text: String, icon: String) -> some View {
-        DSPanel(text: text, icon: icon)
-            .padding(.vertical, 12)
-            .padding(.horizontal, DS.Spacing.rowHorizontal)
-    }
-
     @ViewBuilder
     private func cardPadded<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -662,12 +643,9 @@ struct AIPostProcessingView: View {
 
     @ViewBuilder
     private func fluidAudioVocabularyContent(settings: Settings) -> some View {
-        if settings.parakeetModelChoice.usesTrueStreaming {
+        if settings.engineChoice != .parakeet || !settings.parakeetModelChoice.supportsFluidAudioVocabulary {
             DSSection(overline: "FluidAudio Vocabulary") {
-                cardPanel(
-                    "FluidAudio Vocabulary is only available with Parakeet TDT models. Choose Multilingual, English Only, or English Compact on the Speech Model page to use vocabulary rescoring. For streaming models, pick Apple Intelligence, S1-mini by Superwhisper, Ollama, OpenRouter, or OpenAI Compatible instead.",
-                    icon: "exclamationmark.triangle"
-                )
+                DSInfoRow(label: "Status", value: "Requires a Parakeet TDT model")
             }
         } else if settings.transcriptPostProcessingMode.supportedFeatures.contains(.customVocabulary) {
             vocabularySection(
@@ -711,31 +689,25 @@ struct AIPostProcessingView: View {
 
         case .unavailable(.deviceNotEligible):
             DSSection(overline: "Apple Intelligence") {
-                cardPanel(
-                    "This Mac doesn't support Apple Intelligence. Pick another cleanup method — S1-mini by Superwhisper also runs entirely on this Mac.",
-                    icon: "xmark.circle"
-                )
+                DSInfoRow(label: "Status", value: "Unavailable on this Mac")
             }
 
         case .unavailable(.appleIntelligenceNotEnabled):
             DSSection(overline: "Apple Intelligence") {
-                cardPadded {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .foregroundStyle(DS.Colors.accentDeep)
-                        Text("Apple Intelligence is not enabled")
-                            .font(DS.Fonts.ui(13.5, .medium))
-                            .foregroundStyle(DS.Colors.ink)
-                    }
-                    Button("Open Apple Intelligence Settings") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.AppleIntelligence") {
-                            NSWorkspace.shared.open(url)
+                DSInfoRow(label: "Status") {
+                    HStack(spacing: 10) {
+                        DSStatusPill(
+                            text: "Not enabled",
+                            dotColor: DS.Colors.textSecondary,
+                            textColor: DS.Colors.textSecondary,
+                            fill: DS.Colors.bgInset
+                        )
+                        Button("Open Settings") {
+                            appState.resolveAttentionIssue(.cleanup(.appleIntelligenceNotEnabled))
                         }
+                        .buttonStyle(.dsPrimary)
                     }
-                    .buttonStyle(.dsPrimary)
                 }
-                DSDivider()
-                cardCaption("Enable Apple Intelligence in System Settings to use AI Post Processing.")
             }
 
         case .unavailable(.modelNotReady):
@@ -757,10 +729,7 @@ struct AIPostProcessingView: View {
 
         case .unavailable(_):
             DSSection(overline: "Apple Intelligence") {
-                cardPanel(
-                    "Apple Intelligence is currently unavailable. Try again later.",
-                    icon: "exclamationmark.triangle"
-                )
+                DSInfoRow(label: "Status", value: "Temporarily unavailable")
             }
         }
     }
@@ -773,13 +742,6 @@ struct AIPostProcessingView: View {
         let manager = appState.s1MiniModelManager
 
         DSSection(overline: "S1-mini by Superwhisper") {
-            if activeSpeechLanguage(settings: settings) != .english {
-                cardPanel(
-                    "S1-mini supports English only. With the current speech language, Dictate Anywhere pastes the transcript without S1-mini cleanup.",
-                    icon: "exclamationmark.triangle"
-                )
-                DSDivider()
-            }
             cardPadded {
                 HStack(alignment: .center, spacing: 12) {
                     Image(systemName: s1MiniStatusIcon(manager: manager))
@@ -884,12 +846,6 @@ struct AIPostProcessingView: View {
                 )
             }
         }
-    }
-
-    private func activeSpeechLanguage(settings: Settings) -> SupportedLanguage {
-        settings.engineChoice == .appleSpeech
-            ? settings.appleSpeechLanguage
-            : settings.selectedLanguage
     }
 
     private func s1MiniStatusTitle(manager: S1MiniModelManager) -> String {

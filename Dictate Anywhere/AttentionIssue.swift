@@ -3,10 +3,26 @@ import Foundation
 /// Actionable setup problems shown in the single main-window banner.
 /// The order is deliberate: dictation blockers precede optional improvements.
 struct AttentionIssue: Identifiable, Equatable {
-    enum ID: String, Hashable {
+    enum CleanupProblem: Hashable {
+        case fluidAudioVocabularyUnavailable
+        case appleIntelligenceRequiresMacOS26
+        case appleIntelligenceDeviceIneligible
+        case appleIntelligenceNotEnabled
+        case appleIntelligenceUnavailable
+        case s1MiniLanguageUnsupported
+        case s1MiniNotDownloaded
+        case ollamaModelMissing
+        case openRouterKeyMissing
+        case openRouterModelMissing
+        case openAICompatibleModelMissing
+    }
+
+    enum ID: Hashable {
         case microphone
         case accessibility
         case speechSetup
+        case appleSpeechUnsupported
+        case cleanup(CleanupProblem)
         case automation
     }
 
@@ -23,7 +39,12 @@ struct AttentionIssue: Identifiable, Equatable {
         accessibilityGranted: Bool,
         engineChoice: TranscriptionEngineChoice,
         speechSetupNeeded: Bool,
-        automationDenied: Bool
+        automationDenied: Bool,
+        speechPreparationFailed: Bool = false,
+        legacyAppleSpeechMigrationPending: Bool = false,
+        appleSpeechUnsupportedSelection: Bool = false,
+        appleSpeechRequiresMacOS26: Bool = false,
+        cleanupProblems: [CleanupProblem] = []
     ) -> [AttentionIssue] {
         var issues: [AttentionIssue] = []
 
@@ -51,11 +72,19 @@ struct AttentionIssue: Identifiable, Equatable {
             let message: String
             switch engineChoice {
             case .appleSpeech:
-                message = "Set up Apple Speech to start dictating."
+                message = speechPreparationFailed
+                    ? "Apple Speech could not be prepared. Review Speech Model settings."
+                    : "Set up Apple Speech to start dictating."
             case .assemblyAI:
                 message = "Add an AssemblyAI API key to start dictating."
             case .parakeet:
-                message = "Download a speech model to start dictating."
+                if speechPreparationFailed {
+                    message = "The speech model could not be prepared. Review Speech Model settings."
+                } else if legacyAppleSpeechMigrationPending {
+                    message = "Apple Speech is unavailable here. Download a FluidAudio model to keep dictating."
+                } else {
+                    message = "Download a speech model to start dictating."
+                }
             }
             issues.append(AttentionIssue(
                 id: .speechSetup,
@@ -64,6 +93,22 @@ struct AttentionIssue: Identifiable, Equatable {
                 actionTitle: "Set Up",
                 isOptional: false
             ))
+        }
+
+        if appleSpeechUnsupportedSelection {
+            issues.append(AttentionIssue(
+                id: .appleSpeechUnsupported,
+                title: "Apple Speech is unavailable",
+                message: appleSpeechRequiresMacOS26
+                    ? "Apple Speech requires macOS 26 or later. Choose another speech engine."
+                    : "Apple Speech is unavailable on this Mac. Choose another speech engine.",
+                actionTitle: "Dismiss",
+                isOptional: true
+            ))
+        }
+
+        for problem in cleanupProblems {
+            issues.append(cleanupIssue(problem))
         }
 
         if permissionsChecked && automationDenied {
@@ -77,5 +122,46 @@ struct AttentionIssue: Identifiable, Equatable {
         }
 
         return issues
+    }
+
+    private static func cleanupIssue(_ problem: CleanupProblem) -> AttentionIssue {
+        let message: String
+        switch problem {
+        case .fluidAudioVocabularyUnavailable:
+            message = "Vocabulary rescoring needs a Parakeet TDT speech model."
+        case .appleIntelligenceRequiresMacOS26:
+            message = "Apple Intelligence cleanup requires macOS 26 or later. Choose another method."
+        case .appleIntelligenceDeviceIneligible:
+            message = "Apple Intelligence is unavailable on this Mac. Choose another cleanup method."
+        case .appleIntelligenceNotEnabled:
+            message = "Enable Apple Intelligence in System Settings to use it for cleanup."
+        case .appleIntelligenceUnavailable:
+            message = "Apple Intelligence is unavailable right now. Try again or choose another method."
+        case .s1MiniLanguageUnsupported:
+            message = "S1-mini cleans up English only. Other languages are pasted without S1-mini cleanup."
+        case .s1MiniNotDownloaded:
+            message = "Download S1-mini to use local transcript cleanup."
+        case .ollamaModelMissing:
+            message = "Choose an Ollama model to use transcript cleanup."
+        case .openRouterKeyMissing:
+            message = "Add an OpenRouter API key to use transcript cleanup."
+        case .openRouterModelMissing:
+            message = "Choose an OpenRouter model to use transcript cleanup."
+        case .openAICompatibleModelMissing:
+            message = "Choose a model on your OpenAI-compatible server to use transcript cleanup."
+        }
+        let actionTitle: String
+        switch problem {
+        case .fluidAudioVocabularyUnavailable: actionTitle = "Open Speech Model"
+        case .appleIntelligenceNotEnabled: actionTitle = "Open Settings"
+        default: actionTitle = "View Setup"
+        }
+        return AttentionIssue(
+            id: .cleanup(problem),
+            title: "Transcript cleanup needs attention",
+            message: message,
+            actionTitle: actionTitle,
+            isOptional: true
+        )
     }
 }

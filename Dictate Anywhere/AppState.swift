@@ -98,7 +98,7 @@ final class AppState {
     }
     var appleSpeechSupportedLanguages: [SupportedLanguage] = []
     var appleSpeechInstalledLanguages: [SupportedLanguage] = []
-    private var isShowingMigrationAlert = false
+    var appleSpeechUnsupportedSelection = false
 
     /// Whether the app is transitioning between states (simple guard)
     private var isTransitioning = false
@@ -265,8 +265,64 @@ final class AppState {
             accessibilityGranted: permissions.accessibilityGranted,
             engineChoice: settings.engineChoice,
             speechSetupNeeded: speechSetupNeeded,
-            automationDenied: permissions.automationDenied
+            automationDenied: permissions.automationDenied,
+            speechPreparationFailed: enginePreparationError != nil,
+            legacyAppleSpeechMigrationPending: settings.legacyAppleSpeechMigrationPending,
+            appleSpeechUnsupportedSelection: appleSpeechUnsupportedSelection,
+            appleSpeechRequiresMacOS26: !AppleSpeechEngine.isOperatingSystemSupported,
+            cleanupProblems: cleanupAttentionProblems
         )
+    }
+
+    private var cleanupAttentionProblems: [AttentionIssue.CleanupProblem] {
+        guard settings.engineChoice != .assemblyAI else { return [] }
+        switch settings.transcriptPostProcessingMode {
+        case .none:
+            return []
+        case .fluidAudioVocabulary:
+            return settings.engineChoice != .parakeet || !settings.parakeetModelChoice.supportsFluidAudioVocabulary
+                ? [.fluidAudioVocabularyUnavailable] : []
+        case .appleIntelligence:
+            guard #available(macOS 26, *) else { return [.appleIntelligenceRequiresMacOS26] }
+            switch AIPostProcessingService.availability {
+            case .available: return []
+            case .unavailable(.deviceNotEligible): return [.appleIntelligenceDeviceIneligible]
+            case .unavailable(.appleIntelligenceNotEnabled): return [.appleIntelligenceNotEnabled]
+            case .unavailable(.modelNotReady): return []
+            case .unavailable(_): return [.appleIntelligenceUnavailable]
+            }
+        case .s1Mini:
+            var problems: [AttentionIssue.CleanupProblem] = []
+            let language = settings.engineChoice == .appleSpeech
+                ? settings.appleSpeechLanguage : settings.selectedLanguage
+            if language != .english { problems.append(.s1MiniLanguageUnsupported) }
+            if !s1MiniModelManager.isModelDownloaded && !s1MiniModelManager.isBusy {
+                problems.append(.s1MiniNotDownloaded)
+            }
+            return problems
+        case .ollama:
+            return settings.ollamaModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? [.ollamaModelMissing] : []
+        case .openRouter:
+            var problems: [AttentionIssue.CleanupProblem] = []
+            let keyStatus = OpenRouterPostProcessingService.apiKeyStatus(
+                apiKey: settings.openRouterAPIKey,
+                apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable
+            )
+            if case .missing = keyStatus.source { problems.append(.openRouterKeyMissing) }
+            if settings.openRouterModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                problems.append(.openRouterModelMissing)
+            }
+            return problems
+        case .openAICompatible:
+            return settings.openAICompatibleModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? [.openAICompatibleModelMissing] : []
+        }
+    }
+
+    func reportUnsupportedAppleSpeechSelection() {
+        appleSpeechUnsupportedSelection = true
+        selectedAttentionIssueID = .appleSpeechUnsupported
     }
 
     private var speechSetupNeeded: Bool {
@@ -274,7 +330,7 @@ final class AppState {
         if enginePreparationError != nil { return true }
         switch settings.engineChoice {
         case .parakeet:
-            return !parakeetEngine.isModelDownloaded
+            return !parakeetEngine.isDownloading && !parakeetEngine.isModelDownloaded
         case .appleSpeech:
             return !appleSpeechInstalledLanguages.contains(settings.appleSpeechLanguage)
         case .assemblyAI:
@@ -290,6 +346,17 @@ final class AppState {
             Task { await permissions.resolve(.accessibility) }
         case .speechSetup:
             selectedPage = .models
+        case .appleSpeechUnsupported:
+            appleSpeechUnsupportedSelection = false
+        case .cleanup(let problem):
+            if problem == .fluidAudioVocabularyUnavailable {
+                selectedPage = .models
+            } else if problem == .appleIntelligenceNotEnabled,
+               let url = URL(string: "x-apple.systempreferences:com.apple.preference.AppleIntelligence") {
+                NSWorkspace.shared.open(url)
+            } else {
+                selectedPage = .aiPostProcessing
+            }
         case .automation:
             Task { await permissions.resolve(.automation) }
         }
@@ -612,6 +679,7 @@ final class AppState {
         let trace = PerfTrace.begin("stt.modelSwitch")
         defer { trace.end() }
         guard status == .idle else { return }
+        appleSpeechUnsupportedSelection = false
         settings.engineChoice = .parakeet
         settings.userHasChosenEngine = userInitiated
         await parakeetEngine.handleSelectedModelChange()
@@ -624,6 +692,8 @@ final class AppState {
         guard status == .idle else { return }
         guard availableEngineChoices.contains(choice) else { return }
         guard choice != .appleSpeech || AppleSpeechEngine.isSupported else { return }
+
+        appleSpeechUnsupportedSelection = false
 
         if choice != .appleSpeech {
             await appleSpeechEngine.invalidatePreparedSession()
@@ -1001,9 +1071,6 @@ final class AppState {
 
             guard modelReady, engine.isReady else {
                 logger.warning("startDictation: FluidAudio engine not ready, aborting")
-                if settings.legacyAppleSpeechMigrationPending && !parakeetEngine.checkModelOnDisk() {
-                    showLegacyAppleSpeechUnavailableAlert()
-                }
                 status = .error("\(settings.parakeetModelChoice.displayName) is not ready. Download it from Speech Model settings.")
                 status = .idle
                 presentBlockingAttentionIssueOnce(.speechSetup)
@@ -2001,42 +2068,6 @@ final class AppState {
         (engine as? ParakeetEngine)?.endOfUtteranceHandler = nil
     }
 
-    private func showLegacyAppleSpeechUnavailableAlert() {
-        guard !isShowingMigrationAlert else { return }
-        isShowingMigrationAlert = true
-        defer { isShowingMigrationAlert = false }
-
-        let restorePolicy = settings.appAppearanceMode.activationPolicy
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        defer {
-            NSApp.setActivationPolicy(restorePolicy)
-        }
-
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        if AppleSpeechEngine.isOperatingSystemSupported {
-            alert.messageText = "Apple Speech Isn’t Available on This Mac"
-            alert.informativeText = """
-            Dictate Anywhere has switched to FluidAudio. Download a FluidAudio speech model to \
-            continue dictating.
-            """
-        } else {
-            alert.messageText = "Apple Speech Requires macOS 26"
-            alert.informativeText = """
-            \(AppleSpeechEngine.operatingSystemDisplayName) does not support Apple Speech. Dictate \
-            Anywhere has switched to FluidAudio. Download a FluidAudio speech model to continue dictating.
-            """
-        }
-        alert.addButton(withTitle: "Open Speech Model")
-        alert.addButton(withTitle: "Not Now")
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-
-        selectedPage = .models
-        NotificationCenter.default.post(name: .requestShowMainWindow, object: nil)
-    }
 }
 
 // MARK: - Audio Device Manager

@@ -22,7 +22,6 @@ final class ComponentRenderTests: XCTestCase {
     func testOverlineRenders() { assertRenders(DSOverline(text: "Startup")) }
     func testDividerRenders() { assertRenders(DSDivider()) }
     func testHintRenders() { assertRenders(DSHint(text: "Helpful hint text for the user.")) }
-    func testPanelRenders() { assertRenders(DSPanel(text: "Informational panel message body.", icon: "keyboard")) }
 
     func testChipRenders() {
         assertRenders(DSChip(text: "um"))

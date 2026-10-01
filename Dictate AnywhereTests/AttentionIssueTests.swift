@@ -83,4 +83,86 @@ final class AttentionIssueTests: XCTestCase {
             .failed
         )
     }
+
+    func testAppleSpeechAndAssemblyAISetupUseTheSharedCarousel() {
+        for engine in [TranscriptionEngineChoice.appleSpeech, .assemblyAI] {
+            let issues = AttentionIssue.pending(
+                permissionsChecked: true,
+                microphoneGranted: true,
+                microphoneCanPrompt: false,
+                accessibilityGranted: true,
+                engineChoice: engine,
+                speechSetupNeeded: true,
+                automationDenied: false
+            )
+
+            XCTAssertEqual(issues.map(\.id), [.speechSetup])
+            XCTAssertTrue(issues[0].message.contains(engine == .assemblyAI ? "API key" : "Apple Speech"))
+        }
+    }
+
+    func testPreparationFailureDoesNotClaimTheModelIsMissing() {
+        let issues = AttentionIssue.pending(
+            permissionsChecked: true,
+            microphoneGranted: true,
+            microphoneCanPrompt: false,
+            accessibilityGranted: true,
+            engineChoice: .parakeet,
+            speechSetupNeeded: true,
+            automationDenied: false,
+            speechPreparationFailed: true
+        )
+
+        XCTAssertEqual(issues.map(\.id), [.speechSetup])
+        XCTAssertTrue(issues[0].message.contains("could not be prepared"))
+    }
+
+    func testCleanupWarningsJoinTheCarouselWithoutStacking() {
+        let issues = AttentionIssue.pending(
+            permissionsChecked: true,
+            microphoneGranted: false,
+            microphoneCanPrompt: false,
+            accessibilityGranted: false,
+            engineChoice: .appleSpeech,
+            speechSetupNeeded: true,
+            automationDenied: true,
+            cleanupProblems: [.s1MiniLanguageUnsupported, .s1MiniNotDownloaded]
+        )
+
+        XCTAssertEqual(issues.map(\.id), [
+            .microphone,
+            .accessibility,
+            .speechSetup,
+            .cleanup(.s1MiniLanguageUnsupported),
+            .cleanup(.s1MiniNotDownloaded),
+            .automation
+        ])
+        XCTAssertTrue(issues[3].isOptional)
+        XCTAssertTrue(issues[4].isOptional)
+    }
+
+    func testUnavailableAppleSpeechAndIntelligenceUseCarouselActions() {
+        let issues = AttentionIssue.pending(
+            permissionsChecked: true,
+            microphoneGranted: true,
+            microphoneCanPrompt: false,
+            accessibilityGranted: true,
+            engineChoice: .parakeet,
+            speechSetupNeeded: true,
+            automationDenied: false,
+            legacyAppleSpeechMigrationPending: true,
+            appleSpeechUnsupportedSelection: true,
+            appleSpeechRequiresMacOS26: true,
+            cleanupProblems: [.appleIntelligenceNotEnabled]
+        )
+
+        XCTAssertEqual(issues.map(\.id), [
+            .speechSetup,
+            .appleSpeechUnsupported,
+            .cleanup(.appleIntelligenceNotEnabled)
+        ])
+        XCTAssertTrue(issues[0].message.contains("FluidAudio"))
+        XCTAssertTrue(issues[1].message.contains("macOS 26"))
+        XCTAssertEqual(issues[2].actionTitle, "Open Settings")
+    }
 }

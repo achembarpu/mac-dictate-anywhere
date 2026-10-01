@@ -18,7 +18,7 @@ final class AppDelegateTests: XCTestCase {
 
         appDelegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
         for _ in 0..<100 where !appState.permissions.micGranted {
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(10))
         }
 
         XCTAssertTrue(appState.permissions.micGranted)
