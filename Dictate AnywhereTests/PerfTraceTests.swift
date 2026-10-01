@@ -1,7 +1,7 @@
 import XCTest
 @testable import Dictate_Anywhere
 
-private final class TraceSnapshotStorage: @unchecked Sendable {
+nonisolated private final class TraceSnapshotStorage: @unchecked Sendable {
     let lock = NSLock()
     var values: [String: String] = [:]
 }

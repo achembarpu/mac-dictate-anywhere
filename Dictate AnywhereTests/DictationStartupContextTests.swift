@@ -347,7 +347,7 @@ final class DictationStartupContextTests: XCTestCase {
 }
 
 #if DEBUG
-private final class TraceCompletions: @unchecked Sendable {
+nonisolated private final class TraceCompletions: @unchecked Sendable {
     private let lock = NSLock()
     private var records: [(name: String, metadata: String)] = []
 

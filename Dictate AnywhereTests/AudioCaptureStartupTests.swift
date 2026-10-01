@@ -113,7 +113,7 @@ private final class TestAudioCaptureController: @unchecked Sendable, AudioCaptur
     }
 }
 
-private final class LockedValue<Value>: @unchecked Sendable {
+nonisolated private final class LockedValue<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: Value
 
