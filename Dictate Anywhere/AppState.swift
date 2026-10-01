@@ -42,6 +42,7 @@ final class AppState {
     var currentTranscript = ""
     var lastTranscript = ""
     var selectedPage: SidebarPage = .models
+    var selectedAttentionIssueID: AttentionIssue.ID?
     var ollamaDownloadState: OllamaDownloadState?
     var ollamaDeletingModel: String?
     var ollamaModelActionError: String?
@@ -58,7 +59,7 @@ final class AppState {
     let hotkeyService = HotkeyService()
     let audioMonitor = AudioMonitor()
     let volumeController = VolumeController()
-    let textInserter = TextInserter()
+    let textInserter: TextInserter
     let overlay = OverlayWindow()
     let audioDeviceManager = AudioDeviceManager()
     let parakeetEngine = ParakeetEngine()
@@ -149,6 +150,7 @@ final class AppState {
     private var cleanupPrewarmTask: Task<Void, Never>?
     private var hasStarted = false
     private var isShuttingDown = false
+    private var presentedBlockingAttentionIssues = Set<AttentionIssue.ID>()
 
     /// Serializes profile applies; a change arriving mid-apply queues behind it.
     private var inputSourceApplyTask: Task<Void, Never>?
@@ -188,6 +190,7 @@ final class AppState {
         appleSpeechAssetSnapshot: (() async -> (supported: [SupportedLanguage], installed: [SupportedLanguage]))? = nil
     ) {
         self.permissions = permissions ?? Permissions()
+        self.textInserter = TextInserter(permissions: self.permissions)
         self.microphonePermissionRequester = microphonePermissionRequester
         self.recoveryStore = recoveryStore ?? DictationRecoveryStore()
         self.engineOverride = engine
@@ -252,6 +255,54 @@ final class AppState {
                 self?.handleAccessibilityPermissionChanged(granted)
             }
         }
+    }
+
+    var attentionIssues: [AttentionIssue] {
+        AttentionIssue.pending(
+            permissionsChecked: permissions.hasChecked,
+            microphoneGranted: permissions.micGranted,
+            accessibilityGranted: permissions.accessibilityGranted,
+            engineChoice: settings.engineChoice,
+            speechSetupNeeded: speechSetupNeeded,
+            automationDenied: permissions.automationDenied
+        )
+    }
+
+    private var speechSetupNeeded: Bool {
+        guard !activeEngine.isReady, !isPreparingEngine else { return false }
+        if enginePreparationError != nil { return true }
+        switch settings.engineChoice {
+        case .parakeet:
+            return !parakeetEngine.isModelDownloaded
+        case .appleSpeech:
+            return !appleSpeechInstalledLanguages.contains(settings.appleSpeechLanguage)
+        case .assemblyAI:
+            return !assemblyAIEngine.isReady
+        }
+    }
+
+    func resolveAttentionIssue(_ id: AttentionIssue.ID) {
+        switch id {
+        case .microphone:
+            Task { await permissions.resolve(.microphone) }
+        case .accessibility:
+            Task { await permissions.resolve(.accessibility) }
+        case .speechSetup:
+            selectedPage = .models
+        case .automation:
+            Task { await permissions.resolve(.automation) }
+        }
+    }
+
+    func refreshPermissionsAfterActivation() async {
+        await permissions.refresh()
+        presentedBlockingAttentionIssues.formIntersection(attentionIssues.map(\.id))
+    }
+
+    private func presentBlockingAttentionIssueOnce(_ id: AttentionIssue.ID) {
+        guard presentedBlockingAttentionIssues.insert(id).inserted else { return }
+        selectedAttentionIssueID = id
+        NotificationCenter.default.post(name: .requestShowMainWindow, object: nil)
     }
 
     private func setupInputSourceCallbacks() {
@@ -355,7 +406,7 @@ final class AppState {
             logger.warning("Startup paste script compilation failed; paste will retry on first use")
         }
         guard !isShuttingDown else { return }
-        await PerfTrace.measure("app.permissionCheck") { await permissions.check() }
+        await PerfTrace.measure("app.permissionCheck") { await permissions.refresh() }
         guard !isShuttingDown else { return }
         updateAccessibilityIntegration(granted: permissions.accessibilityGranted, promptIfNeeded: true)
         await PerfTrace.measure("app.appleSpeechAssetRefresh") {
@@ -885,6 +936,11 @@ final class AppState {
             status = .idle
         }
         guard status == .idle, !isTransitioning else { return }
+        if hasStarted {
+            await permissions.refreshForDictation()
+            guard !isShuttingDown, status == .idle, !isTransitioning else { return }
+            if mode == .holdToRecord && !isHoldToRecordKeyDown { return }
+        }
         if !permissions.micGranted {
             let granted: Bool
             if let microphonePermissionRequester {
@@ -894,7 +950,7 @@ final class AppState {
             }
 
             guard granted else {
-                status = .error("Microphone access is required to dictate. Enable it in System Settings, then try again.")
+                presentBlockingAttentionIssueOnce(.microphone)
                 return
             }
 
@@ -949,6 +1005,7 @@ final class AppState {
                 }
                 status = .error("\(settings.parakeetModelChoice.displayName) is not ready. Download it from Speech Model settings.")
                 status = .idle
+                presentBlockingAttentionIssueOnce(.speechSetup)
                 return
             }
         case .appleSpeech:
@@ -959,6 +1016,7 @@ final class AppState {
                 logger.warning("startDictation: Apple Speech engine not ready, aborting")
                 status = .error("Apple Speech is not ready. Open Speech Model settings to finish setup.")
                 status = .idle
+                presentBlockingAttentionIssueOnce(.speechSetup)
                 return
             }
         case .assemblyAI:
@@ -966,6 +1024,7 @@ final class AppState {
                 logger.warning("startDictation: AssemblyAI API key is missing")
                 status = .error("Add an AssemblyAI API key in Speech Model settings before dictating.")
                 status = .idle
+                presentBlockingAttentionIssueOnce(.speechSetup)
                 return
             }
         }
@@ -1100,6 +1159,10 @@ final class AppState {
 
         guard !isShuttingDown else { return }
         guard didStart else {
+            await permissions.refreshForDictation()
+            if !permissions.micGranted {
+                presentBlockingAttentionIssueOnce(.microphone)
+            }
             invalidateContextCapture()
             let wasContinuing = continuingEntryID != nil
             await discardSessionRecovery()
@@ -1420,6 +1483,9 @@ final class AppState {
         case .copiedOnly:
             insertionOrchestrationTrace.end(outcome: "copiedOnly")
             trace.end(outcome: "copiedOnly")
+            if transcriptDeliveryOverride == nil && !permissions.accessibilityGranted {
+                presentBlockingAttentionIssueOnce(.accessibility)
+            }
         case .failed:
             insertionOrchestrationTrace.end(outcome: "failed")
             trace.end(outcome: "failed")
@@ -1647,6 +1713,10 @@ final class AppState {
 
     func continueCancelledDictation(_ entry: CancelledDictation) async {
         guard !isShuttingDown, status == .idle, !isTransitioning else { return }
+        if hasStarted {
+            await permissions.refreshForDictation()
+            guard !isShuttingDown, status == .idle, !isTransitioning else { return }
+        }
         let trace = PerfTrace.begin("recovery.continue")
         defer { trace.end() }
         isTransitioning = true
@@ -1659,6 +1729,7 @@ final class AppState {
             recoveryStore.errorMessage = granted
                 ? "Microphone access is ready. Click Continue to resume your saved session."
                 : "Microphone access is required to continue. Your saved session is still available."
+            if !granted { presentBlockingAttentionIssueOnce(.microphone) }
             return
         }
         do {

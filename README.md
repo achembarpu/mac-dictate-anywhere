@@ -56,7 +56,9 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **Microphone** - For capturing your voice
 - **Accessibility** - For detecting the Fn key globally and inserting text
 
-On the first paste, macOS may also ask **Dictate Anywhere** to control **System Events**. Allow this under **System Settings → Privacy & Security → Automation** for the AppleScript paste path. If you decline, the app uses its keyboard-event paste fallback. Automation permission is separate from Accessibility.
+The app checks access when it starts, when you return to it, and when you dictate or paste. Its single setup banner lets you browse and fix any outstanding issues. Apple Speech's on-device engine does not ask for a separate Speech Recognition permission.
+
+On the first paste, macOS may also ask **Dictate Anywhere** to control **System Events**. Allow this under **System Settings → Privacy & Security → Automation** for the AppleScript paste path. If you decline, the app uses its keyboard-event paste fallback and offers an optional recovery action in the setup banner. Automation permission is separate from Accessibility.
 
 ## Optional AI Transcript Cleanup
 

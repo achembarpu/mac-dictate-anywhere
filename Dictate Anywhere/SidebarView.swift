@@ -59,6 +59,9 @@ struct SidebarView: View {
     private var statusText: String {
         switch appState.status {
         case .idle:
+            if appState.attentionIssues.contains(where: { !$0.isOptional }) {
+                return "Setup needed"
+            }
             return appState.activeEngine.isReady ? "Ready to dictate" : "Model not set up"
         case .recording: return "Listening…"
         case .processing: return "Transcribing…"
@@ -69,6 +72,9 @@ struct SidebarView: View {
     private var statusColor: Color {
         switch appState.status {
         case .idle:
+            if appState.attentionIssues.contains(where: { !$0.isOptional }) {
+                return DS.Colors.accentDeep
+            }
             return appState.activeEngine.isReady ? DS.Colors.success : DS.Colors.textSecondary
         case .recording, .processing: return DS.Colors.accent
         case .error: return DS.Colors.destructive

@@ -57,31 +57,67 @@ enum SidebarPage: String, CaseIterable, Identifiable {
     }
 }
 
-struct WarningBanner: View {
-    let message: String
-    let buttonTitle: String
-    let action: () -> Void
+struct AttentionBanner: View {
+    let issues: [AttentionIssue]
+    @Binding var selectedID: AttentionIssue.ID?
+    let action: (AttentionIssue.ID) -> Void
+
+    private var selectedIndex: Int {
+        issues.firstIndex(where: { $0.id == selectedID }) ?? 0
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DS.Colors.accentDeep)
-            Text(message)
-                .font(DS.Fonts.ui(12.5))
+        if !issues.isEmpty {
+            let issue = issues[selectedIndex]
+            HStack(spacing: 12) {
+                Image(systemName: issue.isOptional ? "info.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(DS.Colors.accentDeep)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(issue.title)
+                        .font(DS.Fonts.ui(12.5, .semibold))
+                    Text(issue.message)
+                        .font(DS.Fonts.ui(12))
+                }
                 .foregroundStyle(DS.Colors.panelText)
-            Spacer()
-            Button(buttonTitle, action: action)
-                .buttonStyle(.dsSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button(issue.actionTitle) { action(issue.id) }
+                    .buttonStyle(.dsSecondary)
+
+                if issues.count > 1 {
+                    HStack(spacing: 4) {
+                        DSIconButton(
+                            systemImage: "chevron.left",
+                            accessibilityLabel: "Previous setup issue"
+                        ) { selectIssue(offset: -1) }
+                        Text("\(selectedIndex + 1) of \(issues.count)")
+                            .font(DS.Fonts.ui(11))
+                            .monospacedDigit()
+                            .accessibilityLabel("Issue \(selectedIndex + 1) of \(issues.count)")
+                        DSIconButton(
+                            systemImage: "chevron.right",
+                            accessibilityLabel: "Next setup issue"
+                        ) { selectIssue(offset: 1) }
+                    }
+                    .foregroundStyle(DS.Colors.panelText)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(minHeight: 50)
+            .background(DS.Colors.accentSoft)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(DS.Colors.border)
+                    .frame(height: 1)
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(DS.Colors.accentSoft)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(DS.Colors.border)
-                .frame(height: 1)
-        }
+    }
+
+    private func selectIssue(offset: Int) {
+        selectedID = issues[(selectedIndex + offset + issues.count) % issues.count].id
     }
 }
 
@@ -95,34 +131,11 @@ struct MainWindow: View {
             SidebarView(selectedPage: $appState.selectedPage)
 
             VStack(spacing: 0) {
-                if !appState.permissions.micGranted {
-                    WarningBanner(
-                        message: "Microphone permission is required for dictation.",
-                        buttonTitle: "Grant Permission"
-                    ) {
-                        Task {
-                            await appState.permissions.requestMic()
-                        }
-                    }
-                }
-
-                if !appState.permissions.accessibilityGranted {
-                    WarningBanner(
-                        message: "Accessibility permission is required for keyboard shortcuts.",
-                        buttonTitle: "Grant Permission"
-                    ) {
-                        appState.permissions.promptForAccessibility()
-                    }
-                }
-
-                if !appState.activeEngine.isReady && !appState.isPreparingEngine {
-                    WarningBanner(
-                        message: modelSetupMessage,
-                        buttonTitle: "Set Up"
-                    ) {
-                        appState.selectedPage = .models
-                    }
-                }
+                AttentionBanner(
+                    issues: appState.attentionIssues,
+                    selectedID: $appState.selectedAttentionIssueID,
+                    action: appState.resolveAttentionIssue
+                )
 
                 detailView
             }
@@ -141,17 +154,6 @@ struct MainWindow: View {
             minHeight: MainWindowSizing.minimumHeight,
             maxHeight: .infinity
         )
-    }
-
-    private var modelSetupMessage: String {
-        switch appState.settings.engineChoice {
-        case .appleSpeech:
-            return "Apple Speech needs to finish its on-device setup before you can dictate."
-        case .assemblyAI:
-            return "Add an AssemblyAI API key before you can dictate."
-        case .parakeet:
-            return "A speech model is required to start dictating. Download one now."
-        }
     }
 
     @ViewBuilder

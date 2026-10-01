@@ -97,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         Task {
-            await appState.permissions.refresh()
+            await appState.refreshPermissionsAfterActivation()
         }
     }
 

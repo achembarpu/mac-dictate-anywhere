@@ -143,7 +143,15 @@ final class ComponentRenderTests: XCTestCase {
 
     // MARK: - Organisms
 
-    func testWarningBannerRenders() {
-        assertRenders(WarningBanner(message: "A speech model is required.", buttonTitle: "Set Up") {})
+    func testAttentionBannerRenders() {
+        let issues = AttentionIssue.pending(
+            permissionsChecked: true,
+            microphoneGranted: false,
+            accessibilityGranted: false,
+            engineChoice: .parakeet,
+            speechSetupNeeded: true,
+            automationDenied: true
+        )
+        assertRenders(AttentionBanner(issues: issues, selectedID: .constant(nil)) { _ in }, width: 676)
     }
 }
