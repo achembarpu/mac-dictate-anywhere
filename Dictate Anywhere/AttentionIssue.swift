@@ -19,6 +19,7 @@ struct AttentionIssue: Identifiable, Equatable {
     static func pending(
         permissionsChecked: Bool,
         microphoneGranted: Bool,
+        microphoneCanPrompt: Bool,
         accessibilityGranted: Bool,
         engineChoice: TranscriptionEngineChoice,
         speechSetupNeeded: Bool,
@@ -30,8 +31,8 @@ struct AttentionIssue: Identifiable, Equatable {
             issues.append(AttentionIssue(
                 id: .microphone,
                 title: "Microphone access needed",
-                message: "Dictation cannot start until microphone access is enabled.",
-                actionTitle: "Enable Microphone",
+                message: "Allow microphone access to start dictating.",
+                actionTitle: microphoneCanPrompt ? "Allow Microphone" : "Open Settings",
                 isOptional: false
             ))
         }
@@ -40,7 +41,7 @@ struct AttentionIssue: Identifiable, Equatable {
             issues.append(AttentionIssue(
                 id: .accessibility,
                 title: "Accessibility access needed",
-                message: "Enable Dictate Anywhere in System Settings for shortcuts and pasting.",
+                message: "Allow Accessibility for shortcuts and pasting.",
                 actionTitle: "Open Settings",
                 isOptional: false
             ))
@@ -50,11 +51,11 @@ struct AttentionIssue: Identifiable, Equatable {
             let message: String
             switch engineChoice {
             case .appleSpeech:
-                message = "Finish setting up Apple Speech before dictating."
+                message = "Set up Apple Speech to start dictating."
             case .assemblyAI:
-                message = "Add an AssemblyAI API key before dictating."
+                message = "Add an AssemblyAI API key to start dictating."
             case .parakeet:
-                message = "Download a speech model before dictating."
+                message = "Download a speech model to start dictating."
             }
             issues.append(AttentionIssue(
                 id: .speechSetup,
@@ -69,7 +70,7 @@ struct AttentionIssue: Identifiable, Equatable {
             issues.append(AttentionIssue(
                 id: .automation,
                 title: "System Events access is off",
-                message: "Pasting still works through the keyboard fallback. Enable Automation to use the AppleScript path.",
+                message: "Allow System Events for AppleScript paste. Keyboard paste still works.",
                 actionTitle: "Open Settings",
                 isOptional: true
             ))

@@ -41,6 +41,10 @@ final class Permissions {
         micGranted && accessibilityGranted
     }
 
+    var canPromptForMicrophone: Bool {
+        AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
+    }
+
     var onAccessibilityPermissionChanged: ((Bool) -> Void)?
 
     // MARK: - Private

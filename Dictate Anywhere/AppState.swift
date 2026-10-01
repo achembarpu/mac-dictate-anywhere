@@ -261,6 +261,7 @@ final class AppState {
         AttentionIssue.pending(
             permissionsChecked: permissions.hasChecked,
             microphoneGranted: permissions.micGranted,
+            microphoneCanPrompt: permissions.canPromptForMicrophone,
             accessibilityGranted: permissions.accessibilityGranted,
             engineChoice: settings.engineChoice,
             speechSetupNeeded: speechSetupNeeded,

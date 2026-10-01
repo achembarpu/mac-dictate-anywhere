@@ -147,6 +147,7 @@ final class ComponentRenderTests: XCTestCase {
         let issues = AttentionIssue.pending(
             permissionsChecked: true,
             microphoneGranted: false,
+            microphoneCanPrompt: false,
             accessibilityGranted: false,
             engineChoice: .parakeet,
             speechSetupNeeded: true,
