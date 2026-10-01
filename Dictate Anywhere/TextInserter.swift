@@ -16,9 +16,36 @@ enum TextInsertionResult {
     case failed
 }
 
+/// Unchecked-sendable box for the cached paste script. Sharing is race-free:
+/// the instance is published via `pasteScriptLock` and only ever executes
+/// on the serial `pasteScriptQueue`.
+private final class SendablePasteScript: @unchecked Sendable {
+    let script: NSAppleScript
+    init(_ script: NSAppleScript) { self.script = script }
+}
+
 final class TextInserter {
     private var pendingSeparator = ""
     private var pendingSeparatorTargetBundleIdentifier: String?
+
+    /// Paste keystroke script, compiled once and reused. `NSAppleScript`
+    /// compiles on first execution, so a fresh instance per paste repays
+    /// compile cost every dictation.
+    private static let pasteScriptSource = """
+        tell application "System Events"
+            keystroke "v" using command down
+        end tell
+        """
+
+    private let pasteScriptLock = NSLock()
+    private var cachedPasteScript: NSAppleScript?
+    /// Serializes paste-script execution: a cached instance must never run
+    /// concurrently with itself. Dictations already serialize, so this
+    /// changes no observable ordering.
+    private let pasteScriptQueue = DispatchQueue(
+        label: "com.dictate-anywhere.paste-script",
+        qos: .userInitiated
+    )
 
     // MARK: - Public
 
@@ -782,24 +809,35 @@ final class TextInserter {
     private func simulatePasteWithAppleScript() async -> Bool {
         let trace = PerfTrace.begin("insertion.pasteScript")
         defer { trace.end() }
+        guard let script = compiledPasteScript() else { return false }
+        let boxed = SendablePasteScript(script)
         return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let script = """
-                tell application "System Events"
-                    keystroke "v" using command down
-                end tell
-                """
+            pasteScriptQueue.async {
                 var error: NSDictionary?
-                let createTrace = PerfTrace.begin("insertion.pasteScriptCreate")
-                let scriptObject = NSAppleScript(source: script)
-                createTrace.end(outcome: scriptObject == nil ? "failed" : "success")
-                if let scriptObject {
-                    scriptObject.executeAndReturnError(&error)
-                    continuation.resume(returning: error == nil)
-                } else {
-                    continuation.resume(returning: false)
-                }
+                boxed.script.executeAndReturnError(&error)
+                continuation.resume(returning: error == nil)
             }
         }
+    }
+
+    /// Returns the cached paste script, compiling on first use. Side-effect
+    /// free (compiling sends no keystrokes), so startup can call it.
+    private func compiledPasteScript() -> NSAppleScript? {
+        pasteScriptLock.withLock {
+            if let cached = cachedPasteScript { return cached }
+            let trace = PerfTrace.begin("insertion.pasteCompile")
+            defer { trace.end() }
+            var error: NSDictionary?
+            guard let script = NSAppleScript(source: Self.pasteScriptSource),
+                  script.compileAndReturnError(&error) else { return nil }
+            cachedPasteScript = script
+            return script
+        }
+    }
+
+    /// Compiles the paste script ahead of first use so no dictation pays
+    /// compile cost. Called at startup regardless of the model prewarm setting.
+    func prewarmPasteScript() {
+        _ = compiledPasteScript()
     }
 }

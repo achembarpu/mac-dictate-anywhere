@@ -312,6 +312,9 @@ final class AppState {
     private func runStartupSequence() async {
         let trace = PerfTrace.begin("app.startup")
         defer { trace.end() }
+        // The paste script is independent of model prewarm and must be ready
+        // before the first dictation, even when model prewarm is disabled.
+        textInserter.prewarmPasteScript()
         await PerfTrace.measure("app.permissionCheck") { await permissions.check() }
         guard !isShuttingDown else { return }
         updateAccessibilityIntegration(granted: permissions.accessibilityGranted, promptIfNeeded: true)
