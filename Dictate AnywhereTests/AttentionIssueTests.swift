@@ -117,6 +117,47 @@ final class AttentionIssueTests: XCTestCase {
         XCTAssertTrue(issues[0].message.contains("could not be prepared"))
     }
 
+    func testRecoveryErrorJoinsCarouselAndKeepsItsDetails() {
+        let message = "Could not continue. Your saved session is still available."
+        let issues = AttentionIssue.pending(
+            permissionsChecked: true,
+            microphoneGranted: true,
+            microphoneCanPrompt: false,
+            accessibilityGranted: true,
+            engineChoice: .parakeet,
+            speechSetupNeeded: false,
+            automationDenied: true,
+            recoveryError: message
+        )
+
+        XCTAssertEqual(issues.map(\.id), [.recovery, .automation])
+        XCTAssertEqual(issues[0].message, message)
+        XCTAssertEqual(issues[0].actionTitle, "Dismiss")
+    }
+
+    func testRecordingFailureAppearsUnlessMicrophonePermissionAlreadyExplainsIt() {
+        func issues(microphoneGranted: Bool, recoveryError: String? = nil) -> [AttentionIssue.ID] {
+            AttentionIssue.pending(
+                permissionsChecked: true,
+                microphoneGranted: microphoneGranted,
+                microphoneCanPrompt: false,
+                accessibilityGranted: true,
+                engineChoice: .parakeet,
+                speechSetupNeeded: false,
+                automationDenied: false,
+                recoveryError: recoveryError,
+                recordingError: "Failed to start recording: no microphone"
+            ).map(\.id)
+        }
+
+        XCTAssertEqual(issues(microphoneGranted: true), [.recordingFailed])
+        XCTAssertEqual(issues(microphoneGranted: false), [.microphone])
+        XCTAssertEqual(
+            issues(microphoneGranted: true, recoveryError: "Saved session is available"),
+            [.recovery, .recordingFailed]
+        )
+    }
+
     func testCleanupWarningsJoinTheCarouselWithoutStacking() {
         let issues = AttentionIssue.pending(
             permissionsChecked: true,

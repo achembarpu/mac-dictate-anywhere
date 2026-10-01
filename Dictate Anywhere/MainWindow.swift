@@ -142,18 +142,22 @@ struct MainWindow: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DS.Colors.bgWindow)
-        .alert("Dictation recovery", isPresented: Binding(
-            get: { appState.recoveryStore.errorMessage != nil },
-            set: { if !$0 { appState.recoveryStore.errorMessage = nil } }
-        )) {
-            Button("OK") { appState.recoveryStore.errorMessage = nil }
-        } message: { Text(appState.recoveryStore.errorMessage ?? "") }
+        .onAppear { selectRecoveryIssueIfNeeded() }
+        .onChange(of: appState.recoveryStore.errorMessage) { _, error in
+            if error != nil { selectRecoveryIssueIfNeeded() }
+        }
         .frame(
             minWidth: MainWindowSizing.minimumWidth,
             maxWidth: .infinity,
             minHeight: MainWindowSizing.minimumHeight,
             maxHeight: .infinity
         )
+    }
+
+    private func selectRecoveryIssueIfNeeded() {
+        guard appState.recoveryStore.errorMessage != nil else { return }
+        appState.selectedAttentionIssueID = appState.permissions.hasChecked
+            && !appState.permissions.micGranted ? .microphone : .recovery
     }
 
     @ViewBuilder

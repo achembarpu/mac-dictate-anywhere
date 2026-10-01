@@ -48,6 +48,7 @@ final class AppState {
     var ollamaModelActionError: String?
     var ollamaModelActionsRevision = 0
     var enginePreparationError: String?
+    var recordingStartError: String?
 
     /// Static accessor for AppDelegate menu bar (avoids circular dependency)
     nonisolated(unsafe) static var lastTranscriptForMenuBar = ""
@@ -267,6 +268,8 @@ final class AppState {
             speechSetupNeeded: speechSetupNeeded,
             automationDenied: permissions.automationDenied,
             speechPreparationFailed: enginePreparationError != nil,
+            recoveryError: recoveryStore.errorMessage,
+            recordingError: recordingStartError,
             legacyAppleSpeechMigrationPending: settings.legacyAppleSpeechMigrationPending,
             appleSpeechUnsupportedSelection: appleSpeechUnsupportedSelection,
             appleSpeechRequiresMacOS26: !AppleSpeechEngine.isOperatingSystemSupported,
@@ -349,6 +352,10 @@ final class AppState {
             Task { await permissions.resolve(.accessibility) }
         case .speechSetup:
             selectedPage = .models
+        case .recovery:
+            recoveryStore.errorMessage = nil
+        case .recordingFailed:
+            recordingStartError = nil
         case .appleSpeechUnsupported:
             appleSpeechUnsupportedSelection = false
         case .cleanup(let problem):
@@ -1021,6 +1028,7 @@ final class AppState {
 
     func startDictation(mode: HotkeyMode? = nil) async {
         guard !isShuttingDown else { return }
+        recordingStartError = nil
         logger.info("startDictation: entry, status=\(String(describing: self.status), privacy: .public), isTransitioning=\(self.isTransitioning, privacy: .public), engineChoice=\(String(describing: self.settings.engineChoice), privacy: .public)")
         if case .error = status {
             status = .idle
@@ -1262,6 +1270,11 @@ final class AppState {
                 recoveryStore.errorMessage = "Could not start the microphone. Your saved session is still available. \(message)"
             }
             status = .error("Failed to start recording: \(message)")
+            recordingStartError = permissions.micGranted && !wasContinuing
+                ? "Could not start the microphone. \(message)" : nil
+            selectedAttentionIssueID = !permissions.micGranted ? .microphone
+                : (wasContinuing ? .recovery : .recordingFailed)
+            NotificationCenter.default.post(name: .requestShowMainWindow, object: nil)
             overlay.show(state: .processing)
             overlay.hide(afterDelay: 2.0)
             insertionTargetApp = nil

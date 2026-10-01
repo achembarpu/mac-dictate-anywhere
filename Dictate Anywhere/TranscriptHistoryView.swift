@@ -83,9 +83,10 @@ struct TranscriptHistoryView: View {
                                     .font(DS.Fonts.ui(11.5))
                                     .foregroundStyle(DS.Colors.textSecondary)
                                 if entry.captureError != nil || (!entry.hasAudio && entry.completedTranscript == nil && entry.transcriptPrefix == nil) {
-                                    Text("Partial recovery copy — some audio may be unavailable.")
-                                        .font(DS.Fonts.ui(11.5))
-                                        .foregroundStyle(DS.Colors.accentDeep)
+                                    DSFieldMessage(
+                                        text: "Partial recovery copy — some audio may be unavailable.",
+                                        tone: .warning
+                                    )
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)

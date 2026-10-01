@@ -119,7 +119,7 @@ private struct InputSourceMappingRow: View {
             }
             languageRow
             if let reason = inactiveReason {
-                DSHint(text: reason, icon: "exclamationmark.triangle")
+                DSFieldMessage(text: reason, tone: .warning)
                     .padding(.horizontal, DS.Spacing.rowHorizontal)
                     .padding(.bottom, 10)
             }

@@ -27,6 +27,11 @@ struct SettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.dsSwitch)
                 }
+                if let error = settings.launchAtLoginError {
+                    DSFieldMessage(text: error, tone: .error)
+                        .padding(.horizontal, DS.Spacing.rowHorizontal)
+                        .padding(.bottom, 10)
+                }
                 DSDivider()
                 DSInfoRow(label: "App appears in") {
                     DSDropdown(

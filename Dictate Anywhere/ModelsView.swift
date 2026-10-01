@@ -107,13 +107,9 @@ struct ModelsView: View {
                     }
                     if let error = downloadError {
                         DSDivider()
-                        DSInfoRow(
-                            label: error,
-                            labelColor: DS.Colors.destructive,
-                            labelWeight: .regular
-                        ) {
-                            EmptyView()
-                        }
+                        DSFieldMessage(text: error, tone: .error)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, DS.Spacing.rowHorizontal)
                     }
                 }
 
@@ -129,13 +125,9 @@ struct ModelsView: View {
                     appleSpeechStatusRow
                     if let error = appState.enginePreparationError {
                         DSDivider()
-                        DSInfoRow(
-                            label: error,
-                            labelColor: DS.Colors.destructive,
-                            labelWeight: .regular
-                        ) {
-                            EmptyView()
-                        }
+                        DSFieldMessage(text: error, tone: .error)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, DS.Spacing.rowHorizontal)
                     }
                 }
 
@@ -198,6 +190,11 @@ struct ModelsView: View {
                             .buttonStyle(.dsSecondary)
                     }
                 }
+            }
+            if let error = settings.assemblyAIAPIKeyError {
+                DSFieldMessage(text: error, tone: .error)
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+                    .padding(.bottom, 10)
             }
             DSDivider()
             DSInfoRow(label: "Status") {

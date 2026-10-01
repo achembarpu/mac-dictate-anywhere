@@ -31,7 +31,7 @@ private enum KeychainSecretStore {
         return value
     }
 
-    nonisolated static func write(_ value: String, service: String, account: String) {
+    nonisolated static func write(_ value: String, service: String, account: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -40,8 +40,8 @@ private enum KeychainSecretStore {
 
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedValue.isEmpty {
-            SecItemDelete(query as CFDictionary)
-            return
+            let status = SecItemDelete(query as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
         }
 
         let data = Data(trimmedValue.utf8)
@@ -50,8 +50,9 @@ private enum KeychainSecretStore {
         if updateStatus == errSecItemNotFound {
             var createQuery = query
             createQuery[kSecValueData as String] = data
-            SecItemAdd(createQuery as CFDictionary, nil)
+            return SecItemAdd(createQuery as CFDictionary, nil) == errSecSuccess
         }
+        return updateStatus == errSecSuccess
     }
 }
 
@@ -912,6 +913,7 @@ final class Settings {
     private nonisolated static let openRouterAPIKeyKeychainAccount = "openrouter-api-key"
     private nonisolated static let openAICompatibleAPIKeyKeychainAccount = "openai-compatible-api-key"
     private nonisolated static let assemblyAIAPIKeyKeychainAccount = "assemblyai-api-key"
+    private nonisolated static let apiKeySaveError = "Could not save the API key to Keychain. Try entering it again."
 
     /// Background queue for sound playback
     private let soundQueue = DispatchQueue(label: "com.dictate-anywhere.sounds", qos: .userInteractive)
@@ -1079,8 +1081,12 @@ final class Settings {
     }
 
     var assemblyAIAPIKey: String {
-        didSet { Self.storeAssemblyAIAPIKey(assemblyAIAPIKey) }
+        didSet {
+            assemblyAIAPIKeyError = Self.storeAssemblyAIAPIKey(assemblyAIAPIKey)
+                ? nil : Self.apiKeySaveError
+        }
     }
+    var assemblyAIAPIKeyError: String?
 
     var assemblyAIRegion: AssemblyAIRegion {
         didSet { UserDefaults.standard.set(assemblyAIRegion.rawValue, forKey: Keys.assemblyAIRegion) }
@@ -1398,9 +1404,11 @@ final class Settings {
 
     var openRouterAPIKey: String {
         didSet {
-            Self.storeOpenRouterAPIKey(openRouterAPIKey)
+            openRouterAPIKeyError = Self.storeOpenRouterAPIKey(openRouterAPIKey)
+                ? nil : Self.apiKeySaveError
         }
     }
+    var openRouterAPIKeyError: String?
 
     var openRouterAPIKeyEnvironmentVariable: String {
         didSet {
@@ -1425,9 +1433,11 @@ final class Settings {
 
     var openAICompatibleAPIKey: String {
         didSet {
-            Self.storeOpenAICompatibleAPIKey(openAICompatibleAPIKey)
+            openAICompatibleAPIKeyError = Self.storeOpenAICompatibleAPIKey(openAICompatibleAPIKey)
+                ? nil : Self.apiKeySaveError
         }
     }
+    var openAICompatibleAPIKeyError: String?
 
     var openAICompatiblePostProcessingPrompt: String {
         didSet {
@@ -1525,6 +1535,7 @@ final class Settings {
             updateLoginItem()
         }
     }
+    var launchAtLoginError: String?
 
     var appAppearanceMode: AppAppearanceMode {
         didSet {
@@ -2031,8 +2042,14 @@ final class Settings {
                 }
             }
         } catch {
-            print("Failed to update login item: \(error)")
+            launchAtLoginError = "Could not update Launch at Login. \(error.localizedDescription)"
+            return
         }
+        if launchAtLogin && service.status == .requiresApproval {
+            launchAtLoginError = "Allow Dictate Anywhere to launch at login in System Settings."
+            return
+        }
+        launchAtLoginError = nil
     }
 
     // MARK: - Filler Word Removal
@@ -2354,7 +2371,7 @@ final class Settings {
         )
     }
 
-    private nonisolated static func storeAssemblyAIAPIKey(_ value: String) {
+    private nonisolated static func storeAssemblyAIAPIKey(_ value: String) -> Bool {
         KeychainSecretStore.write(
             value,
             service: assemblyAIAPIKeyKeychainService,
@@ -2369,7 +2386,7 @@ final class Settings {
         )
     }
 
-    private nonisolated static func storeOpenRouterAPIKey(_ value: String) {
+    private nonisolated static func storeOpenRouterAPIKey(_ value: String) -> Bool {
         KeychainSecretStore.write(
             value,
             service: openRouterAPIKeyKeychainService,
@@ -2388,7 +2405,7 @@ final class Settings {
         )
     }
 
-    private nonisolated static func storeOpenAICompatibleAPIKey(_ value: String) {
+    private nonisolated static func storeOpenAICompatibleAPIKey(_ value: String) -> Bool {
         KeychainSecretStore.write(
             value,
             service: openAICompatibleAPIKeyKeychainService,

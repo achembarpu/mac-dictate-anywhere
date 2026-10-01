@@ -780,9 +780,7 @@ struct AIPostProcessingView: View {
                 }
 
                 if let error = s1MiniActionError ?? manager.lastError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(DS.Fonts.ui(12.5))
-                        .foregroundStyle(DS.Colors.accentDeep)
+                    DSFieldMessage(text: error, tone: .error)
                 }
             }
             DSDivider()
@@ -1028,6 +1026,11 @@ struct AIPostProcessingView: View {
                     isSecure: true
                 )
             }
+            if let error = settings.openRouterAPIKeyError {
+                DSFieldMessage(text: error, tone: .error)
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+                    .padding(.bottom, 10)
+            }
             DSDivider()
             fieldRow(label: "API Key Environment Variable (Optional)") {
                 DSTextField(
@@ -1136,6 +1139,11 @@ struct AIPostProcessingView: View {
                     ),
                     isSecure: true
                 )
+            }
+            if let error = settings.openAICompatibleAPIKeyError {
+                DSFieldMessage(text: error, tone: .error)
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+                    .padding(.bottom, 10)
             }
             DSDivider()
             fieldRow(label: "Model") {
@@ -1272,9 +1280,7 @@ struct AIPostProcessingView: View {
 
             if let error = appState.ollamaModelActionError {
                 DSDivider()
-                Text(error)
-                    .font(DS.Fonts.ui(12.5))
-                    .foregroundStyle(DS.Colors.destructive)
+                DSFieldMessage(text: error, tone: .error)
                     .padding(.vertical, 10)
                     .padding(.horizontal, DS.Spacing.rowHorizontal)
             }
@@ -1605,20 +1611,6 @@ struct AIPostProcessingView: View {
     // MARK: - Status views
 
     @ViewBuilder
-    private func statusLabel(_ text: String, systemImage: String, tint: Color) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(tint)
-                .padding(.top, 1)
-            Text(text)
-                .font(DS.Fonts.ui(12.5))
-                .foregroundStyle(DS.Colors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    @ViewBuilder
     private func ollamaStatusView(settings: Settings) -> some View {
         if isCheckingOllama {
             HStack(spacing: 8) {
@@ -1629,38 +1621,33 @@ struct AIPostProcessingView: View {
                     .foregroundStyle(DS.Colors.textSecondary)
             }
         } else if let message = ollamaStatusMessage {
-            statusLabel(message, systemImage: "xmark.circle", tint: DS.Colors.destructive)
+            DSFieldMessage(text: message, tone: .error)
         } else if let availability = ollamaAvailability {
             if availability.installedModels.isEmpty {
-                statusLabel(
+                DSFieldMessage(text:
                     "Connected, but no Ollama models are installed yet.",
-                    systemImage: "exclamationmark.triangle",
-                    tint: DS.Colors.accentDeep
+                    tone: .warning
                 )
             } else if availability.selectedModel.isEmpty {
-                statusLabel(
+                DSFieldMessage(text:
                     "Connected. Choose an installed model below or enter one manually.",
-                    systemImage: "checkmark.circle",
-                    tint: DS.Colors.success
+                    tone: .success
                 )
             } else if availability.selectedModelIsInstalled {
-                statusLabel(
+                DSFieldMessage(text:
                     "Connected. \(availability.resolvedSelectedModel ?? availability.selectedModel) is available.",
-                    systemImage: "checkmark.circle",
-                    tint: DS.Colors.success
+                    tone: .success
                 )
             } else {
-                statusLabel(
+                DSFieldMessage(text:
                     "Connected, but \(availability.selectedModel) is not installed on this Ollama server.",
-                    systemImage: "exclamationmark.triangle",
-                    tint: DS.Colors.accentDeep
+                    tone: .warning
                 )
             }
         } else {
-            statusLabel(
+            DSFieldMessage(text:
                 "Enter your Ollama server URL to check connectivity.",
-                systemImage: "bolt.horizontal.circle",
-                tint: DS.Colors.textSecondary
+                tone: .info
             )
         }
     }
@@ -1686,40 +1673,35 @@ struct AIPostProcessingView: View {
                     .foregroundStyle(DS.Colors.textSecondary)
             }
         } else if let message = openRouterStatusMessage {
-            statusLabel(message, systemImage: "xmark.circle", tint: DS.Colors.destructive)
+            DSFieldMessage(text: message, tone: .error)
         } else if case .missing = apiKeyStatus.source {
-            statusLabel(
+            DSFieldMessage(text:
                 "No OpenRouter API key is configured yet. Paste one above or set \(apiKeyStatus.environmentVariableName) in the app environment.",
-                systemImage: "key.slash",
-                tint: DS.Colors.accentDeep
+                tone: .warning
             )
         } else if let resolvedModel {
-            statusLabel(
+            DSFieldMessage(text:
                 openRouterAvailableModelStatusMessage(
                     selectedModel: selectedModel,
                     resolvedModel: resolvedModel,
                     apiKeyStatus: apiKeyStatus
                 ),
-                systemImage: resolvedModel.supportsStructuredOutputs ? "checkmark.circle" : "exclamationmark.triangle",
-                tint: resolvedModel.supportsStructuredOutputs ? DS.Colors.success : DS.Colors.accentDeep
+                tone: resolvedModel.supportsStructuredOutputs ? .success : .warning
             )
         } else if !selectedModel.isEmpty {
-            statusLabel(
+            DSFieldMessage(text:
                 "\(openRouterCredentialSourceMessage(apiKeyStatus)) \(selectedModel) was not found in the latest OpenRouter model refresh.",
-                systemImage: "exclamationmark.triangle",
-                tint: DS.Colors.accentDeep
+                tone: .warning
             )
         } else if openRouterAvailability != nil {
-            statusLabel(
+            DSFieldMessage(text:
                 "\(openRouterCredentialSourceMessage(apiKeyStatus)) Enter a model id above or search the fetched catalog below.",
-                systemImage: "checkmark.circle",
-                tint: DS.Colors.success
+                tone: .success
             )
         } else {
-            statusLabel(
+            DSFieldMessage(text:
                 "Refresh models to validate your OpenRouter setup and search the available catalog.",
-                systemImage: "network",
-                tint: DS.Colors.textSecondary
+                tone: .info
             )
         }
     }
@@ -1781,38 +1763,33 @@ struct AIPostProcessingView: View {
                     .foregroundStyle(DS.Colors.textSecondary)
             }
         } else if let message = openAICompatibleStatusMessage {
-            statusLabel(message, systemImage: "xmark.circle", tint: DS.Colors.destructive)
+            DSFieldMessage(text: message, tone: .error)
         } else if let availability = openAICompatibleAvailability {
             if availability.models.isEmpty {
-                statusLabel(
+                DSFieldMessage(text:
                     "Connected, but the server did not report any models.",
-                    systemImage: "exclamationmark.triangle",
-                    tint: DS.Colors.accentDeep
+                    tone: .warning
                 )
             } else if selectedModel.isEmpty {
-                statusLabel(
+                DSFieldMessage(text:
                     "Connected. Choose a model below or enter one manually.",
-                    systemImage: "checkmark.circle",
-                    tint: DS.Colors.success
+                    tone: .success
                 )
             } else if availability.selectedModelIsAvailable {
-                statusLabel(
+                DSFieldMessage(text:
                     "Connected. \(selectedModel) is available.",
-                    systemImage: "checkmark.circle",
-                    tint: DS.Colors.success
+                    tone: .success
                 )
             } else {
-                statusLabel(
+                DSFieldMessage(text:
                     "Connected, but \(selectedModel) was not listed by this server.",
-                    systemImage: "exclamationmark.triangle",
-                    tint: DS.Colors.accentDeep
+                    tone: .warning
                 )
             }
         } else {
-            statusLabel(
+            DSFieldMessage(text:
                 "Enter a server URL and refresh models to check connectivity.",
-                systemImage: "network",
-                tint: DS.Colors.textSecondary
+                tone: .info
             )
         }
     }
