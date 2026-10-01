@@ -16,11 +16,27 @@ instrumentation overhead. Preserve the device, OS, model revision, and build
 configuration with results; local Release benchmarks trace by default even
 though distributed Release archives do not. The trace records device, OS, and
 build configuration, while model revision must be recorded separately. The app and
-dependencies are Release-optimized; Xcode compiles the XCTest benchmark
-harness without optimization, so synthetic test-loop timings are not
-production absolute timings.
+dependencies are Release-optimized; benchmark runs also compile the XCTest
+harness with `-O`. Synthetic test-loop timings still exclude full app rendering
+and are not production absolute timings.
 
 The command runs the following deterministic or opt-in scenarios:
+
+Use registered groups to run focused benchmarks:
+
+```sh
+./scripts/dev.sh benchmark --list
+./scripts/dev.sh benchmark --only overlay
+./scripts/dev.sh benchmark --release --only audio,overlay
+./scripts/dev.sh benchmark --only insertion --only recovery
+```
+
+`--only` accepts comma-separated groups and can be repeated. Repeated groups
+are deduplicated. The default is `all`; unknown or empty groups fail before
+building. Groups are registered with their descriptions and Xcode test
+selectors in one catalog in `scripts/dev.sh`. Add new benchmark selectors
+there to make them available through `--list` and focused runs. Benchmarks
+compile both app and tests with `-O` for consistent helper comparisons.
 
 | Component | Coverage |
 | --- | --- |
@@ -72,6 +88,28 @@ offline ASR and recovery timings report p50/p95, and XCTest records CPU/memory
 for the synchronous workload tests. These are not whole-app CPU or peak-memory
 measurements. Energy, thermal state, microphone callback overruns, and live UI
 latency still require Instruments and real app runs before product decisions.
+
+`OverlayContentTests` always runs in the normal test suite. It evaluates the
+production preview and waveform bodies under Observation tracking and proves
+that 600 level-only updates cause zero transcript-content invalidations. It
+also covers preview disabled, same-length corrections, empty/resumed text, and
+character-boundary/Unicode output. These are dependency checks rather than
+counts of frames rendered by SwiftUI.
+
+Run the focused overlay comparison after configuring local Team ID signing:
+
+```sh
+./scripts/dev.sh benchmark --only overlay
+```
+
+This command runs the dependency checks and compares the production bounded
+suffix helper with the historical full-count algorithm on identical short/long
+English and long CJK text. It compiles **both** the Debug app and test target
+with `SWIFT_OPTIMIZATION_LEVEL=-O`. It alternates measurement order, consumes results, checks matching
+output, and reports median microseconds per call over five rounds. Timings have
+no pass/fail threshold. The separate `DictateAnywhere-Benchmark.xcresult` bundle
+preserves the normal test result bundle. These optimized Debug helper timings
+do not measure whole-app CPU, UI frames, or energy use.
 
 XCTest performance tests run one unrecorded warm-up plus the configured
 measurement iterations ([Apple documentation](https://developer.apple.com/documentation/xctest/xctmeasureoptions/iterationcount)).
