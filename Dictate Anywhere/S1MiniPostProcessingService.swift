@@ -280,9 +280,15 @@ actor S1MiniInferenceEngine {
         }
         promptEvalTrace.end()
 
+        guard let sampler = llama_sampler_init_greedy() else {
+            throw S1MiniServiceError.invalidOutput
+        }
+        defer { llama_sampler_free(sampler) }
+
         let (output, outputTokenCount) = try sampleOutput(
             context: context,
             vocabulary: vocabulary,
+            sampler: sampler,
             maximumOutputTokens: maximumOutputTokens
         )
         trace.recordCounts(["output_tokens": outputTokenCount, "output_bytes": output.count])
@@ -331,6 +337,7 @@ actor S1MiniInferenceEngine {
     private func sampleOutput(
         context: OpaquePointer,
         vocabulary: OpaquePointer,
+        sampler: UnsafeMutablePointer<llama_sampler>,
         maximumOutputTokens: Int
     ) throws -> (Data, Int) {
         let trace = PerfTrace.begin("cleanup.decode")
@@ -339,7 +346,7 @@ actor S1MiniInferenceEngine {
         var outputTokenCount = 0
         for _ in 0..<maximumOutputTokens {
             try Task.checkCancellation()
-            let token = try greedyToken(context: context, vocabulary: vocabulary)
+            let token = llama_sampler_sample(sampler, context, -1)
             if llama_vocab_is_eog(vocabulary, token) {
                 break
             }
@@ -463,27 +470,6 @@ actor S1MiniInferenceEngine {
         return buffer.withUnsafeBytes { bytes in
             Data(bytes.prefix(Int(count)))
         }
-    }
-
-    private func greedyToken(
-        context: OpaquePointer,
-        vocabulary: OpaquePointer
-    ) throws -> llama_token {
-        guard let logits = llama_get_logits_ith(context, -1) else {
-            throw S1MiniServiceError.invalidOutput
-        }
-        let count = Int(llama_vocab_n_tokens(vocabulary))
-        guard count > 0 else {
-            throw S1MiniServiceError.invalidOutput
-        }
-
-        var selected = 0
-        var maximum = logits[0]
-        for index in 1..<count where logits[index] > maximum {
-            selected = index
-            maximum = logits[index]
-        }
-        return llama_token(selected)
     }
 }
 
