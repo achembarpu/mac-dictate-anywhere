@@ -125,6 +125,9 @@ final class AppState {
     private var activeRecordingStartupID: UUID?
     private var recordingStartTask: Task<Void, Error>?
     private var startupTask: Task<Void, Never>?
+    /// The startup sequence refreshes these assets before resolving input-source
+    /// profiles. Preparation during that sequence can reuse the same snapshot.
+    private var appleSpeechAssetsRefreshedDuringStartup = false
     private struct EnginePreparationKey: Equatable {
         let engine: TranscriptionEngineChoice
         let model: ParakeetModelChoice
@@ -356,6 +359,8 @@ final class AppState {
             await refreshAppleSpeechAssetState()
         }
         guard !isShuttingDown else { return }
+        appleSpeechAssetsRefreshedDuringStartup = true
+        defer { appleSpeechAssetsRefreshedDuringStartup = false }
         let startupInputSourceID = inputSourceIDOverride?() ?? inputSourceMonitor.currentInputSourceID()
         if settings.engineChoice != .assemblyAI,
            settings.inputSourceAutoSwitchEnabled,
@@ -386,6 +391,7 @@ final class AppState {
             }
         }
         guard !isShuttingDown else { return }
+        appleSpeechAssetsRefreshedDuringStartup = false
         await prewarmCleanupEngineIfNeeded()
     }
 
@@ -495,7 +501,9 @@ final class AppState {
                 settings.legacyAppleSpeechMigrationPending = false
             }
         case .appleSpeech:
-            await refreshAppleSpeechAssetState()
+            if !appleSpeechAssetsRefreshedDuringStartup {
+                await refreshAppleSpeechAssetState()
+            }
             guard !isShuttingDown else { return }
             if !appleSpeechSupportedLanguages.contains(settings.appleSpeechLanguage),
                let fallback = appleSpeechSupportedLanguages.first {
@@ -538,7 +546,7 @@ final class AppState {
         // A just-completed prepare may have installed the Apple Speech asset
         // the input-source mapping hint is watching; refresh so the hint
         // clears without waiting for settings to reopen.
-        if settings.engineChoice == .appleSpeech {
+        if settings.engineChoice == .appleSpeech, !ready, prewarmModel {
             appleSpeechInstalledLanguages = await AppleSpeechEngine.installedLanguages()
             guard !isShuttingDown else { return }
         }
