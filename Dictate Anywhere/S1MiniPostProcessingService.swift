@@ -535,8 +535,14 @@ enum S1MiniPostProcessingService {
 
     /// Loads the model outside the dictation path so the first cleanup is
     /// warm. Errors are swallowed: failure leaves lazy loading unchanged.
-    static func prewarm(modelURL: URL) async {
-        _ = try? await S1MiniInferenceEngine.shared.loadModelIfNeeded(from: modelURL)
+    @discardableResult
+    static func prewarm(modelURL: URL) async -> Bool {
+        do {
+            _ = try await S1MiniInferenceEngine.shared.loadModelIfNeeded(from: modelURL)
+            return true
+        } catch {
+            return false
+        }
     }
 }
 

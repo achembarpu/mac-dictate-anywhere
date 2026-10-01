@@ -81,8 +81,8 @@ audio-controller creation, and engine session startup before changing behavior.
 `audio.controllerWait` includes queueing and the caller's timeout; `audio.controllerCreate`
 tracks actual construction and may finish later if CoreAudio is blocked. The
 request-to-recording span ends before an immediate hold-to-record stop begins.
-`insertion.pasteCompile` times the first explicit compilation of the cached
-AppleScript; execution remains inside `insertion.pasteScript`.
+`insertion.pasteCompile` times startup compilation of the cached AppleScript
+on the paste worker queue; execution remains inside `insertion.pasteScript`.
 Use Instruments' Time Profiler, Allocations, Energy Log, and audio diagnostics
 alongside these application spans for CPU, memory, thermal behavior, callback
 duration, and hardware dropouts; these are not measured by `PerfTrace`.
