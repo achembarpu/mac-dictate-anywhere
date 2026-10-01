@@ -1,5 +1,16 @@
 # Performance benchmarking
 
+## Audio capture hardware check
+
+After configuring local Team ID signing, run `RUN_AUDIO_CAPTURE_SMOKE=1 scripts/dev.sh test`
+to include three rapid microphone stop/restart cycles. This check uses real
+capture controllers and different setup queues through the shared restart gate.
+It counts callbacks and discards audio samples. It requires microphone permission
+already granted to the Debug app and skips without prompting when permission is
+unavailable. Normal test runs skip this hardware check. Full dictation checks on
+speaker and Bluetooth/headphone routes remain useful for output restoration and
+recognizer-level engine switching.
+
 Run the repeatable benchmark suite from the repository root:
 
 ```sh

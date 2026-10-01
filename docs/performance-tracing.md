@@ -57,7 +57,7 @@ S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local
 | User-visible boundary | Trace names |
 | --- | --- |
 | Startup and switching | `app.startup`, `app.permissionCheck`, `app.appleSpeechAssetRefresh`, `app.inputSourceApply`, `stt.prepare`, `stt.modelSwitch`, `stt.enginePrepare`, `stt.modelLoad` |
-| Accepted hotkey request to confirmed microphone capture | `dictation.requestToRecording`, `dictation.inputSourceApply`, `dictation.capture`, `dictation.contextCapture`, `dictation.start`, `audio.startup`, `audio.controllerWait`, `audio.controllerCreate`, `audio.microphoneBoost`, `audio.systemMute` |
+| Accepted hotkey request to confirmed microphone capture | `dictation.requestToRecording`, `dictation.inputSourceApply`, `dictation.capture`, `dictation.contextCapture`, `dictation.start`, `audio.startup`, `audio.settle`, `audio.controllerWait`, `audio.controllerCreate`, `audio.microphoneBoost`, `audio.systemMute` |
 | Live recognition availability | `stt.firstPartial`, `stt.batchPreview`, `stt.chunkCommit`, `stt.streamingProcess`, `stt.transcribe`, `audio.captureSummary`; Apple Speech reports `stt.appleSpeechSessionStart`, `stt.appleSpeechAssetInstall`, `stt.appleSpeechAnalyzerPrepare`, `stt.appleSpeechInputSummary`; AssemblyAI also reports `stt.livePreviewStart` and `stt.assemblyAIWarmConnection` |
 | Automatic end-of-utterance | `eou.detected`, `eou.stop`, followed by the regular stop path |
 | Stop recording to final transcript | `dictation.stopToInsertion`, `stt.stopToFinal`, `audio.teardown` (first controller shutdown), `stt.livePreviewStop` (AssemblyAI preview), `stt.finalize`, `stt.finalTail`, `stt.streamingFinish`, `stt.finalVocabulary`, `stt.transcribe` |
@@ -66,7 +66,7 @@ S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local
 | Local cleanup | `cleanup.validate`, `cleanup.request`, `cleanup.modelLoad`, `cleanup.tokenize`, `cleanup.promptEval`, `cleanup.decode`, `cleanup.generate` |
 | Apple Intelligence cleanup | `cleanup.appleIntelligenceSchema`, `cleanup.appleIntelligenceSchemaAccepted`, `cleanup.appleIntelligenceToolsFallback`, `cleanup.appleIntelligenceTools` |
 | Remote cleanup | `cleanup.ollamaReasoningLookup`, `cleanup.ollamaRequest`, `cleanup.ollamaServerTimings`, `cleanup.openRouterRequest`, `cleanup.openAICompatibleRequest`; Ollama's server-reported timings follow the same trace switch |
-| Delivery and restoration | `transcript.normalize`, `transcript.history`, `insertion.targetActivation`, `insertion.deliver`, `insertion.prepare`, `insertion.listEdit`, `insertion.clipboard`, `insertion.clipboardReady`, `insertion.pasteScript`, `insertion.pasteCompile`, `insertion.pasteEvent`, `insertion.listEditVerify`, `dictation.teardown`, `audio.microphoneRestore`, `audio.systemRestore` |
+| Delivery and restoration | `transcript.normalize`, `transcript.history`, `insertion.targetActivation`, `insertion.deliver`, `insertion.prepare`, `insertion.listEdit`, `insertion.clipboard`, `insertion.clipboardReady`, `insertion.pasteScript`, `insertion.pasteCompile`, `insertion.pasteEvent`, `insertion.listEditVerify`, `dictation.teardown`, `audio.microphoneRestore`, `audio.restoreSettle`, `audio.systemRestore` |
 | Cancel and recovery paths | `dictation.cancel`, `recovery.captureStart`, `recovery.preserve`, `recovery.discard`, `recovery.reload`, `recovery.transcribe`, `recovery.continue` |
 
 Compare one trace at a time: `dictation.stopToInsertion` ends when delivery
@@ -79,8 +79,16 @@ to identify the largest cost. For recording-start regressions, start from
 `dictation.requestToRecording` and distinguish context capture, audio routing,
 audio-controller creation, and engine session startup before changing behavior.
 `audio.controllerWait` includes queueing and the caller's timeout; `audio.controllerCreate`
-tracks actual construction and may finish later if CoreAudio is blocked. The
-request-to-recording span ends before an immediate hold-to-record stop begins.
+tracks actual construction and may finish later if CoreAudio is blocked.
+The `audio.settle` interval belongs to capture startup: after a Parakeet stop, a
+rapid capture restart waits only for the remaining part of the 120 ms HAL gap.
+Final recognition and idle cancellation do not wait for that gap. The gate is
+shared by all capture startup paths and rechecked if a previous capture arrives
+late on the setup queue.
+`audio.restoreSettle` measures the 200 ms output-route wait only when recording
+actually changed output mute state. Bypassed and already-muted routes restore
+without this wait. On successful delivery, this work follows text insertion.
+The request-to-recording span ends before an immediate hold-to-record stop begins.
 `insertion.pasteCompile` times startup compilation of the cached AppleScript
 on the paste worker queue; execution remains inside `insertion.pasteScript`.
 `insertion.clipboardReady` measures the bounded wait for pasteboard visibility
