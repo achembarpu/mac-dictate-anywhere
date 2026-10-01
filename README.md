@@ -56,6 +56,8 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **Microphone** - For capturing your voice
 - **Accessibility** - For detecting the Fn key globally and inserting text
 
+On the first paste, macOS may also ask **Dictate Anywhere** to control **System Events**. Allow this under **System Settings → Privacy & Security → Automation** for the AppleScript paste path. If you decline, the app uses its keyboard-event paste fallback. Automation permission is separate from Accessibility.
+
 ## Optional AI Transcript Cleanup
 
 FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Mac even when a remote transcript-cleanup provider is enabled. AssemblyAI is a separate cloud speech-model choice: when selected, audio is sent directly to AssemblyAI for the final transcription. When compatible Apple Speech language assets are already installed, the same microphone samples also produce an on-device live preview; that preview is never pasted in place of AssemblyAI's result. Context Awareness keeps surrounding text local by default; sharing it with AssemblyAI or another remote provider requires a separate opt-in.

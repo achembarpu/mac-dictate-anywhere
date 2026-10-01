@@ -161,6 +161,9 @@ resign_sparkle_helpers
 log "Verifying app signature"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 codesign -dv --verbose=4 "$APP_PATH" >/dev/null 2>&1
+codesign -d --entitlements :- "$APP_PATH" > "$TEMP_DIR/app-entitlements.plist" 2>/dev/null
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.automation.apple-events' "$TEMP_DIR/app-entitlements.plist" 2>/dev/null)" == "true" ]] || \
+  fail "Signed app is missing the Apple Events Automation entitlement"
 
 log "Submitting app for notarization"
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$APP_NOTARY_ZIP"
