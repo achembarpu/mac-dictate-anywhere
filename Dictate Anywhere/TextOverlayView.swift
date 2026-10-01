@@ -21,10 +21,10 @@ struct TextOverlayView: View {
 
             DSSection(overline: "Overlay") {
                 VStack(spacing: 14) {
-                    DSWaveformPill()
+                    DSWaveformPill(showsTextPreview: settings.showTextPreview)
                     Text(settings.showTextPreview
-                         ? "Waveform with live text — how your overlay looks right now"
-                         : "Waveform only — how your overlay looks right now")
+                         ? "Example live text above the waveform"
+                         : "Waveform-only preview")
                         .font(DS.Fonts.ui(12))
                         .foregroundStyle(DS.Colors.textSecondary)
                 }

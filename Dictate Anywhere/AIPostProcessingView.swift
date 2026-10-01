@@ -614,7 +614,7 @@ struct AIPostProcessingView: View {
 
                         Button("Add") { addFillerWord() }
                             .buttonStyle(.dsSecondary)
-                            .disabled(newFillerWord.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(addableFillerWord == nil)
 
                         Spacer(minLength: 0)
 
@@ -622,6 +622,7 @@ struct AIPostProcessingView: View {
                             settings.fillerWordsToRemove = Settings.defaultFillerWords
                         }
                         .buttonStyle(.dsSecondary)
+                        .disabled(settings.fillerWordsToRemove == Settings.defaultFillerWords)
                     }
                 }
             }
@@ -629,10 +630,14 @@ struct AIPostProcessingView: View {
     }
 
     private func addFillerWord() {
-        let word = newFillerWord.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !word.isEmpty, !appState.settings.fillerWordsToRemove.contains(word) else { return }
+        guard let word = addableFillerWord else { return }
         appState.settings.fillerWordsToRemove.append(word)
         newFillerWord = ""
+    }
+
+    private var addableFillerWord: String? {
+        let word = newFillerWord.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !word.isEmpty && !appState.settings.fillerWordsToRemove.contains(word) ? word : nil
     }
 
     // MARK: - FluidAudio vocabulary
@@ -756,7 +761,7 @@ struct AIPostProcessingView: View {
                         Button(manager.isDeleting ? "Deleting…" : "Delete Model…") {
                             isConfirmingS1MiniDeletion = true
                         }
-                        .buttonStyle(.dsSecondary)
+                        .buttonStyle(.dsDestructive)
                         .disabled(manager.isBusy)
                     } else {
                         Button(manager.isDownloading ? "Downloading…" : "Download Model") {
@@ -1013,7 +1018,7 @@ struct AIPostProcessingView: View {
     @ViewBuilder
     private func openRouterContent(settings: Settings) -> some View {
         DSSection(overline: "OpenRouter") {
-            fieldRow(label: "API Key") {
+            fieldRow(label: "API key") {
                 DSTextField(
                     placeholder: "Paste OpenRouter API key",
                     text: Binding(
@@ -1030,7 +1035,7 @@ struct AIPostProcessingView: View {
                     .padding(.bottom, 10)
             }
             DSDivider()
-            fieldRow(label: "API Key Environment Variable (Optional)") {
+            fieldRow(label: "API key variable (optional)") {
                 DSTextField(
                     placeholder: OpenRouterPostProcessingService.defaultAPIKeyEnvironmentVariable,
                     text: Binding(
@@ -1131,7 +1136,7 @@ struct AIPostProcessingView: View {
                 )
             }
             DSDivider()
-            fieldRow(label: "API Key (Optional)") {
+            fieldRow(label: "API key (optional)") {
                 DSTextField(
                     placeholder: "Leave blank for local servers without auth",
                     text: Binding(

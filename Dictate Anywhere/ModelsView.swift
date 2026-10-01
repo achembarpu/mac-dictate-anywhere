@@ -187,8 +187,8 @@ struct ModelsView: View {
                     )
                     .frame(width: 280)
                     if !settings.assemblyAIAPIKey.isEmpty {
-                        Button("Clear") { appState.updateAssemblyAIAPIKey("") }
-                            .buttonStyle(.dsSecondary)
+                        Button("Clear Stored Key") { appState.updateAssemblyAIAPIKey("") }
+                            .buttonStyle(.dsDestructive)
                     }
                 }
             }

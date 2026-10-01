@@ -59,7 +59,10 @@ struct CustomVocabularySection: View {
 
                     Button("Add") { addTerms() }
                         .buttonStyle(.dsSecondary)
-                        .disabled(pendingTerm.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(VocabularyInputParser.terms(
+                            from: pendingTerm,
+                            existingTerms: terms
+                        ).isEmpty)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

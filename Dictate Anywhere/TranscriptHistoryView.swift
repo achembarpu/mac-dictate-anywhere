@@ -35,13 +35,14 @@ struct TranscriptHistoryView: View {
 
     var body: some View {
         @Bindable var settings = appState.settings
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let entries = Self.filteredEntries(
             Array(settings.transcriptHistory.reversed()),
-            searchText: searchText
+            searchText: query
         )
         let cancelledEntries = appState.recoveryStore.entries.filter {
-            searchText.isEmpty || $0.preview.localizedCaseInsensitiveContains(searchText)
-                || "Cancelled dictation".localizedCaseInsensitiveContains(searchText)
+            query.isEmpty || $0.preview.localizedCaseInsensitiveContains(query)
+                || "Cancelled dictation".localizedCaseInsensitiveContains(query)
         }
 
         DSPage(spacing: 20) {
@@ -131,10 +132,10 @@ struct TranscriptHistoryView: View {
                 DSCard {
                     DSEmptyState(
                         systemImage: "clock.arrow.circlepath",
-                        title: searchText.isEmpty ? "No transcripts" : "No matches",
-                        message: searchText.isEmpty
+                        title: query.isEmpty ? "No transcripts" : "No matches",
+                        message: query.isEmpty
                             ? "Completed dictations will appear here."
-                            : "No dictations match “\(searchText)”."
+                            : "No dictations match “\(query)”."
                     )
                     .padding(.vertical, 20)
                 }

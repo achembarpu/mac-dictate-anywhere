@@ -77,7 +77,10 @@ private struct QuickVocabularyView: View {
 
                     Button("Add", action: addTerm)
                     .buttonStyle(.dsSecondary)
-                    .disabled(newTerm.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(VocabularyInputParser.terms(
+                        from: newTerm,
+                        existingTerms: settings.customVocabulary
+                    ).isEmpty)
                 }
             }
             .padding(.horizontal, DS.Spacing.rowHorizontal)
