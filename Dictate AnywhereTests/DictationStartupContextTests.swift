@@ -68,6 +68,21 @@ final class DictationStartupContextTests: XCTestCase {
         return app
     }
 
+    func testModelPrewarmCanBeDeferredWithoutDisablingFirstUsePreparation() async {
+        let engine = StartupContextEngine()
+        engine.isReady = false
+        let app = app(engine: engine, capture: { _ in nil })
+
+        await app.prepareActiveEngine(prewarmModel: false)
+        XCTAssertEqual(engine.prepareCount, 0)
+        XCTAssertFalse(engine.isReady)
+
+        await app.prepareActiveEngine()
+        XCTAssertEqual(engine.prepareCount, 1)
+        XCTAssertTrue(engine.isReady)
+        await app.shutdown()
+    }
+
     func testSlowContextDoesNotDelayListeningAndStopClosesMicrophoneBeforeWaiting() async {
         let captured = expectation(description: "context capture began")
         let gate = StartupContextGate(started: captured)
@@ -312,11 +327,15 @@ private final class StartupContextEngine: TranscriptionEngine {
     var vocabularyAtFinalization: [String] = []
     var appliedContexts: [DictationContext] = []
     var finalizationCount = 0
+    var prepareCount = 0
     var finalTranscript = "Recorded words."
     var onCaptureStopped: (() -> Void)?
 
     func levelSamples(count: Int) -> [Float] { [] }
-    func prepare() async throws {}
+    func prepare() async throws {
+        prepareCount += 1
+        isReady = true
+    }
     func startRecording(deviceID: AudioDeviceID?) async throws { capturing = true }
     func stopAudioCapture() async { capturing = false; onCaptureStopped?() }
     func stopRecording() async -> String {

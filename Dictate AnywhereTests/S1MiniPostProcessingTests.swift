@@ -310,4 +310,24 @@ final class S1MiniPostProcessingTests: XCTestCase {
             textAfterCursor: nil
         )
     }
+
+    func testPrewarmPolicyRequiresS1MiniEnglishAndEnabled() {
+        XCTAssertTrue(S1MiniPrewarmPolicy.shouldPrewarm(
+            mode: .s1Mini, language: .english, prewarmEnabled: true))
+    }
+
+    func testPrewarmPolicyRejectsNonS1MiniModes() {
+        for mode: TranscriptPostProcessingMode in [.none, .fluidAudioVocabulary, .appleIntelligence, .ollama, .openRouter, .openAICompatible] {
+            XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
+                mode: mode, language: .english, prewarmEnabled: true),
+                "mode \(mode) must not prewarm")
+        }
+    }
+
+    func testPrewarmPolicyRejectsNonEnglishAndDisabledToggle() {
+        XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
+            mode: .s1Mini, language: .german, prewarmEnabled: true))
+        XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
+            mode: .s1Mini, language: .english, prewarmEnabled: false))
+    }
 }

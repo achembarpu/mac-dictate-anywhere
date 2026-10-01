@@ -359,7 +359,9 @@ actor S1MiniInferenceEngine {
         return (output, outputTokenCount)
     }
 
-    private func loadModelIfNeeded(from url: URL) throws -> OpaquePointer {
+    /// Loads the cached model or the model at `url`. Internal (not private)
+    /// so startup prewarm can reuse it without going through a cleanup call.
+    func loadModelIfNeeded(from url: URL) throws -> OpaquePointer {
         let trace = PerfTrace.begin("cleanup.modelLoad")
         defer { trace.end() }
         let path = url.standardizedFileURL.path
@@ -529,5 +531,23 @@ enum S1MiniPostProcessingService {
         let trace = PerfTrace.begin("cleanup.unload")
         defer { trace.end() }
         await S1MiniInferenceEngine.shared.unload()
+    }
+
+    /// Loads the model outside the dictation path so the first cleanup is
+    /// warm. Errors are swallowed: failure leaves lazy loading unchanged.
+    static func prewarm(modelURL: URL) async {
+        _ = try? await S1MiniInferenceEngine.shared.loadModelIfNeeded(from: modelURL)
+    }
+}
+
+/// Pure gate for S1-mini startup prewarm. Kept separate from orchestration
+/// so the conditions are unit-testable without loading a model.
+enum S1MiniPrewarmPolicy {
+    static func shouldPrewarm(
+        mode: TranscriptPostProcessingMode,
+        language: SupportedLanguage,
+        prewarmEnabled: Bool
+    ) -> Bool {
+        prewarmEnabled && mode == .s1Mini && language == .english
     }
 }
