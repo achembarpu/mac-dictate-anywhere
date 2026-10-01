@@ -37,7 +37,8 @@ struct SettingsView: View {
                     DSDropdown(
                         selection: $settings.appAppearanceMode,
                         options: AppAppearanceMode.allCases,
-                        title: \.displayName
+                        title: \.displayName,
+                        accessibilityName: "App appearance"
                     )
                 }
                 DSDivider()
@@ -59,7 +60,8 @@ struct SettingsView: View {
                     DSDropdown(
                         selection: $settings.themeMode,
                         options: ThemeMode.allCases,
-                        title: \.displayName
+                        title: \.displayName,
+                        accessibilityName: "Theme"
                     )
                 }
             }
@@ -81,7 +83,8 @@ struct SettingsView: View {
                                 options: appState.appleSpeechSupportedLanguages.isEmpty
                                     ? [settings.appleSpeechLanguage]
                                     : appState.appleSpeechSupportedLanguages,
-                                title: \.displayWithFlag
+                                title: \.displayWithFlag,
+                                accessibilityName: "Transcription language"
                             )
                         }
                     } else if settings.engineChoice == .parakeet {
@@ -98,7 +101,8 @@ struct SettingsView: View {
                                     selection: $settings.selectedLanguage,
                                     options: parakeetModelChoice.selectableLanguages
                                         ?? Array(SupportedLanguage.allCases),
-                                    title: \.displayWithFlag
+                                    title: \.displayWithFlag,
+                                    accessibilityName: "Transcription language"
                                 )
                             }
                         }
@@ -122,7 +126,8 @@ struct SettingsView: View {
                             guard let uid else { return "System Default" }
                             return appState.audioDeviceManager.availableInputDevices
                                 .first { $0.uid == uid }?.name ?? uid
-                        }
+                        },
+                        accessibilityName: "Microphone"
                     )
                 }
                 DSDivider()

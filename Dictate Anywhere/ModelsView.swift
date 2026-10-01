@@ -39,6 +39,7 @@ struct ModelsView: View {
                         ),
                         options: appState.availableEngineChoices,
                         title: engineChoiceTitle,
+                        accessibilityName: "Speech engine",
                         isEnabled: appState.status == .idle
                             && !appState.isPreparingEngine
                             && !appState.parakeetEngine.isDownloading
@@ -63,6 +64,7 @@ struct ModelsView: View {
                             ),
                             options: ParakeetModelChoice.availableCases,
                             title: \.displayName,
+                            accessibilityName: "FluidAudio model variant",
                             isEnabled: appState.status == .idle && !appState.parakeetEngine.isDownloading
                         )
                     }
@@ -219,7 +221,8 @@ struct ModelsView: View {
                 DSDropdown(
                     selection: $settings.assemblyAIRegion,
                     options: AssemblyAIRegion.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "AssemblyAI processing region"
                 )
             }
             DSDivider()
@@ -235,7 +238,8 @@ struct ModelsView: View {
                 DSDropdown(
                     selection: $settings.assemblyAILanguage,
                     options: AssemblyAILanguage.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "AssemblyAI language"
                 )
             }
             DSDivider()
@@ -258,7 +262,8 @@ struct ModelsView: View {
                 DSDropdown(
                     selection: $settings.assemblyAIOutputMode,
                     options: AssemblyAIOutputMode.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "AssemblyAI output"
                 )
             }
         }
@@ -327,7 +332,8 @@ struct ModelsView: View {
             DSDropdown(
                 selection: assemblyAIWritingStyleBinding(settings: settings, category: category),
                 options: DictationWritingStyle.options(for: category),
-                title: \.displayName
+                title: \.displayName,
+                accessibilityName: "AssemblyAI writing style for \(category.displayName)"
             )
         }
     }
@@ -362,9 +368,8 @@ struct ModelsView: View {
     @ViewBuilder
     private var appleSpeechStatusRow: some View {
         if appState.isPreparingEngine {
-            DSInfoRow(label: "Preparing Apple Speech…") {
-                ProgressView()
-                    .controlSize(.small)
+            DSInfoRow(label: "Status") {
+                DSLoadingMessage(text: "Preparing Apple Speech…")
             }
         } else if appState.appleSpeechEngine.isReady {
             DSInfoRow(label: "Status") {

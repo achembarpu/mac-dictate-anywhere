@@ -53,93 +53,71 @@ final class QuickVocabularyPanel {
 }
 
 private struct QuickVocabularyView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var newTerm = ""
-    @State private var justAdded: String?
     private var settings: Settings { Settings.shared }
 
     var body: some View {
         @Bindable var settings = settings
 
         VStack(spacing: 0) {
-            // Input area
             VStack(alignment: .leading, spacing: 8) {
                 Text("Teach the transcription engine new words, names, or phrases.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(DS.Fonts.ui(12.5))
+                    .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 8) {
-                    TextField(
-                        "Custom vocabulary word or phrase",
+                    DSTextField(
+                        placeholder: "Add word or phrase…",
                         text: $newTerm,
-                        prompt: Text("e.g. Kubernetes, ChatGPT...")
+                        accessibilityName: "Add custom vocabulary word or phrase"
                     )
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { addTerm() }
+                    .onSubmit { addTerm() }
 
-                    Button(action: addTerm) {
-                        Text("Add")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
+                    Button("Add", action: addTerm)
+                    .buttonStyle(.dsSecondary)
                     .disabled(newTerm.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.horizontal, DS.Spacing.rowHorizontal)
+            .padding(.top, 16)
             .padding(.bottom, 14)
 
-            Divider()
+            DSDivider()
 
-            // Word list
             if settings.customVocabulary.isEmpty {
                 Spacer()
-                VStack(spacing: 6) {
-                    Image(systemName: "text.book.closed")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.quaternary)
-                    Text("No words added yet")
-                        .font(.callout)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
+                DSEmptyState(systemImage: "text.book.closed", title: "No words added yet")
                 Spacer()
             } else {
                 ScrollView {
                     FlowLayout(spacing: 6) {
                         ForEach(settings.customVocabulary, id: \.self) { term in
-                            VocabularyChip(
-                                term: term,
-                                font: .callout,
-                                horizontalPadding: 10,
-                                verticalPadding: 5,
-                                backgroundColor: justAdded == term
-                                    ? Color.accentColor.opacity(0.15)
-                                    : Color(nsColor: .quaternaryLabelColor)
-                            ) {
-                                withAnimation(.easeOut(duration: 0.2)) {
+                            DSChip(text: term, onRemove: {
+                                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                                     settings.customVocabulary.removeAll { $0 == term }
                                 }
-                            }
-                            .transition(.scale.combined(with: .opacity))
+                            })
                         }
                     }
                     .padding(16)
                 }
 
-                Divider()
+                DSDivider()
 
                 HStack {
                     Text("\(settings.customVocabulary.count) word\(settings.customVocabulary.count == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(DS.Fonts.ui(11.5))
+                        .foregroundStyle(DS.Colors.textSecondary)
                     Spacer()
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, DS.Spacing.rowHorizontal)
                 .padding(.vertical, 8)
             }
         }
         .frame(minHeight: 240, idealHeight: 336)
+        .background(DS.Colors.bgWindow)
     }
 
     private func addTerm() {
@@ -148,17 +126,9 @@ private struct QuickVocabularyView: View {
             existingTerms: Settings.shared.customVocabulary
         )
         guard !terms.isEmpty else { return }
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
             Settings.shared.customVocabulary.append(contentsOf: terms)
-            justAdded = terms.last
         }
         newTerm = ""
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            if justAdded == terms.last {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    justAdded = nil
-                }
-            }
-        }
     }
 }

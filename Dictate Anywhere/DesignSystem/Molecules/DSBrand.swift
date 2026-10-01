@@ -52,6 +52,7 @@ struct DSFooterCard: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(statusText)
                     .font(DS.Fonts.ui(12, .medium))

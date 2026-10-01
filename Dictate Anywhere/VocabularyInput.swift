@@ -25,44 +25,11 @@ enum VocabularyInputParser {
     }
 }
 
-struct VocabularyChip: View {
-    let term: String
-    var font: Font = .caption
-    var horizontalPadding: CGFloat = 8
-    var verticalPadding: CGFloat = 4
-    var backgroundColor = Color(nsColor: .quaternaryLabelColor)
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(term)
-                .font(font)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Button(action: onRemove) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(term)")
-        }
-        .frame(maxWidth: 260)
-        .padding(.horizontal, horizontalPadding)
-        .padding(.vertical, verticalPadding)
-        .background {
-            Capsule()
-                .fill(backgroundColor)
-        }
-        .clipShape(Capsule())
-    }
-}
-
 /// Shared design-system section for every provider that accepts custom terms.
 /// Keeping the editing behavior here prevents cloud and local model pages from
 /// drifting into subtly different vocabulary controls.
 struct CustomVocabularySection: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var terms: [String]
     let footer: String
     @State private var pendingTerm = ""
@@ -73,11 +40,11 @@ struct CustomVocabularySection: View {
                 if !terms.isEmpty {
                     FlowLayout(spacing: 6) {
                         ForEach(terms, id: \.self) { term in
-                            DSChip(text: term) {
-                                withAnimation(.easeOut(duration: 0.2)) {
+                            DSChip(text: term, onRemove: {
+                                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                                     terms.removeAll { $0 == term }
                                 }
-                            }
+                            })
                         }
                     }
                 }
@@ -100,14 +67,7 @@ struct CustomVocabularySection: View {
             .padding(.horizontal, DS.Spacing.rowHorizontal)
 
             DSDivider()
-            Text(footer)
-                .font(DS.Fonts.ui(12.5))
-                .lineSpacing(12.5 * 0.5 - 3)
-                .foregroundStyle(DS.Colors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
-                .padding(.horizontal, DS.Spacing.rowHorizontal)
+            DSCardCaption(text: footer)
         }
     }
 

@@ -40,6 +40,7 @@ struct ShortcutsView: View {
                         DSDivider()
                     }
                     HotkeyBindingRow(
+                        number: index + 1,
                         binding: binding,
                         allBindings: settings.hotkeyBindings,
                         validationError: shortcutError?.target == .binding(binding.id)
@@ -115,6 +116,7 @@ struct ShortcutsView: View {
                     caption: "Choose a shortcut you won't use in other apps. Clear it to cancel only from the menu bar."
                 ) {
                     ShortcutRecorderView(
+                        accessibilityName: "Cancel shortcut",
                         displayName: settings.cancelShortcut.displayName,
                         onRecord: { keyCode, modifiers, displayName in
                             var candidate = settings.cancelShortcut
@@ -188,6 +190,7 @@ struct ShortcutsView: View {
 // MARK: - Hotkey Binding Row
 
 private struct HotkeyBindingRow: View {
+    let number: Int
     let binding: HotkeyBinding
     let allBindings: [HotkeyBinding]
     let validationError: String?
@@ -229,6 +232,7 @@ private struct HotkeyBindingRow: View {
                 Spacer(minLength: 0)
 
                 ShortcutRecorderView(
+                    accessibilityName: "Shortcut \(number)",
                     displayName: binding.displayName,
                     onRecord: onRecord,
                     onClear: onClear,
@@ -237,8 +241,8 @@ private struct HotkeyBindingRow: View {
                 )
 
                 if canDelete {
-                    DSIconButton(systemImage: "trash", accessibilityLabel: "Remove shortcut", action: onDelete)
-                        .help("Remove shortcut")
+                    DSIconButton(systemImage: "trash", accessibilityLabel: "Remove shortcut \(number)", action: onDelete)
+                        .help("Remove shortcut \(number)")
                 }
             }
             .padding(16)
@@ -264,7 +268,8 @@ private struct HotkeyBindingRow: View {
                         set: { onModeChanged($0) }
                     ),
                     options: HotkeyMode.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "Activation mode for shortcut \(number)"
                 )
             }
         }

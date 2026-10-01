@@ -910,7 +910,7 @@ final class AppState {
         ollamaModelActionError = nil
         ollamaDownloadState = OllamaDownloadState(
             model: trimmedModel,
-            status: "Preparing model download...",
+            status: "Preparing model download…",
             fractionCompleted: nil,
             completed: nil,
             total: nil

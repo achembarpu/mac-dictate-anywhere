@@ -10,6 +10,7 @@ import AppKit
 
 struct SettingsMultilineTextArea: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Binding var text: String
     let label: String
@@ -117,8 +118,8 @@ struct SettingsMultilineTextArea: View {
             radius: isFocused ? 8 : 4,
             y: isFocused ? 2 : 1
         )
-        .animation(.easeOut(duration: 0.16), value: isFocused)
-        .animation(.easeOut(duration: 0.16), value: height)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: height)
     }
 
     private var resizeGesture: some Gesture {

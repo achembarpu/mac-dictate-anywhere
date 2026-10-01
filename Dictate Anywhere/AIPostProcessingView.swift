@@ -68,7 +68,8 @@ struct AIPostProcessingView: View {
                                 || settings.engineChoice != .parakeet
                                 || settings.parakeetModelChoice.supportsFluidAudioVocabulary
                         },
-                        title: \.displayName
+                        title: \.displayName,
+                        accessibilityName: "Transcript processing method"
                     )
                 }
             }
@@ -143,7 +144,7 @@ struct AIPostProcessingView: View {
         switch settings.transcriptPostProcessingMode {
         case .none:
             DSSection(overline: "No Cleanup") {
-                cardCaption("Your transcript is pasted exactly as the speech model produced it, after the local filler-word removal below. Pick another method to turn on AI cleanup, per-destination writing styles, and app context.")
+                DSCardCaption(text: "Your transcript is pasted exactly as the speech model produced it, after the local filler-word removal below. Pick another method to turn on AI cleanup, per-destination writing styles, and app context.")
             }
         case .fluidAudioVocabulary:
             fluidAudioVocabularyContent(settings: settings)
@@ -194,7 +195,7 @@ struct AIPostProcessingView: View {
                     )
                 } else {
                     DSDivider()
-                    cardCaption(contextDeliveryCaption(for: mode, support: contextSupport))
+                    DSCardCaption(text: contextDeliveryCaption(for: mode, support: contextSupport))
                 }
             }
         }
@@ -210,7 +211,7 @@ struct AIPostProcessingView: View {
                     DSDivider()
                     writingStyleRow(settings: settings, category: .other)
                     DSDivider()
-                    cardCaption("\(mode.displayName) is told which of these four destinations you are dictating into, and matches the style you set for it.")
+                    DSCardCaption(text: "\(mode.displayName) is told which of these four destinations you are dictating into, and matches the style you set for it.")
                 }
             }
 
@@ -221,7 +222,7 @@ struct AIPostProcessingView: View {
             if supportedFeatures.contains(.appCategories) {
                 // Which app counts as which destination.
                 DSSection(overline: "App Categories") {
-                    cardCaption(appCategoriesCaption(for: mode))
+                    DSCardCaption(text: appCategoriesCaption(for: mode))
 
                     if !settings.dictationAppRules.isEmpty {
                         DSDivider()
@@ -343,7 +344,8 @@ struct AIPostProcessingView: View {
             DSDropdown(
                 selection: writingStyleBinding(settings: settings, category: category),
                 options: DictationWritingStyle.options(for: category),
-                title: \.displayName
+                title: \.displayName,
+                accessibilityName: "Writing style for \(category.displayName)"
             )
         }
     }
@@ -369,11 +371,12 @@ struct AIPostProcessingView: View {
                         set: { settings.s1MiniStyling = $0 }
                     ),
                     options: S1MiniStyling.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "S1-mini fallback style"
                 )
             }
             DSDivider()
-            cardCaption("Every option shown here is one of S1-mini's trained Styling values. Dictate Anywhere selects the value locally from the destination category without changing the model prompt format.")
+            DSCardCaption(text: "Every option shown here is one of S1-mini's trained Styling values. Dictate Anywhere selects the value locally from the destination category without changing the model prompt format.")
         }
     }
 
@@ -388,7 +391,8 @@ struct AIPostProcessingView: View {
             DSDropdown(
                 selection: s1MiniStylingBinding(settings: settings, category: category),
                 options: S1MiniStyling.allCases,
-                title: \.displayName
+                title: \.displayName,
+                accessibilityName: "S1-mini style for \(category.displayName)"
             )
         }
     }
@@ -422,7 +426,8 @@ struct AIPostProcessingView: View {
             DSDropdown(
                 selection: appRuleCategoryBinding(settings: settings, index: index),
                 options: DictationContextCategory.allCases,
-                title: \.displayName
+                title: \.displayName,
+                accessibilityName: "Category for \(rule.appName)"
             )
             Toggle(
                 "Read field context",
@@ -430,6 +435,7 @@ struct AIPostProcessingView: View {
             )
             .toggleStyle(.dsSwitch)
             .fixedSize()
+            .accessibilityLabel("Read field context for \(rule.appName)")
             DSIconButton(
                 systemImage: "trash",
                 tint: DS.Colors.destructive,
@@ -557,19 +563,6 @@ struct AIPostProcessingView: View {
         .padding(.horizontal, DS.Spacing.rowHorizontal)
     }
 
-    /// Secondary caption line inside a card.
-    @ViewBuilder
-    private func cardCaption(_ text: String) -> some View {
-        Text(text)
-            .font(DS.Fonts.ui(12.5))
-            .lineSpacing(12.5 * 0.5 - 3)
-            .foregroundStyle(DS.Colors.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 12)
-            .padding(.horizontal, DS.Spacing.rowHorizontal)
-    }
-
     @ViewBuilder
     private func cardPadded<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -604,9 +597,9 @@ struct AIPostProcessingView: View {
                             .foregroundStyle(DS.Colors.textSecondary)
                         FlowLayout(spacing: 6) {
                             ForEach(settings.fillerWordsToRemove, id: \.self) { word in
-                                DSChip(text: word) {
+                                DSChip(text: word, onRemove: {
                                     settings.fillerWordsToRemove.removeAll { $0 == word }
-                                }
+                                })
                             }
                         }
                     }
@@ -679,7 +672,7 @@ struct AIPostProcessingView: View {
                         )
                     }
                     DSDivider()
-                    cardCaption("This prompt tells Apple Intelligence how to transform your transcribed text. The transcript is appended after your prompt.")
+                    DSCardCaption(text: "This prompt tells Apple Intelligence how to transform your transcribed text. The transcript is appended after your prompt.")
                 }
             }
 
@@ -727,7 +720,7 @@ struct AIPostProcessingView: View {
                     }
                 }
                 DSDivider()
-                cardCaption("The on-device model is being prepared. This may take a few minutes.")
+                DSCardCaption(text: "The on-device model is being prepared. This may take a few minutes.")
             }
 
         case .unavailable(_):
@@ -760,7 +753,7 @@ struct AIPostProcessingView: View {
                     Spacer(minLength: 12)
 
                     if manager.isModelDownloaded {
-                        Button(manager.isDeleting ? "Deleting…" : "Delete") {
+                        Button(manager.isDeleting ? "Deleting…" : "Delete Model…") {
                             isConfirmingS1MiniDeletion = true
                         }
                         .buttonStyle(.dsSecondary)
@@ -813,7 +806,8 @@ struct AIPostProcessingView: View {
                         DSDropdown(
                             selection: $settings.s1MiniStyling,
                             options: S1MiniStyling.allCases,
-                            title: \.displayName
+                            title: \.displayName,
+                            accessibilityName: "S1-mini styling"
                         )
                     }
                     DSDivider()
@@ -825,7 +819,8 @@ struct AIPostProcessingView: View {
                     DSDropdown(
                         selection: $settings.s1MiniStructure,
                         options: S1MiniStructure.allCases,
-                        title: \.displayName
+                        title: \.displayName,
+                        accessibilityName: "S1-mini structure"
                     )
                 }
                 DSDivider()
@@ -836,11 +831,12 @@ struct AIPostProcessingView: View {
                     DSDropdown(
                         selection: $settings.s1MiniContextSetting,
                         options: S1MiniContextSetting.allCases,
-                        title: \.displayName
+                        title: \.displayName,
+                        accessibilityName: "S1-mini context"
                     )
                 }
                 DSDivider()
-                cardCaption(
+                DSCardCaption(text:
                     settings.dictationContextAwarenessEnabled
                         ? "Styling is selected by app category below. S1-mini uses only its fixed, trained controls—not an arbitrary prompt or custom vocabulary. Local filler-word removal still runs first."
                         : "S1-mini uses only these fixed, trained controls—not an arbitrary prompt or custom vocabulary. Local filler-word removal still runs first."
@@ -947,24 +943,19 @@ struct AIPostProcessingView: View {
                             let canDelete = ollamaCanDeleteModels
                             let isBusy = appState.ollamaDownloadState != nil || appState.ollamaDeletingModel != nil
 
-                            Button {
-                                guard !isDeleting else { return }
-                                settings.ollamaModel = model
-                            } label: {
-                                DSChip(
-                                    text: model,
-                                    isSelected: isSelected,
-                                    onRemove: canDelete && !isBusy ? { ollamaPendingDeletionModel = model } : nil
-                                )
-                            }
-                            .buttonStyle(.plain)
+                            DSChip(
+                                text: model,
+                                isSelected: isSelected,
+                                onSelect: { settings.ollamaModel = model },
+                                onRemove: canDelete && !isBusy ? { ollamaPendingDeletionModel = model } : nil
+                            )
                             .disabled(isDeleting)
                         }
                     }
                 }
             }
             DSDivider()
-            cardCaption("Runs transcript cleanup through your local Ollama server. Use the server base URL and an installed model name. Larger models are noticeably better at following cleanup instructions and vocabulary normalization.")
+            DSCardCaption(text: "Runs transcript cleanup through your local Ollama server. Use the server base URL and an installed model name. Larger models are noticeably better at following cleanup instructions and vocabulary normalization.")
         }
 
         if !OllamaPostProcessingService.suggestedModels.isEmpty {
@@ -984,7 +975,8 @@ struct AIPostProcessingView: View {
                             set: { settings.ollamaReasoningSetting = $0.sanitized(for: capability) }
                         ),
                         options: OllamaReasoningSetting.options(for: capability),
-                        title: \.displayName
+                        title: \.displayName,
+                        accessibilityName: "Ollama reasoning"
                     )
                 }
             }
@@ -1004,7 +996,7 @@ struct AIPostProcessingView: View {
                     )
                 }
                 DSDivider()
-                cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for Ollama.")
+                DSCardCaption(text: "Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for Ollama.")
             }
         }
 
@@ -1090,7 +1082,7 @@ struct AIPostProcessingView: View {
                 }
             }
             DSDivider()
-            cardCaption("Runs transcript cleanup through OpenRouter's cloud API. Paste a key directly to store it in Keychain, or leave the API key field blank and use the optional environment variable setting instead.")
+            DSCardCaption(text: "Runs transcript cleanup through OpenRouter's cloud API. Paste a key directly to store it in Keychain, or leave the API key field blank and use the optional environment variable setting instead.")
         }
 
         if let availability = openRouterAvailability {
@@ -1111,7 +1103,7 @@ struct AIPostProcessingView: View {
                     )
                 }
                 DSDivider()
-                cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for OpenRouter.")
+                DSCardCaption(text: "Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for OpenRouter.")
             }
         }
 
@@ -1198,18 +1190,17 @@ struct AIPostProcessingView: View {
                     FlowLayout(spacing: 6) {
                         ForEach(availability.models, id: \.self) { model in
                             let isSelected = settings.openAICompatibleModel.caseInsensitiveCompare(model) == .orderedSame
-                            Button {
-                                settings.openAICompatibleModel = model
-                            } label: {
-                                DSChip(text: model, isSelected: isSelected)
-                            }
-                            .buttonStyle(.plain)
+                            DSChip(
+                                text: model,
+                                isSelected: isSelected,
+                                onSelect: { settings.openAICompatibleModel = model }
+                            )
                         }
                     }
                 }
             }
             DSDivider()
-            cardCaption("Runs transcript cleanup through a local or self-hosted OpenAI-compatible chat completions server, such as LM Studio, llama.cpp, vLLM, or LocalAI. Use the base URL and model name reported by that server.")
+            DSCardCaption(text: "Runs transcript cleanup through a local or self-hosted OpenAI-compatible chat completions server, such as LM Studio, llama.cpp, vLLM, or LocalAI. Use the base URL and model name reported by that server.")
         }
 
         let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
@@ -1226,7 +1217,7 @@ struct AIPostProcessingView: View {
                     )
                 }
                 DSDivider()
-                cardCaption("Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for this server.")
+                DSCardCaption(text: "Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for this server.")
             }
         }
 
@@ -1296,7 +1287,7 @@ struct AIPostProcessingView: View {
                     .padding(.horizontal, DS.Spacing.rowHorizontal)
             }
             DSDivider()
-            cardCaption(ollamaSuggestedModelsFooter(settings: settings))
+            DSCardCaption(text: ollamaSuggestedModelsFooter(settings: settings))
         }
     }
 
@@ -1385,11 +1376,7 @@ struct AIPostProcessingView: View {
                 if isInstalled {
                     HStack(spacing: 8) {
                         if isSelected {
-                            Button("Selected") {
-                                settings.ollamaModel = resolvedInstalledModel ?? suggestion.name
-                            }
-                            .buttonStyle(.dsSecondary)
-                            .disabled(true)
+                            DSStatusPill(text: "Selected")
                         } else {
                             Button("Use") {
                                 settings.ollamaModel = resolvedInstalledModel ?? suggestion.name
@@ -1399,7 +1386,7 @@ struct AIPostProcessingView: View {
                         }
 
                         if canDelete {
-                            Button(isDeleting ? "Deleting…" : "Delete") {
+                            Button(isDeleting ? "Deleting…" : "Delete…") {
                                 ollamaPendingDeletionModel = resolvedInstalledModel ?? suggestion.name
                             }
                             .buttonStyle(.dsDestructive)
@@ -1408,9 +1395,7 @@ struct AIPostProcessingView: View {
                     }
                 } else if canDownload {
                     if isDownloading {
-                        Button("Downloading…") {}
-                            .buttonStyle(.dsSecondary)
-                            .disabled(true)
+                        DSLoadingMessage(text: "Downloading…")
                     } else {
                         Button("Download") {
                             Task {
@@ -1532,7 +1517,7 @@ struct AIPostProcessingView: View {
 
         return DSSection(overline: "Model Search") {
             if matchingModels.isEmpty {
-                cardCaption(openRouterModelSearchEmptyState(settings: settings))
+                DSCardCaption(text: openRouterModelSearchEmptyState(settings: settings))
             } else {
                 cardPadded {
                     OpenRouterModelMatchesView(
@@ -1544,7 +1529,7 @@ struct AIPostProcessingView: View {
                 }
             }
             DSDivider()
-            cardCaption(openRouterModelSearchFooter(availability: availability))
+            DSCardCaption(text: openRouterModelSearchFooter(availability: availability))
         }
     }
 
@@ -1624,13 +1609,7 @@ struct AIPostProcessingView: View {
     @ViewBuilder
     private func ollamaStatusView(settings: Settings) -> some View {
         if isCheckingOllama {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Checking Ollama…")
-                    .font(DS.Fonts.ui(12.5))
-                    .foregroundStyle(DS.Colors.textSecondary)
-            }
+            DSLoadingMessage(text: "Checking Ollama…")
         } else if let message = ollamaStatusMessage {
             DSFieldMessage(text: message, tone: .error)
         } else if let availability = ollamaAvailability {
@@ -1676,13 +1655,7 @@ struct AIPostProcessingView: View {
         )
 
         if isCheckingOpenRouter {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Checking OpenRouter…")
-                    .font(DS.Fonts.ui(12.5))
-                    .foregroundStyle(DS.Colors.textSecondary)
-            }
+            DSLoadingMessage(text: "Checking OpenRouter…")
         } else if let message = openRouterStatusMessage {
             DSFieldMessage(text: message, tone: .error)
         } else if case .missing = apiKeyStatus.source {
@@ -1766,13 +1739,7 @@ struct AIPostProcessingView: View {
         let selectedModel = settings.openAICompatibleModel.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if isCheckingOpenAICompatible {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Checking server…")
-                    .font(DS.Fonts.ui(12.5))
-                    .foregroundStyle(DS.Colors.textSecondary)
-            }
+            DSLoadingMessage(text: "Checking server…")
         } else if let message = openAICompatibleStatusMessage {
             DSFieldMessage(text: message, tone: .error)
         } else if let availability = openAICompatibleAvailability {
@@ -2021,9 +1988,12 @@ private struct OpenRouterModelMatchesView: View {
     let onSelect: (String) -> Void
 
     var body: some View {
-        SwiftUI.ForEach(models, id: \.id) { (model: OpenRouterModelMatch) in
+        SwiftUI.ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
             let isSelected = selectedModel.caseInsensitiveCompare(model.id) == .orderedSame
 
+            if index > 0 {
+                DSDivider()
+            }
             Button {
                 onSelect(model.id)
             } label: {
@@ -2058,6 +2028,8 @@ private struct OpenRouterModelMatchesView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Use \(model.id)")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
     }
 }

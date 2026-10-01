@@ -9,7 +9,7 @@ final class OverlayContentTests: XCTestCase {
         let limit = OverlayPreviewText.maximumCharacters
         for length in [0, 1, limit - 1, limit, limit + 1] {
             let transcript = String(repeating: "a", count: length)
-            let expected = length > limit ? "..." + String(repeating: "a", count: limit) : transcript
+            let expected = length > limit ? "…" + String(repeating: "a", count: limit) : transcript
             XCTAssertEqual(OverlayPreviewText.trimmed(transcript), expected, "length=\(length)")
         }
     }
@@ -17,7 +17,7 @@ final class OverlayContentTests: XCTestCase {
     func testPreviewKeepsCompleteUnicodeCharacters() {
         for pattern in ["Café déjà vu. ", "这是听写文本。", "👩🏽‍💻 👨‍👩‍👧‍👦 🇳🇱 e\u{301} "] {
             let transcript = String(repeating: pattern, count: 100)
-            let expected = "..." + String(transcript.suffix(OverlayPreviewText.maximumCharacters))
+            let expected = "…" + String(transcript.suffix(OverlayPreviewText.maximumCharacters))
             XCTAssertEqual(OverlayPreviewText.trimmed(transcript), expected)
         }
     }

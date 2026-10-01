@@ -51,7 +51,10 @@ struct TranscriptHistoryView: View {
             )
 
             HStack(spacing: 10) {
-                DSSearchField(placeholder: "Search your dictations", text: $searchText)
+                DSSearchField(
+                    placeholder: "Search your dictations", text: $searchText,
+                    accessibilityName: "Search transcript history"
+                )
                 Button("Clear All…") {
                     showClearAllConfirm = true
                 }
@@ -107,12 +110,13 @@ struct TranscriptHistoryView: View {
                                        ? "Recovering…" : "Recover text") {
                                     Task { await appState.recoverCancelledDictation(entry) }
                                 }
-                                .buttonStyle(.plain)
-                                .font(DS.Fonts.ui(11.5, .medium))
-                                .foregroundStyle(DS.Colors.textSecondary)
+                                .buttonStyle(.dsSecondary)
                                 .disabled(appState.status != .idle)
                             }
-                            DSIconButton(systemImage: "trash", accessibilityLabel: "Delete cancelled session") {
+                            DSIconButton(
+                                systemImage: "trash",
+                                accessibilityLabel: "Delete cancelled session from \(Self.dateFormatter.string(from: entry.createdAt))"
+                            ) {
                                 do { try appState.recoveryStore.remove(id: entry.id) }
                                 catch { appState.recoveryStore.errorMessage = error.localizedDescription }
                             }
@@ -125,21 +129,14 @@ struct TranscriptHistoryView: View {
 
             if entries.isEmpty && cancelledEntries.isEmpty {
                 DSCard {
-                    VStack(spacing: 8) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 26))
-                            .foregroundStyle(DS.Colors.textSecondary)
-                        Text(searchText.isEmpty ? "No Transcripts" : "No Matches")
-                            .font(DS.Fonts.ui(14, .semibold))
-                            .foregroundStyle(DS.Colors.ink)
-                        Text(searchText.isEmpty
-                             ? "Completed dictations will appear here."
-                             : "No dictations match “\(searchText)”.")
-                            .font(DS.Fonts.ui(12.5))
-                            .foregroundStyle(DS.Colors.textSecondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 44)
+                    DSEmptyState(
+                        systemImage: "clock.arrow.circlepath",
+                        title: searchText.isEmpty ? "No transcripts" : "No matches",
+                        message: searchText.isEmpty
+                            ? "Completed dictations will appear here."
+                            : "No dictations match “\(searchText)”."
+                    )
+                    .padding(.vertical, 20)
                 }
             } else if !entries.isEmpty {
                 DSCard {
@@ -215,6 +212,9 @@ private struct TranscriptHistoryRow: View {
                             ) {
                                 copy(rawText, kind: .raw)
                             }
+                            .accessibilityLabel(copiedKind == .raw
+                                ? "Copied raw transcript"
+                                : "Copy raw transcript from \(TranscriptHistoryView.dateFormatter.string(from: entry.createdAt))")
                         }
                         .padding(.top, 6)
                     }
@@ -229,8 +229,15 @@ private struct TranscriptHistoryRow: View {
                 ) {
                     copy(entry.text, kind: .transcript)
                 }
-                DSIconButton(systemImage: "trash", accessibilityLabel: "Delete transcript", action: onDelete)
-                    .help("Delete transcript")
+                .accessibilityLabel(copiedKind == .transcript
+                    ? "Copied transcript"
+                    : "Copy transcript from \(TranscriptHistoryView.dateFormatter.string(from: entry.createdAt))")
+                DSIconButton(
+                    systemImage: "trash",
+                    accessibilityLabel: "Delete transcript from \(TranscriptHistoryView.dateFormatter.string(from: entry.createdAt))",
+                    action: onDelete
+                )
+                .help("Delete transcript")
             }
         }
         .padding(.vertical, 14)

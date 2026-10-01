@@ -91,11 +91,12 @@ private struct InputSourceMappingRow: View {
                     DSDropdown(
                         selection: sourceBinding,
                         options: sourceOptions,
-                        title: { sourceName(for: $0) }
+                        title: { sourceName(for: $0) },
+                        accessibilityName: "Input source for \(mapping.inputSourceDisplayName) mapping"
                     )
                     DSIconButton(
                         systemImage: "trash",
-                        accessibilityLabel: "Delete mapping"
+                        accessibilityLabel: "Delete mapping for \(mapping.inputSourceDisplayName)"
                     ) {
                         appState.settings.removeInputSourceMapping(id: mapping.id)
                     }
@@ -105,7 +106,8 @@ private struct InputSourceMappingRow: View {
                 DSDropdown(
                     selection: engineBinding,
                     options: engineOptions,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "Engine for \(mapping.inputSourceDisplayName) mapping"
                 )
             }
             if mapping.engine == .parakeet {
@@ -113,7 +115,8 @@ private struct InputSourceMappingRow: View {
                     DSDropdown(
                         selection: modelBinding,
                         options: ParakeetModelChoice.availableCases,
-                        title: { modelTitle(for: $0) }
+                        title: { modelTitle(for: $0) },
+                        accessibilityName: "Model for \(mapping.inputSourceDisplayName) mapping"
                     )
                 }
             }
@@ -145,13 +148,15 @@ private struct InputSourceMappingRow: View {
                     options: appState.appleSpeechSupportedLanguages.isEmpty
                         ? [mapping.language]
                         : appState.appleSpeechSupportedLanguages,
-                    title: \.displayWithFlag
+                    title: \.displayWithFlag,
+                    accessibilityName: "Language for \(mapping.inputSourceDisplayName) mapping"
                 )
             } else if let selectable = mapping.parakeetModel?.selectableLanguages {
                 DSDropdown(
                     selection: languageBinding,
                     options: selectable,
-                    title: \.displayWithFlag
+                    title: \.displayWithFlag,
+                    accessibilityName: "Language for \(mapping.inputSourceDisplayName) mapping"
                 )
             } else {
                 Text(mapping.parakeetModel?.fixedLanguageLabel ?? "")

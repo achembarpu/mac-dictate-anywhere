@@ -32,12 +32,31 @@ struct DSHint: View {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(DS.Colors.accent)
+                .accessibilityHidden(true)
             Text(text)
                 .font(DS.Fonts.ui(12.5))
                 .foregroundStyle(DS.Colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// Shared inline progress label for setup and provider checks.
+struct DSLoadingMessage: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(DS.Fonts.ui(12.5))
+                .foregroundStyle(DS.Colors.textSecondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
     }
 }
 

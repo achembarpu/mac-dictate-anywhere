@@ -139,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(vocabItem)
 
 #if !DEBUG
-        let updateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "")
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
 #endif

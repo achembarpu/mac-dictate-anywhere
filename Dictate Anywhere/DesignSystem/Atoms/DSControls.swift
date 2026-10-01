@@ -2,6 +2,8 @@ import SwiftUI
 
 /// Atom: pill toggle switch matching the design's Toggle On/Off components.
 struct DSToggleStyle: ToggleStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         Button {
             configuration.isOn.toggle()
@@ -18,7 +20,7 @@ struct DSToggleStyle: ToggleStyle {
                         .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
                         .padding(3)
                 }
-                .animation(.spring(duration: 0.2), value: configuration.isOn)
+                .animation(reduceMotion ? nil : .spring(duration: 0.2), value: configuration.isOn)
             }
             .contentShape(Rectangle())
         }
@@ -115,6 +117,7 @@ struct DSDropdown<SelectionValue: Hashable>: View {
     @Binding var selection: SelectionValue
     let options: [SelectionValue]
     let title: (SelectionValue) -> String
+    let accessibilityName: String
     var isEnabled: Bool = true
 
     var body: some View {
@@ -138,6 +141,8 @@ struct DSDropdown<SelectionValue: Hashable>: View {
         .fixedSize()
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.5)
+        .accessibilityLabel(accessibilityName)
+        .accessibilityValue(title(selection))
     }
 }
 
@@ -167,6 +172,7 @@ struct DSDropdownLabel: View {
 struct DSSearchField: View {
     let placeholder: String
     @Binding var text: String
+    let accessibilityName: String
 
     var body: some View {
         HStack(spacing: 8) {
@@ -177,6 +183,7 @@ struct DSSearchField: View {
                 .textFieldStyle(.plain)
                 .font(DS.Fonts.ui(13))
                 .foregroundStyle(DS.Colors.ink)
+                .accessibilityLabel(accessibilityName)
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)

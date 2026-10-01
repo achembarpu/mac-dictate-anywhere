@@ -3,29 +3,57 @@ import SwiftUI
 /// Atom: small capsule chip ("um", "MIT License", model names, …).
 /// Optionally removable (trailing ×) or tappable.
 struct DSChip: View {
+    @Environment(\.isEnabled) private var isEnabled
     let text: String
     var isSelected: Bool = false
+    var onSelect: (() -> Void)?
     var onRemove: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 5) {
-            Text(text)
-                .font(DS.Fonts.ui(12, .medium))
-                .foregroundStyle(isSelected ? Color.white : DS.Colors.ink)
+        HStack(spacing: 0) {
+            if let onSelect {
+                Button(action: onSelect) {
+                    textLabel
+                        .padding(.vertical, 4)
+                        .padding(.leading, 10)
+                        .padding(.trailing, onRemove == nil ? 10 : 5)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Select \(text)")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            } else {
+                textLabel
+                    .padding(.vertical, 4)
+                    .padding(.leading, 10)
+                    .padding(.trailing, onRemove == nil ? 10 : 5)
+            }
             if let onRemove {
                 Button(action: onRemove) {
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(isSelected ? Color.white.opacity(0.8) : DS.Colors.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .padding(.trailing, 4)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Remove \(text)")
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 10)
         .background(isSelected ? AnyShapeStyle(DS.Colors.accent) : AnyShapeStyle(DS.Colors.bgInset), in: Capsule())
         .overlay(Capsule().strokeBorder(isSelected ? Color.clear : DS.Colors.border, lineWidth: 1))
+        .opacity(isEnabled ? 1 : 0.5)
+        .help(text)
+    }
+
+    private var textLabel: some View {
+        Text(text)
+            .font(DS.Fonts.ui(12, .medium))
+            .foregroundStyle(isSelected ? Color.white : DS.Colors.ink)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: 240, alignment: .leading)
     }
 }
 
