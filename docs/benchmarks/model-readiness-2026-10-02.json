@@ -1,0 +1,86 @@
+{
+  "measured_date": "2026-10-02",
+  "device": "Mac15,10",
+  "os": "26.7.0",
+  "configuration": "Team-signed Release app and test harness, -O, app Swift warnings-as-errors",
+  "fluid_audio": {
+    "version": "0.17.5",
+    "revision": "0b1f46289fe27d95b5e66ad8be46e64f5ee02ae7"
+  },
+  "llama_swift": {
+    "version": "2.10549.0",
+    "revision": "716419d4d7aa542fce301e809cde7234c68ddbc6"
+  },
+  "s1_mini_model_sha256": "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634",
+  "benchmark_command": "PIPELINE_BENCHMARK_ITERATIONS=3 scripts/dev.sh benchmark --release --only cleanup",
+  "prewarm_ms": 236.545459,
+  "first_cleanup_after_prewarm_ms": 87.796583,
+  "cleanup_fixtures": {
+    "short": {
+      "first_request_ms": 240.3015,
+      "cold_model": true,
+      "p50_ms": 87.1,
+      "p95_ms": 89.511,
+      "min_ms": 87.1,
+      "max_ms": 89.511,
+      "warm_iterations": 2
+    },
+    "long": {
+      "first_request_ms": 982.642291,
+      "cold_model": false,
+      "p50_ms": 982.968,
+      "p95_ms": 983.227,
+      "min_ms": 982.968,
+      "max_ms": 983.227,
+      "warm_iterations": 2
+    },
+    "over_limit": {
+      "first_request_ms": 6584.010542,
+      "cold_model": false,
+      "p50_ms": 6472.483,
+      "p95_ms": 6671.065,
+      "min_ms": 6472.483,
+      "max_ms": 6671.065,
+      "warm_iterations": 2
+    }
+  },
+  "same_short_input_and_settings": true,
+  "debug_verification": {
+    "total": 584,
+    "passed": 545,
+    "skipped": 39,
+    "failed": 0,
+    "installed_asr_choices_exercised": 10
+  },
+  "regressions_checked": [
+    "Repeated preparation does not repeat inference or model loading",
+    "Synthetic warmup does not enter real speech or cleanup output",
+    "Prepared vocabulary does not load or warm CTC at Stop",
+    "Opt-out, language, cloud and busy-state gates",
+    "Concurrent cleanup preparation joins one operation",
+    "Changed cleanup choice prepares after the in-flight request",
+    "Shutdown joins preparation before cancelling the engine"
+  ],
+  "source_sha256": {
+    "Dictate Anywhere/TranscriptionEngine.swift": "d2a94c45d3aabff2da310b1e64ca8a68e90c69f9e7a231c6f522b3c05575fd05",
+    "Dictate Anywhere/S1MiniPostProcessingService.swift": "8561e628ce01188af65553752ab2dd53d7e61276cb8d541f3efd0cb75d499cb3",
+    "Dictate Anywhere/AppState.swift": "82057efd47e19f7c8edd5120397ac76dd6e7085e4fb7e89827b7ea05c8cb5907",
+    "Dictate Anywhere/SettingsView.swift": "7e22a0c6af58157dc04af5c9c375fcb3c7481db3e222d597f4d38def61e17100",
+    "Dictate Anywhere/ModelsView.swift": "9165691cab8458e88cc44ae5fd993a3be79d50f243913bbb9a68b016db567f35",
+    "Dictate Anywhere/AIPostProcessingView.swift": "f7c300957f8730d82429faac7ba71fbcb40707161516fd7fa7a51657350d7714",
+    "Dictate Anywhere/AppDelegate.swift": "bb3307ebda4042742e5313d7c750913095cb1999836320ea3b725279e4e63a81",
+    "Dictate Anywhere/Settings.swift": "67a375e850773ea7ac7acaa54fccd3e94be5ff5b1121f1e9abfb2388c4b7aa1f",
+    "Dictate AnywhereTests/DictationStartupContextTests.swift": "a6910e2e3c504febf0ee708465609e915f78de6a7c8d61b9e897c93deb6ce5c9",
+    "Dictate AnywhereTests/RecoveryASRSmokeTests.swift": "ed91460daab4f9bbde2bedc1b2c5dd380443e01f6ed834a9b9225a96bd237e8d",
+    "Dictate AnywhereTests/S1MiniPostProcessingTests.swift": "44a519909e2aca369e4f1ec1e4fb2e04fb376a816257818060fb08ee990e2837",
+    "Dictate AnywhereTests/PipelinePerformanceBenchmarkTests.swift": "af59d3feb66faccbc12265033080e7ffe6ca1d01ba310d0af193c799f4c62b5a",
+    "scripts/dev.sh": "020303a36632885f887b57ed59a7a884147ce28cd10e6f565f5b21c1667b0d51"
+  },
+  "limitations": [
+    "One first-after-prewarm sample and two warm cleanup samples; not population latency",
+    "Explicit installed model path excludes installation checksum validation from prewarm time",
+    "Repeated long and over-limit fixtures use the complete-original fallback; timings are fallback costs",
+    "Preparation avoids model loading once ready; actual recognition, capture setup and new dynamic input shapes still take time",
+    "Original ASR policy and golden-matrix report remains the fa15e64 source snapshot; this follow-up does not change decoder parameters"
+  ]
+}

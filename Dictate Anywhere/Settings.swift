@@ -1582,9 +1582,9 @@ final class Settings {
         }
     }
 
-    /// Prewarm the active speech engine and the S1-mini polish model at
-    /// startup so the first dictation is fast. Engines still prepare lazily
-    /// on first use when this is off.
+    /// Prepare selected speech and cleanup models at startup, and cleanup
+    /// after preference/download changes. Off defers startup loading and skips
+    /// automatic cleanup preparation; first-use loading remains available.
     var prewarmEnginesAtStartup: Bool {
         didSet {
             UserDefaults.standard.set(prewarmEnginesAtStartup, forKey: Keys.prewarmEnginesAtStartup)

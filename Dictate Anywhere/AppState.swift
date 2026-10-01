@@ -146,9 +146,29 @@ final class AppState {
     }
 
     private var enginePreparation: EnginePreparation?
-    /// Tracks the S1-mini prewarm load so shutdown can wait for the
-    /// blocking C call instead of tearing down underneath it.
-    private var cleanupPrewarmTask: Task<Void, Never>?
+    struct CleanupPreparationKey: Equatable {
+        let engine: TranscriptionEngineChoice
+        let model: ParakeetModelChoice
+        let mode: TranscriptPostProcessingMode
+        let language: SupportedLanguage
+        let enabled: Bool
+        let installed: Bool
+        let speechReady: Bool
+        let idle: Bool
+    }
+
+    private struct CleanupPreparation {
+        let id: UUID
+        let key: CleanupPreparationKey
+        let task: Task<Bool, Never>
+    }
+
+    /// Model preparation outlives a settings view; shutdown must join blocking
+    /// inference before releasing the engine underneath it.
+    private var cleanupPreparation: CleanupPreparation?
+    private var preparedCleanupKey: CleanupPreparationKey?
+    var isPreparingCleanupEngine = false
+    private let cleanupModelPreparation: ((TranscriptPostProcessingMode) async -> Bool)?
     private var hasStarted = false
     private var isShuttingDown = false
     private var presentedBlockingAttentionIssues = Set<AttentionIssue.ID>()
@@ -188,7 +208,8 @@ final class AppState {
         contextCapture: (@Sendable (pid_t?) async -> DictationContext?)? = nil,
         inputSourceID: (() -> String?)? = nil,
         profileModelAvailable: ((ParakeetModelChoice) -> Bool)? = nil,
-        appleSpeechAssetSnapshot: (() async -> (supported: [SupportedLanguage], installed: [SupportedLanguage]))? = nil
+        appleSpeechAssetSnapshot: (() async -> (supported: [SupportedLanguage], installed: [SupportedLanguage]))? = nil,
+        cleanupModelPreparation: ((TranscriptPostProcessingMode) async -> Bool)? = nil
     ) {
         self.permissions = permissions ?? Permissions()
         self.textInserter = TextInserter(permissions: self.permissions)
@@ -200,6 +221,7 @@ final class AppState {
         self.inputSourceIDOverride = inputSourceID
         self.profileModelAvailableOverride = profileModelAvailable
         self.appleSpeechAssetSnapshot = appleSpeechAssetSnapshot
+        self.cleanupModelPreparation = cleanupModelPreparation
         setupHotkeyCallbacks()
         setupPermissionCallbacks()
         setupInputSourceCallbacks()
@@ -443,9 +465,11 @@ final class AppState {
 
         // A prewarm load is a blocking C call that ignores cancellation;
         // wait for it rather than tearing down underneath it.
-        cleanupPrewarmTask?.cancel()
-        await cleanupPrewarmTask?.value
-        cleanupPrewarmTask = nil
+        cleanupPreparation?.task.cancel()
+        _ = await cleanupPreparation?.task.value
+        cleanupPreparation = nil
+        isPreparingCleanupEngine = false
+        preparedCleanupKey = nil
 
         // A startup load can outlive its cancelled caller. Join it before
         // cancelling the engine so a late load cannot restore stale state.
@@ -539,31 +563,80 @@ final class AppState {
         }
         guard !isShuttingDown else { return }
         appleSpeechAssetsRefreshedDuringStartup = false
-        await prewarmCleanupEngineIfNeeded()
+        await prepareCleanupEngineIfNeeded()
     }
 
-    /// Warms the S1-mini cleanup model in the background so the first
-    /// dictation with cleanup doesn't pay the load cost. Silent by design: any
-    /// skip or failure leaves first-use lazy loading unchanged. Never runs
-    /// under the test host, where an 8-second model load per test would be
-    /// pure overhead.
-    private func prewarmCleanupEngineIfNeeded() async {
-        guard !AppDelegate.isRunningTests else { return }
-        guard S1MiniPrewarmPolicy.shouldPrewarm(
+    var cleanupPreparationKey: CleanupPreparationKey {
+        CleanupPreparationKey(
+            engine: settings.engineChoice, model: settings.parakeetModelChoice,
             mode: settings.transcriptPostProcessingMode,
             language: settings.engineChoice == .appleSpeech
                 ? settings.appleSpeechLanguage : settings.selectedLanguage,
-            prewarmEnabled: settings.prewarmEnginesAtStartup
-        ) else { return }
-        guard let modelURL = try? await s1MiniModelManager.validatedModelURL() else { return }
-        guard !isShuttingDown else { return }
-        let task = Task(priority: .utility) { [weak self] in
-            guard self != nil else { return }
-            _ = await S1MiniPostProcessingService.prewarm(modelURL: modelURL)
+            enabled: settings.prewarmEnginesAtStartup,
+            installed: s1MiniModelManager.isModelDownloaded,
+            speechReady: activeEngine.isReady, idle: status == .idle
+        )
+    }
+
+    var isCleanupEnginePrepared: Bool {
+        guard let prepared = preparedCleanupKey else { return false }
+        let current = cleanupPreparationKey
+        // Becoming busy does not evict resident models. Scheduling eligibility
+        // is part of the task ID, but must not make Ready flicker during use.
+        return prepared.engine == current.engine && prepared.model == current.model
+            && prepared.mode == current.mode && prepared.language == current.language
+            && prepared.enabled == current.enabled && prepared.installed == current.installed
+    }
+
+    /// Also called after settings/download changes. Join a matching request;
+    /// if preferences changed during loading, prepare the new choice afterward.
+    /// Failure retains lazy first-use loading. Tests inject a bounded operation.
+    func prepareCleanupEngineIfNeeded() async {
+        guard !AppDelegate.isRunningTests || cleanupModelPreparation != nil else { return }
+        while let inFlight = cleanupPreparation {
+            let ready = await inFlight.task.value
+            if cleanupPreparation?.id == inFlight.id {
+                cleanupPreparation = nil
+                isPreparingCleanupEngine = false
+                if ready, !isShuttingDown {
+                    preparedCleanupKey = inFlight.key
+                }
+            }
+            if inFlight.key == cleanupPreparationKey { return }
         }
-        cleanupPrewarmTask = task
-        await task.value
-        cleanupPrewarmTask = nil
+        let key = cleanupPreparationKey
+        guard !isShuttingDown, key.enabled, key.idle, key.engine != .assemblyAI else { return }
+        switch key.mode {
+        case .s1Mini:
+            guard S1MiniPrewarmPolicy.shouldPrewarm(
+                mode: key.mode, language: key.language, prewarmEnabled: key.enabled
+            ),
+                  key.installed || cleanupModelPreparation != nil else { return }
+        case .fluidAudioVocabulary:
+            guard key.engine == .parakeet, key.model.supportsFluidAudioVocabulary,
+                  key.speechReady else { return }
+        default: return
+        }
+        let id = UUID()
+        preparedCleanupKey = nil
+        isPreparingCleanupEngine = true
+        let task = Task(priority: .utility) { [weak self] in
+            guard let self, !self.isShuttingDown else { return false }
+            if let prepare = self.cleanupModelPreparation { return await prepare(key.mode) }
+            if key.mode == .fluidAudioVocabulary {
+                return await self.parakeetEngine.prepareVocabularyIfNeeded()
+            }
+            guard let url = try? await self.s1MiniModelManager.validatedModelURL(),
+                  !self.isShuttingDown, !Task.isCancelled else { return false }
+            return await S1MiniPostProcessingService.prewarm(modelURL: url)
+        }
+        cleanupPreparation = CleanupPreparation(id: id, key: key, task: task)
+        let ready = await task.value
+        if cleanupPreparation?.id == id {
+            cleanupPreparation = nil
+            isPreparingCleanupEngine = false
+            if ready, !isShuttingDown { preparedCleanupKey = key }
+        }
     }
 
     private func handleAccessibilityPermissionChanged(_ granted: Bool) {
@@ -711,6 +784,7 @@ final class AppState {
         settings.userHasChosenEngine = userInitiated
         await parakeetEngine.handleSelectedModelChange()
         await prepareActiveEngine(prewarmModel: prewarmModel)
+        if prewarmModel { await prepareCleanupEngineIfNeeded() }
     }
 
     func handleEngineSelectionChange(_ choice: TranscriptionEngineChoice, prewarmModel: Bool = true) async {
@@ -732,6 +806,7 @@ final class AppState {
             selectedPage = .models
         }
         await prepareActiveEngine(prewarmModel: prewarmModel)
+        if prewarmModel { await prepareCleanupEngineIfNeeded() }
     }
 
     func handleAppleSpeechLanguageChange(_ language: SupportedLanguage, prewarmModel: Bool = true) async {
@@ -742,6 +817,7 @@ final class AppState {
         settings.appleSpeechLanguage = language
         await appleSpeechEngine.invalidatePreparedSession()
         await prepareActiveEngine(prewarmModel: prewarmModel)
+        if prewarmModel { await prepareCleanupEngineIfNeeded() }
     }
 
     /// Refreshes both the supportable and the installed Apple Speech language
@@ -840,6 +916,7 @@ final class AppState {
             // still trigger the restore (e.g. a prior switch away stripped
             // `.fluidAudioVocabulary` and this source maps back to it).
             settings.restoreVocabularyModeAfterAutoSwitchIfPending()
+            if prewarmModel { await prepareCleanupEngineIfNeeded() }
             return
 
         case .languageOnly(let language):
@@ -856,6 +933,8 @@ final class AppState {
                 return
             }
             settings.restoreVocabularyModeAfterAutoSwitchIfPending()
+
+            if prewarmModel { await prepareCleanupEngineIfNeeded() }
 
         case .fullApply:
             guard let mapping else { return }

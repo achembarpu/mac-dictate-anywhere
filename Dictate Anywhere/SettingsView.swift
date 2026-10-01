@@ -41,10 +41,10 @@ struct SettingsView: View {
                 }
                 DSDivider()
                 DSDetailRow(
-                    label: "Prewarm models at startup",
-                    caption: "Load the selected speech model and eligible S1-mini cleanup model before first use."
+                    label: "Prepare models ahead of time",
+                    caption: "Warm selected models at launch and when cleanup is enabled. Uses more memory to avoid first-use loading."
                 ) {
-                    DSSwitch(accessibilityName: "Prewarm models at startup", isOn: $settings.prewarmEnginesAtStartup)
+                    DSSwitch(accessibilityName: "Prepare models ahead of time", isOn: $settings.prewarmEnginesAtStartup)
                 }
             }
 
@@ -169,6 +169,14 @@ struct SettingsView: View {
             }
 
             DSHint(text: "Boosting raises low mic input, and muting keeps system audio out of your dictation.")
+        }
+        .task(id: appState.cleanupPreparationKey) {
+            await appState.prepareCleanupEngineIfNeeded()
+        }
+        .onChange(of: settings.prewarmEnginesAtStartup) { _, enabled in
+            if enabled {
+                Task { await appState.prepareActiveEngine() }
+            }
         }
     }
 }

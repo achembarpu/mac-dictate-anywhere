@@ -51,6 +51,27 @@ graphs in the SDK loader. Warmup outputs never enter the recording, and every
 real recording starts with fresh decoder/VAD state. Repeated preparation reuses
 the resident models. Vocabulary mode additionally loads and warms its CTC models
 before finalization, retaining the lazy path if preparation fails.
+If vocabulary is first enabled during a recording, its lazy final pass loads
+weights without running an extra synthetic warmup at Stop. A model switch
+invalidates any suspended vocabulary load before it can restore old weights.
+
+The existing preparation preference is shown as **Prepare models ahead of time**.
+It defaults on and preserves the saved preference. Startup prepares only the
+selected speech/eligible cleanup models. Selecting cleanup, completing its
+download, changing the relevant language, or enabling preparation also requests
+cleanup preparation while idle. Concurrent requests join one operation; a new
+choice queues after an existing load, and shutdown waits before unloading.
+Cloud dictation and non-English S1-mini selections skip unused cleanup preparation.
+Turning this off defers startup loading and automatic cleanup preparation; lazy
+first-use loading remains available. It does not unload already-resident models.
+
+Settings distinguish **Downloaded**, **Preparing for first use…** and **Ready**.
+Downloaded files alone are not treated as a prepared speech model. No manual
+decoder, inference-window, VAD-threshold or compute-placement controls are added:
+the model picker already exposes useful accuracy/language/latency choices, while
+the tested decoder policy stays automatic. Preparation removes avoidable loading
+and initial graph execution once ready; microphone setup, actual recognition and
+unseen dynamic input shapes still take time.
 
 Opt-in vocabulary finalization decodes the full recording once with the SDK
 batch decoder, then applies `VocabularyBoostingSession` to its token timings and

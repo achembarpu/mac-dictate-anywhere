@@ -80,6 +80,10 @@ struct AIPostProcessingView: View {
             // Setup for the selected method sits directly under the picker, so
             // its status and any blocking action stay in the same viewport.
             selectedMethodContent(settings: settings)
+            if settings.transcriptPostProcessingMode == .fluidAudioVocabulary,
+               appState.isPreparingCleanupEngine {
+                DSHint(text: "Preparing vocabulary cleanup for first use…")
+            }
 
             let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
 
@@ -98,6 +102,9 @@ struct AIPostProcessingView: View {
             guard shouldAutoRefreshProviderAvailability else { return }
             ollamaCLIAvailability = OllamaPostProcessingService.cliAvailability()
             await refreshProviderAvailabilityIfNeeded(settings: settings)
+        }
+        .task(id: appState.cleanupPreparationKey) {
+            await appState.prepareCleanupEngineIfNeeded()
         }
         .alert(
             "Delete Ollama Model?",
@@ -791,8 +798,8 @@ struct AIPostProcessingView: View {
                     Button(manager.isDeleting ? "Deleting…" : "Delete Model…") {
                         isConfirmingS1MiniDeletion = true
                     }
-                    .buttonStyle(.dsDestructive)
-                    .disabled(manager.isBusy)
+.buttonStyle(.dsDestructive)
+                    .disabled(manager.isBusy || appState.isPreparingCleanupEngine)
                 }
             }
             DSDivider()
@@ -865,6 +872,8 @@ struct AIPostProcessingView: View {
         if manager.isDownloading { return .downloading(s1MiniVisibleDownloadProgress(manager: manager)) }
         if manager.isDeleting { return .deleting }
         if manager.isVerifying { return .verifying }
+        if appState.isPreparingCleanupEngine { return .preparing }
+        if appState.isCleanupEnginePrepared { return .ready }
         return manager.isModelDownloaded ? .downloaded : .notDownloaded
     }
 
@@ -888,6 +897,7 @@ struct AIPostProcessingView: View {
         Task {
             do {
                 try await appState.s1MiniModelManager.downloadModel()
+                await appState.prepareCleanupEngineIfNeeded()
             } catch {
                 s1MiniActionError = error.localizedDescription
             }

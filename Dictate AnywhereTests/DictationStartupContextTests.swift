@@ -19,18 +19,22 @@ final class DictationStartupContextTests: XCTestCase {
         let localLanguage = settings.selectedLanguage
         let cloudLanguage = settings.assemblyAILanguage
         let processing = settings.transcriptPostProcessingMode
+        let model = settings.parakeetModelChoice
+        let prewarm = settings.prewarmEnginesAtStartup
         let history = settings.transcriptHistory
         restoreSettings = {
             settings.engineChoice = engine
+            settings.parakeetModelChoice = model
             settings.soundEffectsEnabled = sound
             settings.boostMicrophoneVolumeEnabled = boost
             settings.muteSystemAudioDuringRecordingEnabled = mute
             settings.preserveCancelledSessions = preserve
             settings.selectedMicrophoneUID = microphone
-            settings.transcriptPostProcessingMode = processing
             settings.transcriptHistory = history
             settings.selectedLanguage = localLanguage
             settings.assemblyAILanguage = cloudLanguage
+            settings.transcriptPostProcessingMode = processing
+            settings.prewarmEnginesAtStartup = prewarm
         }
         settings.engineChoice = .assemblyAI
         settings.soundEffectsEnabled = false
@@ -55,6 +59,7 @@ final class DictationStartupContextTests: XCTestCase {
     private func app(
         engine: StartupContextEngine,
         capture: @escaping @Sendable (pid_t?) async -> DictationContext?,
+        cleanupPreparation: ((TranscriptPostProcessingMode) async -> Bool)? = nil,
         delivery: @escaping (String) async -> TextInsertionResult = { _ in .copiedOnly }
     ) -> AppState {
         let app = AppState(
@@ -62,7 +67,8 @@ final class DictationStartupContextTests: XCTestCase {
             recoveryStore: DictationRecoveryStore(directory: directory),
             engine: engine,
             transcriptDelivery: delivery,
-            contextCapture: capture
+            contextCapture: capture,
+            cleanupModelPreparation: cleanupPreparation
         )
         app.permissions.micGranted = true
         return app
@@ -80,6 +86,107 @@ final class DictationStartupContextTests: XCTestCase {
         await app.prepareActiveEngine()
         XCTAssertEqual(engine.prepareCount, 1)
         XCTAssertTrue(engine.isReady)
+        await app.shutdown()
+    }
+
+    func testCleanupPreparationRespondsToSelectionLanguageOptOutAndIdleState() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.parakeetModelChoice = .multilingual
+        settings.selectedLanguage = .english
+        settings.prewarmEnginesAtStartup = true
+        var modes: [TranscriptPostProcessingMode] = []
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: {
+            modes.append($0)
+            return true
+        })
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertTrue(modes.isEmpty)
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.prewarmEnginesAtStartup = false
+        await app.prepareCleanupEngineIfNeeded()
+        settings.prewarmEnginesAtStartup = true
+        settings.selectedLanguage = .german
+        await app.prepareCleanupEngineIfNeeded()
+        settings.selectedLanguage = .english
+        app.status = .recording
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertTrue(modes.isEmpty)
+        app.status = .idle
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertEqual(modes, [.s1Mini])
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        app.status = .recording
+        XCTAssertTrue(app.isCleanupEnginePrepared, "Recording must not make resident cleanup look cold")
+        app.status = .idle
+        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertEqual(modes, [.s1Mini, .fluidAudioVocabulary])
+        settings.engineChoice = .assemblyAI
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertEqual(modes.count, 2)
+        await app.shutdown()
+    }
+
+    func testConcurrentCleanupPreparationsJoinAndShutdownWaitsForTheLoad() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.parakeetModelChoice = .multilingual
+        settings.selectedLanguage = .english
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.prewarmEnginesAtStartup = true
+        let started = expectation(description: "cleanup preparation started")
+        let gate = StartupModelPreparationGate(started: started)
+        let engine = StartupContextEngine()
+        engine.capturing = true
+        var calls = 0
+        let app = app(engine: engine, capture: { _ in nil }, cleanupPreparation: { _ in
+            calls += 1
+            await gate.wait()
+            return true
+        })
+        let first = Task { await app.prepareCleanupEngineIfNeeded() }
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertTrue(app.isPreparingCleanupEngine)
+        let second = Task { await app.prepareCleanupEngineIfNeeded() }
+        let stopping = Task { await app.shutdown() }
+        await Task.yield()
+        XCTAssertTrue(engine.capturing, "Shutdown unloaded the engine while preparation was running")
+        XCTAssertEqual(calls, 1)
+        await gate.release()
+        await first.value
+        await second.value
+        await stopping.value
+        XCTAssertEqual(calls, 1)
+        XCTAssertFalse(engine.capturing)
+        XCTAssertFalse(app.isPreparingCleanupEngine)
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+    }
+
+    func testCleanupChoiceChangedDuringPreparationIsPreparedAfterTheOldLoad() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.parakeetModelChoice = .multilingual
+        settings.selectedLanguage = .english
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.prewarmEnginesAtStartup = true
+        let started = expectation(description: "first cleanup preparation started")
+        let gate = StartupModelPreparationGate(started: started)
+        var modes: [TranscriptPostProcessingMode] = []
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: { mode in
+            modes.append(mode)
+            if mode == .s1Mini { await gate.wait() }
+            return true
+        })
+        let first = Task { await app.prepareCleanupEngineIfNeeded() }
+        await fulfillment(of: [started], timeout: 5)
+        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
+        let changed = Task { await app.prepareCleanupEngineIfNeeded() }
+        await gate.release()
+        await first.value
+        await changed.value
+        XCTAssertEqual(modes, [.s1Mini, .fluidAudioVocabulary])
+        XCTAssertTrue(app.isCleanupEnginePrepared)
         await app.shutdown()
     }
 
@@ -165,10 +272,10 @@ final class DictationStartupContextTests: XCTestCase {
         let gate = StartupContextGate(started: captured)
         let engine = StartupContextEngine()
         var delivered: [String] = []
-        let app = app(engine: engine, capture: { _ in await gate.capture() }) {
+        let app = app(engine: engine, capture: { _ in await gate.capture() }, delivery: {
             delivered.append($0)
             return .copiedOnly
-        }
+        })
         let listening = expectation(description: "listening before context is ready")
         let starting = Task {
             await app.startDictation()

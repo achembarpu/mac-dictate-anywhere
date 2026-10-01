@@ -57,11 +57,37 @@ or live UI latency measurements.
 ## Verification and reproduction
 
 Final full signed Debug suite with installed-model, Mandarin, Nemotron and S1-mini
-opt-ins: **579 total; 540 passed, 39 skipped, 0 failed**. App Swift warnings are
+opt-ins after the model-readiness follow-up: **584 total; 545 passed, 39 skipped,
+0 failed**. App Swift warnings are
 errors. Focused-group/forwarding script tests and diff whitespace checks pass.
 Skips include unavailable platform/hardware and opt-in benchmark/network cases.
 No cloud accuracy, energy, microphone/Bluetooth-route latency, or whole-app peak
 memory claim.
+
+## Model readiness follow-up
+
+Selected speech and VAD models now run a synthetic warmup before Ready. Native
+warmup resets its state, with EOU callbacks installed afterward so no synthetic
+end-of-speech signal can reach real dictation. Vocabulary models prepare before
+Stop, and S1-mini exercises context creation and generation once per loaded model.
+Settings/download/language changes prepare eligible cleanup while idle. Concurrent
+requests join, shutdown waits, and the existing preparation opt-out remains.
+
+The optimized cleanup benchmark measures the same 47-character transcript and
+settings both ways: **87.8 ms for the first cleanup after preparation**, compared
+with **240.3 ms with the model unloaded**. Preparation takes 236.5 ms outside that
+request. Subsequent warm cleanup p50/p95 is 87.1/89.5 ms (two samples), close to
+the original 85.6/85.8 ms probe. These small samples are diagnostic timings.
+The explicit installed model path excludes integrity-validation time.
+
+All ten installed speech choices pass first real transcription and repeated
+preparation checks. Tests also cover S1-mini request independence, zero CTC load
+or warmup at Stop after preparation, selection/opt-out/language gates, request
+joining and shutdown during loading. The existing `cleanup` benchmark now retains
+the first-after-prewarm measurement for future work. See the
+[readiness report](benchmarks/model-readiness-2026-10-02.json) for source hashes,
+individual measurements and limits. The ASR policy table above remains the
+original `fa15e64` measurement snapshot.
 
 The [machine-readable report](benchmarks/model-aware-transcription-2026-10-02.json)
 retains per-trial comparisons, all quality cases, source hashes, installed weight

@@ -168,8 +168,17 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         let startedAt = ContinuousClock.now
         let modelReady = await S1MiniPostProcessingService.prewarm(modelURL: modelURL)
         let elapsed = startedAt.duration(to: .now)
-        await S1MiniPostProcessingService.unload()
         XCTAssertTrue(modelReady, "S1-mini model failed to prewarm")
-        print("PIPELINE_BENCHMARK component=s1_mini_model_load elapsed=\(elapsed)")
+        print("PIPELINE_BENCHMARK component=s1_mini_prewarm elapsed=\(elapsed)")
+        let firstCleanup = ContinuousClock.now
+        let output = try await S1MiniPostProcessingService.process(
+            text: "Um, I think we should send the report tomorrow.", modelURL: modelURL,
+            styling: .semiFormal, structure: .prose, contextSetting: .general, context: nil
+        )
+        let requestElapsed = firstCleanup.duration(to: .now)
+        XCTAssertTrue(output.lowercased().contains("tomorrow"))
+        XCTAssertFalse(output.lowercased().contains("hello"), "Synthetic warmup leaked into cleanup")
+        print("PIPELINE_BENCHMARK component=s1_mini_first_cleanup_after_prewarm elapsed=\(requestElapsed)")
+        await S1MiniPostProcessingService.unload()
     }
 }

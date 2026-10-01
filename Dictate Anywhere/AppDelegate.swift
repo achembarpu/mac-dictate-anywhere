@@ -354,9 +354,10 @@ extension Notification.Name {
 private func configureFluidAudioLogging() {
     #if DEBUG
     let keepDebugLogs = ProcessInfo.processInfo.environment["DICTATE_ANYWHERE_KEEP_FLUID_DEBUG_LOGS"] == "1"
-    #else
-    let keepDebugLogs = false
-    #endif
     AppLogger.minimumLevel = keepDebugLogs ? .debug : .warning
     AppLogger.mirrorsToConsole = keepDebugLogs
+    #else
+    AppLogger.minimumLevel = .warning
+    AppLogger.mirrorsToConsole = false
+    #endif
 }

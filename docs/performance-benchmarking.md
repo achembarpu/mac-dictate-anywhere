@@ -76,7 +76,7 @@ time or transcript quality.
 | Insertion preparation | Replays whitespace, list, CJK, and boundary fixtures through insertion formatting. |
 | Paste script compilation | Compares repeated AppleScript compilation with the production precompile and cached path, without sending keystrokes. |
 | S1-mini policy | Exercises the production startup-prewarm decision matrix. |
-| S1-mini model load | Measures production prewarm with the app's validated installed model, or an explicit `S1_MINI_MODEL_PATH`; never downloads. |
+| S1-mini preparation | Measures production weight loading plus one synthetic inference warmup with the app's validated installed model, or an explicit `S1_MINI_MODEL_PATH`; never downloads. Already-warm models skip synthetic inference. |
 | S1-mini cleanup | With the app's validated installed model, or `S1_MINI_MODEL_PATH`, runs short, long and over-limit text through the real local cleanup service and reports cold/warm request timings. |
 | Apple Intelligence cleanup | Runs a fixed cleanup prompt through the on-device Foundation Models service when available. Schema success and fallback are visible in performance traces. |
 | Model switching | With `RUN_MODEL_SWITCH_BENCHMARK=1` and at least two installed models, times a fixed model-switch sequence. |

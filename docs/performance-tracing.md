@@ -59,14 +59,14 @@ S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local
 
 | User-visible boundary | Trace names |
 | --- | --- |
-| Startup and switching | `app.startup`, `app.permissionCheck`, `app.appleSpeechAssetRefresh`, `app.inputSourceApply`, `stt.prepare`, `stt.modelSwitch`, `stt.enginePrepare`, `stt.modelLoad` |
+| Startup and switching | `app.startup`, `app.permissionCheck`, `app.appleSpeechAssetRefresh`, `app.inputSourceApply`, `stt.prepare`, `stt.modelSwitch`, `stt.enginePrepare`, `stt.modelLoad`, `stt.modelWarmup` |
 | Accepted hotkey request to confirmed microphone capture | `dictation.requestToRecording`, `dictation.inputSourceApply`, `dictation.capture`, `dictation.contextCapture`, `dictation.start`, `audio.startup`, `audio.settle`, `audio.controllerWait`, `audio.controllerCreate`, `audio.microphoneBoost`, `audio.systemMute` |
 | Live recognition availability | `stt.firstPartial`, `stt.batchPreview`, `stt.batchVAD`, `stt.streamingProcess`, `stt.transcribe`, `audio.captureSummary`; Apple Speech reports `stt.appleSpeechSessionStart`, `stt.appleSpeechAssetInstall`, `stt.appleSpeechAnalyzerPrepare`, `stt.appleSpeechInputSummary`; AssemblyAI also reports `stt.livePreviewStart` and `stt.assemblyAIWarmConnection` |
 | Automatic end-of-utterance | `eou.detected`, `eou.stop`, followed by the regular stop path |
 | Stop recording to final transcript | `dictation.stopToInsertion`, `stt.stopToFinal`, `audio.teardown` (first controller shutdown), `stt.livePreviewStop` (AssemblyAI preview), `stt.finalize`, `stt.batchFinish`, `stt.streamingFinish`, `stt.transcribe` |
-| FluidAudio vocabulary final pass | `stt.vocabularyBoost`, `stt.ctcModelLoad`, `stt.vocabularyInference` |
+| FluidAudio vocabulary final pass | `stt.vocabularyBoost`, `stt.ctcModelLoad`, `stt.ctcWarmup`, `stt.vocabularyInference` |
 | AssemblyAI final request | `stt.assemblyAIFinal`, `stt.assemblyAIRequestBuild`, `stt.assemblyAIRequest`, `stt.assemblyAIResponseDecode`, `stt.warmConnectionWait` |
-| Local cleanup | `cleanup.validate`, `cleanup.request`, `cleanup.modelLoad`, `cleanup.tokenize`, `cleanup.promptEval`, `cleanup.decode`, `cleanup.generate` |
+| Local cleanup | `cleanup.validate`, `cleanup.prewarm`, `cleanup.request`, `cleanup.modelLoad`, `cleanup.tokenize`, `cleanup.promptEval`, `cleanup.decode`, `cleanup.generate` |
 | Apple Intelligence cleanup | `cleanup.appleIntelligenceSchema`, `cleanup.appleIntelligenceSchemaAccepted`, `cleanup.appleIntelligenceToolsFallback`, `cleanup.appleIntelligenceTools` |
 | Remote cleanup | `cleanup.ollamaReasoningLookup`, `cleanup.ollamaRequest`, `cleanup.ollamaServerTimings`, `cleanup.openRouterRequest`, `cleanup.openAICompatibleRequest`; Ollama's server-reported timings follow the same trace switch |
 | Delivery and restoration | `transcript.normalize`, `transcript.history`, `insertion.targetActivation`, `insertion.deliver`, `insertion.prepare`, `insertion.listEdit`, `insertion.clipboard`, `insertion.clipboardReady`, `insertion.pasteScript`, `insertion.pasteCompile`, `insertion.pasteEvent`, `insertion.listEditVerify`, `dictation.teardown`, `audio.microphoneRestore`, `audio.restoreSettle`, `audio.systemRestore` |

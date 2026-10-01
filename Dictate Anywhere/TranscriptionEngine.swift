@@ -870,23 +870,26 @@ final class ParakeetEngine: TranscriptionEngine {
         loadedModels = models
         modelOnDiskCached[modelChoice] = true
 
+        await prepareVocabularyIfNeeded()
         await MainActor.run {
             self.isReady = true
             self.isModelDownloaded = true
         }
-        await prepareVocabularyIfNeeded()
     }
 
     /// Vocabulary models must be resident before Stop, including when cleanup
     /// is enabled after the speech model has already been prepared.
-    func prepareVocabularyIfNeeded() async {
+    @discardableResult
+    func prepareVocabularyIfNeeded() async -> Bool {
         guard Settings.shared.transcriptPostProcessingMode == .fluidAudioVocabulary,
               selectedModelChoice.supportsFluidAudioVocabulary,
-              await asrCoordinator.isInitialized(for: selectedModelChoice) else { return }
+              await asrCoordinator.isInitialized(for: selectedModelChoice) else { return false }
         do {
             try await asrCoordinator.prepareVocabulary()
+            return true
         } catch {
             logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)")
+            return false
         }
     }
 
@@ -1483,6 +1486,7 @@ private actor AsrManagerCoordinator {
     private var multilingualManager: StreamingNemotronMultilingualAsrManager?
     private var pendingEndOfUtterance = false
     private var ctcModels: CtcModels?
+    private var modelGeneration = UUID()
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
         category: "AsrCoordinator"
@@ -1571,9 +1575,6 @@ private actor AsrManagerCoordinator {
         switch modelChoice {
         case .parakeetEou320:
             let streaming = StreamingEouAsrManager(chunkSize: .ms320)
-            await streaming.setEouCallback { [weak self] _ in
-                Task { await self?.markEndOfUtteranceDetected() }
-            }
             try await streaming.loadModels(to: fluidAudioModelCacheRoot(), configuration: nil, progressHandler: nil)
             streamingManager = streaming
             streamingModelChoice = modelChoice
@@ -1622,6 +1623,13 @@ private actor AsrManagerCoordinator {
             }
         }
         pendingEndOfUtterance = false
+        // Warmup must not queue an end-of-speech callback that could arrive
+        // after reset and prematurely stop the first real recording.
+        if let eou = streamingManager as? StreamingEouAsrManager {
+            await eou.setEouCallback { [weak self] _ in
+                Task { await self?.markEndOfUtteranceDetected() }
+            }
+        }
         logger.info("initializeStreaming: completed for \(modelChoice.displayName, privacy: .public)")
     }
 
@@ -1638,13 +1646,26 @@ private actor AsrManagerCoordinator {
 
     func prepareVocabulary() async throws {
         guard ctcModels == nil else { return }
-        let trace = PerfTrace.begin("stt.ctcModelLoad")
-        defer { trace.end() }
-        let loaded = try await CtcModels.downloadAndLoad(variant: .ctc110m)
-        _ = try await CtcKeywordSpotter(models: loaded).spotKeywordsWithLogProbs(
-            audioSamples: Self.warmupAudio, customVocabulary: CustomVocabularyContext(terms: [])
-        )
+        let loaded = try await loadVocabularyModels()
+        _ = try await PerfTrace.measure("stt.ctcWarmup") {
+            try await CtcKeywordSpotter(models: loaded).spotKeywordsWithLogProbs(
+                audioSamples: Self.warmupAudio, customVocabulary: CustomVocabularyContext(terms: [])
+            )
+        }
+    }
+
+    private func loadVocabularyModels() async throws -> CtcModels {
+        if let ctcModels { return ctcModels }
+        let generation = modelGeneration
+        let loaded = try await PerfTrace.measure("stt.ctcModelLoad") {
+            try await CtcModels.downloadAndLoad(variant: .ctc110m)
+        }
+        try Task.checkCancellation()
+        // A settings switch can release this coordinator while loading awaits.
+        // Do not restore weights for a model that is no longer selected.
+        guard generation == modelGeneration else { throw CancellationError() }
         ctcModels = loaded
+        return loaded
     }
 
     func resetSession(for modelChoice: ParakeetModelChoice) async throws {
@@ -1734,8 +1755,9 @@ private actor AsrManagerCoordinator {
         let terms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         guard !terms.isEmpty else { return original }
         do {
-            try await prepareVocabulary()
-            guard let ctcModels else { return original }
+            // If cleanup was enabled during recording, load lazily without an
+            // extra synthetic warmup on the latency-sensitive Stop path.
+            let ctcModels = try await loadVocabularyModels()
             let boosting = try await VocabularyBoostingSession(
                 vocabulary: CustomVocabularyContext(terms: terms.map { CustomVocabularyTerm(text: $0) }),
                 ctcModels: ctcModels, config: ParakeetEngine.vocabularyRescorerConfig
@@ -1807,6 +1829,7 @@ private actor AsrManagerCoordinator {
     }
 
     func cleanup() async {
+        modelGeneration = UUID()
         await cancelBatch()
         logger.info("cleanup: releasing manager (was initialized=\(self.isInitialized(), privacy: .public))")
         if let manager {

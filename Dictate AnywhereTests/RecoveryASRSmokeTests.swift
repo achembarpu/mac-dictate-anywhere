@@ -166,6 +166,13 @@ final class RecoveryASRSmokeTests: XCTestCase {
         settings.transcriptPostProcessingMode = .fluidAudioVocabulary
         settings.customVocabulary = ["John Collier", "Macbeth"]
         try await engine.prepare()
+        #if DEBUG
+        let lateLoads = OSAllocatedUnfairLock(initialState: 0)
+        PerfTrace.onIntervalCompleted = { name, _, _ in
+            if name == "stt.ctcModelLoad" || name == "stt.ctcWarmup" { lateLoads.withLock { $0 += 1 } }
+        }
+        defer { PerfTrace.onIntervalCompleted = nil }
+        #endif
         for shift in [0, 8_000, 16_000] {
             let input = [Float](repeating: 0, count: shift) + audio
             try await engine.beginBatchReplayForTesting()
@@ -176,6 +183,9 @@ final class RecoveryASRSmokeTests: XCTestCase {
             XCTAssertTrue(result.lowercased().contains("cheerful"), "Clear seam speech was lost: \(result)")
             XCTAssertLessThanOrEqual(try fixture.errorRate(hypothesis: result), 0.06, result)
         }
+        #if DEBUG
+        XCTAssertEqual(lateLoads.withLock { $0 }, 0, "CTC weights loaded at Stop instead of during preparation")
+        #endif
     }
 
     func testBatchCancellationAndShortFinalTailDoNotCarryBetweenRecordings() async throws {
