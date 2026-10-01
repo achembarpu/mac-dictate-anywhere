@@ -256,6 +256,11 @@ final class S1MiniModelManager {
 
     func refreshInstallationState() async {
         guard !isDownloading, !isDeleting else { return }
+        guard Self.hasCompleteInstallation(modelURL: modelURL, licenseURL: licenseURL) else {
+            isModelDownloaded = false
+            verifiedFingerprint = nil
+            return
+        }
         do {
             _ = try await validatedModelURL()
             lastError = nil

@@ -190,7 +190,11 @@ final class S1MiniPostProcessingTests: XCTestCase {
             .appendingPathComponent("s1-mini-concurrent-validation-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data("model fixture".utf8).write(to: directory.appendingPathComponent(S1MiniModelSpec.filename))
+        let modelURL = directory.appendingPathComponent(S1MiniModelSpec.filename)
+        try Data().write(to: modelURL)
+        let modelFile = try FileHandle(forWritingTo: modelURL)
+        try modelFile.truncate(atOffset: UInt64(S1MiniModelSpec.byteCount))
+        try modelFile.close()
         try Data("license".utf8).write(to: directory.appendingPathComponent("LICENSE"))
 
         let started = expectation(description: "integrity check started")
@@ -209,6 +213,19 @@ final class S1MiniPostProcessingTests: XCTestCase {
         XCTAssertEqual(validatedURL, manager.modelURL)
         XCTAssertEqual(gate.callCount, 1)
         XCTAssertTrue(manager.isModelDownloaded)
+        XCTAssertFalse(manager.isVerifying)
+    }
+
+    @MainActor
+    func testRefreshWithoutInstalledModelDoesNotReportDownloadFailure() async {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("s1-mini-not-installed-\(UUID())", isDirectory: true)
+        let manager = S1MiniModelManager(modelDirectory: directory)
+
+        await manager.refreshInstallationState()
+
+        XCTAssertFalse(manager.isModelDownloaded)
+        XCTAssertNil(manager.lastError)
         XCTAssertFalse(manager.isVerifying)
     }
 
