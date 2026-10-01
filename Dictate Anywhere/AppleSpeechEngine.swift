@@ -129,7 +129,6 @@ final class AppleSpeechEngine: TranscriptionEngine {
         let language = Settings.shared.appleSpeechLanguage
         let vocabulary = appleContextualVocabulary()
         do {
-            try await Self.requestAuthorizationIfNeeded()
             let session = try await AppleSpeechSession(
                 requestedLocale: Self.locale(for: language),
                 contextualVocabulary: vocabulary,
@@ -392,25 +391,6 @@ final class AppleSpeechEngine: TranscriptionEngine {
         return Locale(identifier: languageCode)
     }
 
-    @available(macOS 26.0, *)
-    static func requestAuthorizationIfNeeded() async throws {
-        let status: SFSpeechRecognizerAuthorizationStatus
-        switch SFSpeechRecognizer.authorizationStatus() {
-        case .notDetermined:
-            status = await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { newStatus in
-                    continuation.resume(returning: newStatus)
-                }
-            }
-        case let currentStatus:
-            status = currentStatus
-        }
-
-        guard status == .authorized else {
-            throw TranscriptionError.speechRecognitionPermissionDenied
-        }
-    }
-
     static func makeInstalledLivePreviewSession(
         languageCode: String,
         contextualVocabulary: [String],
@@ -427,7 +407,6 @@ final class AppleSpeechEngine: TranscriptionEngine {
         )
         guard installedIdentifiers.contains(supportedLocale.identifier(.bcp47)) else { return nil }
 
-        try await requestAuthorizationIfNeeded()
         return try await AppleSpeechSession(
             requestedLocale: supportedLocale,
             contextualVocabulary: contextualVocabulary,

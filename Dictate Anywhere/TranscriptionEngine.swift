@@ -420,7 +420,6 @@ enum TranscriptionError: LocalizedError {
     case engineNotReady
     case appleSpeechUnavailable
     case appleSpeechLanguageUnsupported
-    case speechRecognitionPermissionDenied
 
     var errorDescription: String? {
         switch self {
@@ -431,7 +430,6 @@ enum TranscriptionError: LocalizedError {
         case .engineNotReady: return "Transcription engine is not ready."
         case .appleSpeechUnavailable: return "Apple Speech requires macOS 26 or later and a supported Mac."
         case .appleSpeechLanguageUnsupported: return "The selected language is not supported by Apple Speech on this Mac."
-        case .speechRecognitionPermissionDenied: return "Speech Recognition permission is required to use Apple Speech."
         }
     }
 }
