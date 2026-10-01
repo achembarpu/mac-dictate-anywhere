@@ -125,6 +125,21 @@ final class AppState {
     private var activeRecordingStartupID: UUID?
     private var recordingStartTask: Task<Void, Error>?
     private var startupTask: Task<Void, Never>?
+    private struct EnginePreparationKey: Equatable {
+        let engine: TranscriptionEngineChoice
+        let model: ParakeetModelChoice
+        let language: SupportedLanguage
+        let appleSpeechLanguage: SupportedLanguage
+        let prewarmModel: Bool
+    }
+
+    private struct EnginePreparation {
+        let id: UUID
+        let key: EnginePreparationKey
+        let task: Task<Void, Never>
+    }
+
+    private var enginePreparation: EnginePreparation?
     /// Tracks the S1-mini prewarm load so shutdown can wait for the
     /// blocking C call instead of tearing down underneath it.
     private var cleanupPrewarmTask: Task<Void, Never>?
@@ -283,6 +298,12 @@ final class AppState {
         await cleanupPrewarmTask?.value
         cleanupPrewarmTask = nil
 
+        // A startup load can outlive its cancelled caller. Join it before
+        // cancelling the engine so a late load cannot restore stale state.
+        enginePreparation?.task.cancel()
+        await enginePreparation?.task.value
+        enginePreparation = nil
+
         let engine = sessionEngine ?? activeEngine
         await engine.cancel()
         if let recordingStartTask {
@@ -415,6 +436,41 @@ final class AppState {
     // MARK: - Engine Lifecycle
 
     func prepareActiveEngine(prewarmModel: Bool = true) async {
+        while let inFlight = enginePreparation {
+            await inFlight.task.value
+            if enginePreparation?.id == inFlight.id {
+                enginePreparation = nil
+            }
+            if inFlight.key == enginePreparationKey(prewarmModel: prewarmModel) {
+                return
+            }
+        }
+        guard !isShuttingDown else { return }
+        let id = UUID()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performPrepareActiveEngine(prewarmModel: prewarmModel)
+        }
+        enginePreparation = EnginePreparation(
+            id: id, key: enginePreparationKey(prewarmModel: prewarmModel), task: task
+        )
+        await task.value
+        if enginePreparation?.id == id {
+            enginePreparation = nil
+        }
+    }
+
+    private func enginePreparationKey(prewarmModel: Bool) -> EnginePreparationKey {
+        EnginePreparationKey(
+            engine: settings.engineChoice,
+            model: settings.parakeetModelChoice,
+            language: settings.selectedLanguage,
+            appleSpeechLanguage: settings.appleSpeechLanguage,
+            prewarmModel: prewarmModel
+        )
+    }
+
+    private func performPrepareActiveEngine(prewarmModel: Bool) async {
         let trace = PerfTrace.begin("stt.prepare")
         defer { trace.end() }
         guard !isShuttingDown else { return }

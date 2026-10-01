@@ -83,6 +83,28 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testConcurrentPreparationJoinsTheInFlightModelLoad() async {
+        let started = expectation(description: "model preparation started")
+        let gate = StartupModelPreparationGate(started: started)
+        let engine = StartupContextEngine()
+        engine.isReady = false
+        engine.onPrepareAsync = { await gate.wait() }
+        let app = app(engine: engine, capture: { _ in nil })
+
+        let startup = Task { await app.prepareActiveEngine() }
+        await fulfillment(of: [started], timeout: 5)
+        let firstUse = Task { await app.prepareActiveEngine() }
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(engine.prepareCount, 1)
+
+        await gate.release()
+        await startup.value
+        await firstUse.value
+        XCTAssertEqual(engine.prepareCount, 1)
+        XCTAssertTrue(engine.isReady)
+        await app.shutdown()
+    }
+
     func testStartupAppliesInputSourceProfileBeforePrewarmingSpeechModel() async {
         let settings = Settings.shared
         let savedModel = settings.parakeetModelChoice
@@ -368,6 +390,25 @@ private actor StartupContextSequence {
     func capture() async -> DictationContext? { await gates.removeFirst().capture() }
 }
 
+private actor StartupModelPreparationGate {
+    private let started: XCTestExpectation
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(started: XCTestExpectation) { self.started = started }
+
+    func wait() async {
+        await withCheckedContinuation {
+            continuation = $0
+            started.fulfill()
+        }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 @MainActor
 private final class StartupContextEngine: TranscriptionEngine {
     var recoveryCapture: RecoveryAudioCapture?
@@ -384,6 +425,7 @@ private final class StartupContextEngine: TranscriptionEngine {
     var prepareCount = 0
     var languageAtPreparation: SupportedLanguage?
     var onPrepare: (() -> Void)?
+    var onPrepareAsync: (() async -> Void)?
     var finalTranscript = "Recorded words."
     var onCaptureStopped: (() -> Void)?
 
@@ -391,6 +433,7 @@ private final class StartupContextEngine: TranscriptionEngine {
     func prepare() async throws {
         prepareCount += 1
         languageAtPreparation = Settings.shared.selectedLanguage
+        await onPrepareAsync?()
         isReady = true
         onPrepare?()
     }
