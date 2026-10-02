@@ -37,3 +37,19 @@ the integration report.
 Sources: [S1 author recipe](https://huggingface.co/superwhisper/s1-mini),
 [verified MLX conversion](https://huggingface.co/mlx-community/S1-mini-MLX-4bit),
 [official runtime](https://github.com/ml-explore/mlx-swift-lm).
+
+## Model installation
+
+The normal model cache holds a complete `mlx/` or `llama/` package. Apple Silicon
+prefers MLX; Intel selects GGUF and never initializes the MLX graph. Existing root
+GGUF downloads remain usable offline. Apple Silicon offers **Optimize Model** to
+install the smaller MLX package alongside them; new installs download the
+recommended format directly. Deleting the model removes both managed formats.
+
+Every new package includes pinned weight/config/tokenizer hashes plus the author's
+full LICENSE and NOTICE. Download progress covers all assets. Failed or cancelled
+transfers remove staging data and retain the previous installation; concurrent
+operations are rejected. Integrity hashing runs off the main actor, is coalesced
+and cached against every package file's metadata. A complete directory is committed
+only after verification. Changing runtime changes the preparation identity, so the
+new graph is warmed before it can be shown as prepared.

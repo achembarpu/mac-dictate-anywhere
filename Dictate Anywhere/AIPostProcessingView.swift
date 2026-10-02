@@ -803,7 +803,7 @@ struct AIPostProcessingView: View {
         DSSection(overline: "S1-mini by Superwhisper") {
             DSInfoRow(label: "Language", value: "English cleanup")
             DSDivider()
-            DSInfoRow(label: "Model", value: "462 MB · English · Local transcript normalizer")
+            DSInfoRow(label: "Model", value: "\(Int(ceil(Double(manager.downloadByteCount) / 1_048_576))) MB · English · Local transcript normalizer")
             DSDivider()
             DSModelReadinessRow(
                 readiness: s1MiniReadiness(manager: manager),
@@ -827,6 +827,14 @@ struct AIPostProcessingView: View {
                 DSFieldMessage(text: error, tone: .error)
                     .padding(.horizontal, DS.Spacing.rowHorizontal)
                     .padding(.bottom, 10)
+            }
+            if manager.canOptimizeInstalledModel {
+                DSDivider()
+                DSInfoRow(label: "Use the optimized model for this Mac.", labelColor: DS.Colors.textSecondary) {
+                    Button(manager.isDownloading ? "Optimizing…" : "Optimize Model") { downloadS1MiniModel() }
+                        .buttonStyle(.dsPrimary)
+                        .disabled(manager.isBusy || appState.isPreparingCleanupEngine)
+                }
             }
             if manager.isModelDownloaded {
                 DSDivider()
@@ -921,8 +929,8 @@ struct AIPostProcessingView: View {
         }
 
         let fraction = s1MiniVisibleDownloadProgress(manager: manager)
-        let downloadedMiB = Int(Double(S1MiniModelSpec.byteCount) * fraction / 1_048_576)
-        let totalMiB = Int(ceil(Double(S1MiniModelSpec.byteCount) / 1_048_576))
+        let downloadedMiB = Int(Double(manager.downloadByteCount) * fraction / 1_048_576)
+        let totalMiB = Int(ceil(Double(manager.downloadByteCount) / 1_048_576))
         return "\(Int(fraction * 100))% · \(downloadedMiB) of \(totalMiB) MB"
     }
 

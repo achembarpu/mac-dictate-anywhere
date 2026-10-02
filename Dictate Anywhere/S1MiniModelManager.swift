@@ -36,15 +36,29 @@ enum S1MiniModelManagerError: LocalizedError {
 
 enum S1MiniModelIntegrity {
     nonisolated static func validate(_ url: URL) throws {
+        if url.pathExtension == "gguf" {
+            if url.deletingLastPathComponent().lastPathComponent == S1MiniRuntime.llama.rawValue {
+                for asset in S1MiniRuntime.llama.assets {
+                    try validate(url.deletingLastPathComponent().appendingPathComponent(asset.filename), asset: asset)
+                }
+            } else {
+                try validate(url, asset: S1MiniRuntime.llama.assets[0])
+            }
+        } else {
+            for asset in S1MiniRuntime.mlx.assets {
+                try validate(url.appendingPathComponent(asset.filename), asset: asset)
+            }
+        }
+    }
+
+    nonisolated static func validate(_ url: URL, asset: S1MiniModelAsset) throws {
+        try Task.checkCancellation()
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         let byteCount = (attributes[.size] as? NSNumber)?.int64Value ?? -1
-        guard byteCount == S1MiniModelSpec.byteCount else {
-            throw S1MiniModelManagerError.unexpectedFileSize(
-                actual: byteCount,
-                expected: S1MiniModelSpec.byteCount
-            )
+        guard byteCount == asset.byteCount else {
+            throw S1MiniModelManagerError.unexpectedFileSize(actual: byteCount, expected: asset.byteCount)
         }
-        guard try sha256(of: url) == S1MiniModelSpec.sha256 else {
+        guard try sha256(of: url) == asset.sha256 else {
             throw S1MiniModelManagerError.checksumMismatch
         }
     }
@@ -55,6 +69,7 @@ enum S1MiniModelIntegrity {
 
         var hasher = SHA256()
         while let data = try handle.read(upToCount: 1_048_576), !data.isEmpty {
+            try Task.checkCancellation()
             hasher.update(data: data)
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
@@ -90,6 +105,7 @@ enum S1MiniDownloadProgress {
 
 private final class S1MiniModelDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let destinationURL: URL
+    private let byteCount: Int64
     private let onProgress: @Sendable (Double) -> Void
     private let stateLock = NSLock()
     private var continuation: CheckedContinuation<URLResponse, Error>?
@@ -98,8 +114,9 @@ private final class S1MiniModelDownloader: NSObject, URLSessionDownloadDelegate,
     private var fileMoveError: Error?
     private var lastReportedFraction = -1.0
 
-    init(destinationURL: URL, onProgress: @escaping @Sendable (Double) -> Void) {
+    init(destinationURL: URL, byteCount: Int64, onProgress: @escaping @Sendable (Double) -> Void) {
         self.destinationURL = destinationURL
+        self.byteCount = byteCount
         self.onProgress = onProgress
     }
 
@@ -143,7 +160,7 @@ private final class S1MiniModelDownloader: NSObject, URLSessionDownloadDelegate,
     ) {
         let fraction = S1MiniDownloadProgress.transferFraction(
             totalBytesWritten: totalBytesWritten,
-            serverExpectedByteCount: totalBytesExpectedToWrite
+            serverExpectedByteCount: totalBytesExpectedToWrite, pinnedByteCount: byteCount
         )
 
         stateLock.lock()
@@ -203,61 +220,65 @@ private final class S1MiniModelDownloader: NSObject, URLSessionDownloadDelegate,
 @Observable
 @MainActor
 final class S1MiniModelManager {
-    private struct Fingerprint: Equatable {
+    nonisolated private struct FileFingerprint: Equatable {
+        let path: String
         let byteCount: Int64
         let modificationDate: Date
     }
-
     private struct InstalledValidation {
         let id: UUID
-        let fingerprint: Fingerprint
+        let fingerprint: [FileFingerprint]
         let task: Task<Void, Error>
     }
 
-    private(set) var isModelDownloaded: Bool
+    private(set) var isModelDownloaded = false
     private(set) var isDownloading = false
     private(set) var isDeleting = false
     private(set) var isVerifying = false
     private(set) var runtimeRevision = 0
     private(set) var downloadProgress = 0.0
     private(set) var lastError: String?
-
+    private(set) var installedModelURL: URL?
     let modelDirectory: URL
-    let modelURL: URL
-    let licenseURL: URL
-
-    private var verifiedFingerprint: Fingerprint?
+    let recommendedRuntime: S1MiniRuntime
+    private var verifiedFingerprint: [FileFingerprint]?
     @ObservationIgnored private var installedValidation: InstalledValidation?
+    @ObservationIgnored private var downloadID: UUID?
+    @ObservationIgnored private let assetDownloader: @Sendable (S1MiniModelAsset, URL, @escaping @Sendable (Double) -> Void) async throws -> Void
     @ObservationIgnored private let integrityValidator: @Sendable (URL) throws -> Void
 
     init(
         modelDirectory: URL = S1MiniModelManager.defaultModelDirectory,
+        recommendedRuntime: S1MiniRuntime = .recommended,
+        assetDownloader: @escaping @Sendable (S1MiniModelAsset, URL, @escaping @Sendable (Double) -> Void) async throws -> Void = S1MiniModelManager.downloadAsset,
         integrityValidator: @escaping @Sendable (URL) throws -> Void = S1MiniModelIntegrity.validate
     ) {
         self.modelDirectory = modelDirectory
+        self.recommendedRuntime = recommendedRuntime
         self.integrityValidator = integrityValidator
-        modelURL = modelDirectory.appendingPathComponent(S1MiniModelSpec.filename)
-        licenseURL = modelDirectory.appendingPathComponent("LICENSE")
-        isModelDownloaded = Self.hasCompleteInstallation(
-            modelURL: modelURL,
-            licenseURL: licenseURL
-        )
+        self.assetDownloader = assetDownloader
+        installedModelURL = Self.installedURL(in: modelDirectory, runtime: recommendedRuntime)
+        isModelDownloaded = installedModelURL != nil
     }
 
     nonisolated static var defaultModelDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dictate Anywhere", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent("S1-mini", isDirectory: true)
+            .appendingPathComponent("Dictate Anywhere/Models/S1-mini", isDirectory: true)
     }
 
-    var isBusy: Bool {
-        isDownloading || isDeleting || isVerifying
+    var modelURL: URL { installedModelURL ?? recommendedRuntime.modelURL(in: modelDirectory) }
+    var licenseURL: URL { (modelURL.pathExtension == "gguf" ? modelURL.deletingLastPathComponent() : modelURL).appendingPathComponent("LICENSE") }
+    var downloadByteCount: Int64 { recommendedRuntime.downloadByteCount }
+    var canOptimizeInstalledModel: Bool {
+        recommendedRuntime == .mlx && installedModelURL?.pathExtension == "gguf"
     }
+    var installationIdentity: String { installedModelURL?.path ?? "" }
+    var isBusy: Bool { isDownloading || isDeleting || isVerifying }
 
     func refreshInstallationState() async {
         guard !isDownloading, !isDeleting else { return }
-        guard Self.hasCompleteInstallation(modelURL: modelURL, licenseURL: licenseURL) else {
+        installedModelURL = Self.installedURL(in: modelDirectory, runtime: recommendedRuntime)
+        guard installedModelURL != nil else {
             isModelDownloaded = false
             verifiedFingerprint = nil
             return
@@ -275,97 +296,75 @@ final class S1MiniModelManager {
     func validatedModelURL() async throws -> URL {
         let trace = PerfTrace.begin("cleanup.validate")
         defer { trace.end() }
-        guard Self.hasNonEmptyFile(at: licenseURL) else {
-            isModelDownloaded = false
-            throw S1MiniModelManagerError.missingLicense
-        }
-        let fingerprint = try Self.fingerprint(at: modelURL)
+        guard let url = installedModelURL else { throw S1MiniServiceError.modelNotDownloaded }
+        let fingerprint = try Self.fingerprint(at: url)
         if fingerprint != verifiedFingerprint {
-            try await validateInstalledModel(fingerprint: fingerprint)
+            try await validateInstalledModel(url: url, fingerprint: fingerprint)
         }
+        try Task.checkCancellation()
         isModelDownloaded = true
-        return modelURL
+        return url
     }
 
     func downloadModel() async throws {
         let trace = PerfTrace.begin("cleanup.modelDownload")
         defer { trace.end() }
         guard !isBusy else { throw S1MiniModelManagerError.downloadInProgress }
-
-        if let existingURL = try? await validatedModelURL() {
-            isModelDownloaded = true
+        isDownloading = true
+        let operationID = UUID()
+        downloadID = operationID
+        defer { isDownloading = false; downloadID = nil }
+        if !canOptimizeInstalledModel, (try? await validatedModelURL()) != nil {
             lastError = nil
-            _ = existingURL
             return
         }
-
-        isDownloading = true
-        isModelDownloaded = false
         downloadProgress = 0
         lastError = nil
-
         let fileManager = FileManager.default
-        let stagingID = UUID().uuidString
-        let stagedModelURL = modelDirectory.appendingPathComponent(".\(stagingID).gguf.part")
-        let stagedLicenseURL = modelDirectory.appendingPathComponent(".\(stagingID).license.part")
-
+        let staging = modelDirectory.appendingPathComponent(".\(UUID()).part", isDirectory: true)
         defer {
             isDownloading = false
-            try? fileManager.removeItem(at: stagedModelURL)
-            try? fileManager.removeItem(at: stagedLicenseURL)
-            if let contents = try? fileManager.contentsOfDirectory(atPath: modelDirectory.path),
-               contents.isEmpty {
-                try? fileManager.removeItem(at: modelDirectory)
-            }
+            try? fileManager.removeItem(at: staging)
         }
-
         do {
-            try fileManager.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
-            let downloader = S1MiniModelDownloader(destinationURL: stagedModelURL) { [weak self] fraction in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.downloadProgress = S1MiniDownloadProgress.installationProgress(
-                        current: self.downloadProgress,
-                        transferFraction: fraction
-                    )
+            try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+            var transferred: Int64 = 0
+            for asset in recommendedRuntime.assets {
+                try Task.checkCancellation()
+                let destination = staging.appendingPathComponent(asset.filename)
+                let completedBytes = transferred
+                let totalBytes = downloadByteCount
+                try await assetDownloader(asset, destination) { [weak self] fraction in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.downloadID == operationID else { return }
+                        self.downloadProgress = S1MiniDownloadProgress.installationProgress(current: self.downloadProgress,
+                            transferFraction: (Double(completedBytes) + fraction * Double(asset.byteCount)) / Double(totalBytes))
+                    }
                 }
+                try await Task.detached(priority: .utility) {
+                    try S1MiniModelIntegrity.validate(destination, asset: asset)
+                }.value
+                try Task.checkCancellation()
+                transferred += asset.byteCount
             }
-            let response = try await downloader.download(from: S1MiniModelSpec.downloadURL)
-            try Self.requireSuccessfulHTTPResponse(response)
-            try await Task.detached(priority: .utility) {
-                try S1MiniModelIntegrity.validate(stagedModelURL)
-            }.value
-
-            let (licenseData, licenseResponse) = try await URLSession.shared.data(
-                from: S1MiniModelSpec.licenseURL
-            )
-            try Self.requireSuccessfulHTTPResponse(licenseResponse)
-            guard !licenseData.isEmpty else {
-                throw S1MiniModelManagerError.missingLicense
-            }
-
-            try licenseData.write(to: stagedLicenseURL, options: .atomic)
             downloadProgress = 0.99
-
             runtimeRevision += 1
             await S1MiniPostProcessingService.unload()
-            if fileManager.fileExists(atPath: modelURL.path) {
-                try fileManager.removeItem(at: modelURL)
+            try Task.checkCancellation()
+            let destination = recommendedRuntime.directory(in: modelDirectory)
+            // Keep an existing valid installation until every replacement asset
+            // has passed validation. Rename one complete directory at commit.
+            if fileManager.fileExists(atPath: destination.path) {
+                _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
+            } else {
+                try fileManager.moveItem(at: staging, to: destination)
             }
-            if fileManager.fileExists(atPath: licenseURL.path) {
-                try fileManager.removeItem(at: licenseURL)
-            }
-            try fileManager.moveItem(at: stagedModelURL, to: modelURL)
-            try fileManager.moveItem(at: stagedLicenseURL, to: licenseURL)
-
-            verifiedFingerprint = try Self.fingerprint(at: modelURL)
+            let url = recommendedRuntime.modelURL(in: modelDirectory)
+            installedModelURL = url
+            verifiedFingerprint = try Self.fingerprint(at: url)
             isModelDownloaded = true
             downloadProgress = 1
         } catch {
-            isModelDownloaded = Self.hasCompleteInstallation(
-                modelURL: modelURL,
-                licenseURL: licenseURL
-            )
             lastError = error.localizedDescription
             throw error
         }
@@ -376,93 +375,96 @@ final class S1MiniModelManager {
         isDeleting = true
         lastError = nil
         defer { isDeleting = false }
-
         runtimeRevision += 1
         await S1MiniPostProcessingService.unload()
         let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: modelURL.path) {
-            try fileManager.removeItem(at: modelURL)
+        // Only managed S1 files; preserve unrelated data in the model root.
+        for runtime in [S1MiniRuntime.llama, .mlx] {
+            let directory = runtime.directory(in: modelDirectory)
+            if fileManager.fileExists(atPath: directory.path) { try fileManager.removeItem(at: directory) }
         }
-        if fileManager.fileExists(atPath: licenseURL.path) {
-            try fileManager.removeItem(at: licenseURL)
-        }
-        if let contents = try? fileManager.contentsOfDirectory(atPath: modelDirectory.path), contents.isEmpty {
-            try? fileManager.removeItem(at: modelDirectory)
+        for filename in [S1MiniModelSpec.filename, "LICENSE", "NOTICE"] {
+            let url = modelDirectory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
         }
         verifiedFingerprint = nil
+        installedModelURL = nil
         isModelDownloaded = false
         downloadProgress = 0
     }
 
-    private func validateInstalledModel(fingerprint: Fingerprint) async throws {
+    private func validateInstalledModel(url: URL, fingerprint: [FileFingerprint]) async throws {
         let validation: InstalledValidation
         if let inFlight = installedValidation, inFlight.fingerprint == fingerprint {
             validation = inFlight
         } else {
             let validator = integrityValidator
-            let url = modelURL
-            let task = Task.detached(priority: .utility) {
-                try validator(url)
-            }
-            validation = InstalledValidation(id: UUID(), fingerprint: fingerprint, task: task)
+            validation = InstalledValidation(id: UUID(), fingerprint: fingerprint,
+                task: Task.detached(priority: .utility) { try validator(url) })
             installedValidation = validation
             isVerifying = true
         }
-
+        defer {
+            if installedValidation?.id == validation.id {
+                installedValidation = nil
+                isVerifying = false
+            }
+        }
         do {
             try await validation.task.value
-            guard try Self.fingerprint(at: modelURL) == fingerprint else {
+            guard installedModelURL == url, try Self.fingerprint(at: url) == fingerprint else {
                 throw S1MiniModelManagerError.changedDuringValidation
             }
             verifiedFingerprint = fingerprint
-            if installedValidation?.id == validation.id {
-                installedValidation = nil
-                isVerifying = false
-            }
         } catch {
-            if installedValidation?.id == validation.id {
-                installedValidation = nil
-                isVerifying = false
-                verifiedFingerprint = nil
-            }
+            verifiedFingerprint = nil
+            isModelDownloaded = false
             throw error
         }
     }
 
-    nonisolated private static func hasExpectedSize(at url: URL) -> Bool {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else {
-            return false
+    nonisolated private static func installedURL(in root: URL, runtime: S1MiniRuntime) -> URL? {
+        if complete(runtime.directory(in: root), assets: runtime.assets) { return runtime.modelURL(in: root) }
+        if runtime == .mlx, complete(S1MiniRuntime.llama.directory(in: root), assets: S1MiniRuntime.llama.assets) {
+            return S1MiniRuntime.llama.modelURL(in: root)
         }
-        return size.int64Value == S1MiniModelSpec.byteCount
+        // Existing GGUF downloads remain usable offline during the optimized
+        // model migration. The explicit Optimize action installs MLX alongside.
+        let legacy = root.appendingPathComponent(S1MiniModelSpec.filename)
+        if size(legacy) == S1MiniModelSpec.byteCount, size(root.appendingPathComponent("LICENSE")) > 0 { return legacy }
+        return nil
     }
 
-    nonisolated private static func hasCompleteInstallation(
-        modelURL: URL,
-        licenseURL: URL
-    ) -> Bool {
-        hasExpectedSize(at: modelURL) && hasNonEmptyFile(at: licenseURL)
+    nonisolated private static func complete(_ directory: URL, assets: [S1MiniModelAsset]) -> Bool {
+        assets.allSatisfy { size(directory.appendingPathComponent($0.filename)) == $0.byteCount }
     }
-
-    nonisolated private static func hasNonEmptyFile(at url: URL) -> Bool {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else {
-            return false
+    nonisolated private static func size(_ url: URL) -> Int64 {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber)?.int64Value ?? -1
+    }
+    nonisolated private static func fingerprint(at url: URL) throws -> [FileFingerprint] {
+        let files: [URL]
+        if url.pathExtension != "gguf" {
+            files = S1MiniRuntime.mlx.assets.map { url.appendingPathComponent($0.filename) }
+        } else if url.deletingLastPathComponent().lastPathComponent == S1MiniRuntime.llama.rawValue {
+            files = S1MiniRuntime.llama.assets.map { url.deletingLastPathComponent().appendingPathComponent($0.filename) }
+        } else {
+            files = [url, url.deletingLastPathComponent().appendingPathComponent("LICENSE")]
         }
-        return size.int64Value > 0
+        return try files.map { file in
+            let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+            return FileFingerprint(path: file.path, byteCount: (attributes[.size] as? NSNumber)?.int64Value ?? -1,
+                modificationDate: attributes[.modificationDate] as? Date ?? .distantPast)
+        }
     }
-
-    nonisolated private static func fingerprint(at url: URL) throws -> Fingerprint {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        return Fingerprint(
-            byteCount: (attributes[.size] as? NSNumber)?.int64Value ?? -1,
-            modificationDate: attributes[.modificationDate] as? Date ?? .distantPast
-        )
+    nonisolated private static func downloadAsset(
+        _ asset: S1MiniModelAsset, to destination: URL, progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        let downloader = S1MiniModelDownloader(destinationURL: destination, byteCount: asset.byteCount, onProgress: progress)
+        try requireSuccessfulHTTPResponse(try await downloader.download(from: asset.downloadURL))
     }
 
     nonisolated private static func requireSuccessfulHTTPResponse(_ response: URLResponse) throws {
-        guard let response = response as? HTTPURLResponse,
-              (200..<300).contains(response.statusCode) else {
+        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             throw S1MiniModelManagerError.invalidResponse
         }
     }

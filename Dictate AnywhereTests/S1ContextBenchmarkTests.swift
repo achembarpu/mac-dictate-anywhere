@@ -12,7 +12,7 @@ final class S1ContextBenchmarkTests: XCTestCase {
         #else
         let environment = ProcessInfo.processInfo.environment
         let iterations = max(1, min(10, Int(environment["PIPELINE_BENCHMARK_ITERATIONS"] ?? "5") ?? 5))
-        let manager = S1MiniModelManager()
+        let manager = S1MiniModelManager(recommendedRuntime: .llama)
         let url: URL
         if let path = environment["S1_MINI_MODEL_PATH"], !path.isEmpty {
             url = URL(fileURLWithPath: path)
