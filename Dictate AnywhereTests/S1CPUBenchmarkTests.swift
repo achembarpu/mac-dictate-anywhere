@@ -10,7 +10,7 @@ final class S1CPUBenchmarkTests: XCTestCase {
         #else
         let env = ProcessInfo.processInfo.environment
         let iterations = max(1, min(10, Int(env["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))
-        let manager = S1MiniModelManager()
+        let manager = S1MiniModelManager(recommendedRuntime: .llama)
         let url = env["S1_MINI_MODEL_PATH"].map { URL(fileURLWithPath: $0) } ?? manager.modelURL
         try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path), "Install S1 GGUF or specify its path")
         let engine = S1MiniInferenceEngine.shared

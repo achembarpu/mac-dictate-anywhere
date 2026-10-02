@@ -11,7 +11,7 @@ final class S1PreparationBenchmarkTests: XCTestCase {
         let env = ProcessInfo.processInfo.environment
         let manager = S1MiniModelManager()
         let url: URL
-        if let path = env["S1_MINI_MODEL_PATH"] { url = URL(fileURLWithPath: path) }
+        if let path = env["S1_MLX_MODEL_PATH"] ?? env["S1_MINI_MODEL_PATH"] { url = URL(fileURLWithPath: path) }
         else { url = try await manager.validatedModelURL() }
         let text = "please send invoice 4182 to Mara on October 14 and do not include the draft"
         let iterations = max(1, min(10, Int(env["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))

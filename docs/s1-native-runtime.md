@@ -53,3 +53,17 @@ operations are rejected. Integrity hashing runs off the main actor, is coalesced
 and cached against every package file's metadata. A complete directory is committed
 only after verification. Changing runtime changes the preparation identity, so the
 new graph is warmed before it can be shown as prepared.
+
+## Runtime tuning and inspection
+
+Native MLX keeps normal KV. The Metal GGUF path uses FP16 KV after a paired
+accuracy/performance check; Intel CPU keeps Q8 KV, which performed better in the
+available x86/Rosetta run. CPU threads use physical cores, bounded by active
+processors and capped at eight, to avoid oversubscribing Intel's SMT siblings.
+Rosetta validates the Intel code path; its timings do not predict native Intel
+hardware.
+
+`cleanup.prefillSchedule` measures CPU scheduling. `cleanup.firstToken` ends when
+GPU/CPU prompt work has produced a token visible to the sampling loop. These
+spans avoid mistaking asynchronous scheduling time for completed inference.
+Request/generation spans still include the complete response and graph cleanup.

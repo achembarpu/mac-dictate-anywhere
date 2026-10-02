@@ -1,5 +1,8 @@
 #if arch(arm64)
 import Foundation
+#if DEBUG || PIPELINE_BENCHMARK
+import CryptoKit
+#endif
 import MLX
 import MLXLLM
 import MLXLMCommon
@@ -98,6 +101,7 @@ actor S1MiniMLXInferenceEngine {
         if context != nil {
             Stream().synchronize()
             context = nil
+            prefixCache = []
             Memory.clearCache()
         }
         modelPath = nil
@@ -142,11 +146,12 @@ actor S1MiniMLXInferenceEngine {
         defer { trace.end() }
         let tokenizerTrace = PerfTrace.begin("cleanup.tokenize")
         let count = context.tokenizer.encode(text: transcript, addSpecialTokens: false).count
-        let tokens = context.tokenizer.encode(text: prompt, addSpecialTokens: false)
-        tokenizerTrace.end()
         guard count <= S1MiniModelSpec.maximumTranscriptTokens else {
+            tokenizerTrace.end()
             throw S1MiniServiceError.transcriptTooLong(actual: count, maximum: S1MiniModelSpec.maximumTranscriptTokens)
         }
+        let tokens = context.tokenizer.encode(text: prompt, addSpecialTokens: false)
+        tokenizerTrace.end()
         try Task.checkCancellation()
         let maximum = Int(ceil(Double(count) * 1.3)) + 32
         let stops = Set([context.tokenizer.eosTokenId,
@@ -160,7 +165,11 @@ actor S1MiniMLXInferenceEngine {
             Stream().synchronize()
             if !completed { warmed = false }
         }
-        let promptTrace = PerfTrace.begin("cleanup.promptEval")
+        let firstTokenTrace = PerfTrace.begin("cleanup.firstToken")
+        defer { firstTokenTrace.end() }
+        // Scheduling is asynchronous. firstToken ends only when the first
+        // token reaches the CPU, including the GPU's completed prompt work.
+        let promptTrace = PerfTrace.begin("cleanup.prefillSchedule")
         var iterator: TokenIterator
         do {
             defer { promptTrace.end() }
@@ -171,6 +180,7 @@ actor S1MiniMLXInferenceEngine {
         defer { decodeTrace.end() }
         var output: [Int] = []
         while let token = iterator.next() {
+            firstTokenTrace.end()
             try Task.checkCancellation()
             if stops.contains(token) {
                 completed = true
@@ -194,11 +204,17 @@ actor S1MiniMLXInferenceEngine {
     }
 
     #if DEBUG || PIPELINE_BENCHMARK
-    func configureForTesting(prefix: Bool, prefill: Int = 512) async {
+    func configureForTesting(prefix: Bool, prefill: Int = 256) async {
         await acquireOperation()
         defer { releaseOperation() }
         usePrefix = prefix
         prefillStep = prefill
+    }
+
+    func publicPrefixDigestForTesting() -> String {
+        var hasher = SHA256()
+        for array in prefixCache.flatMap({ $0.state }) { hasher.update(data: array.asData().data) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     func stateForTesting() -> (loaded: Bool, warmed: Bool, prefixPositions: [Int]) {

@@ -203,9 +203,19 @@ and does not launch a server or download models. Use the local collector
 S1's additional authored stress references live in
 `s1-cleanup-stress-manifest.json`: signs/decimals, IDs, email/URL/code spelling,
 negation, spoken corrections, literal instructions/control tokens, names,
-questions and apologies. `s1-cpu` compares GGUF CPU KV precision on either
-architecture; `s1-prepare` measures cold engine vs prepared first use. Both
-reuse the existing fact/meaning scorer and retain results as JSON lines.
+questions and apologies. The `s1-runtime` group compares production native MLX
+with llama Q8/F16 and cached/uncached prefixes; `s1-cpu` compares CPU KV precision
+on either architecture. `s1-prepare` measures cold engine vs prepared first use.
+All reuse the existing fact/meaning scorer and retain every result as JSON lines.
+Normal tests skip installed-model work unless `S1_MLX_MODEL_PATH` or
+`S1_MINI_MODEL_PATH` is forwarded to the test host with the `TEST_RUNNER_` prefix.
+
+For a focused S1 dependency check, set `PIPELINE_BENCHMARK_S1_MODES=mlx,mlx-uncached`
+and run the existing `s1-runtime` group. This loads only selected backends and
+keeps exact cached/uncached output and factual-loss assertions. The default
+still compares all four modes. Unique mode names are validated so a typo cannot
+silently skip the intended comparison. S1 rows include process CPU milliseconds
+and cumulative process peak RSS; these are not GPU allocation or energy figures.
 
 ## Small candidate screens and resource accounting
 

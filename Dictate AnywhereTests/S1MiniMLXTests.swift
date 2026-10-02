@@ -4,6 +4,13 @@ import XCTest
 
 @MainActor
 final class S1MiniMLXTests: XCTestCase {
+    func testCPUThreadsRespectPhysicalCoresAndActiveCapacity() {
+        XCTAssertEqual(S1MiniCPUConfiguration.threads(physicalCores: 4, activeProcessors: 8), 4)
+        XCTAssertEqual(S1MiniCPUConfiguration.threads(physicalCores: 16, activeProcessors: 32), 8)
+        XCTAssertEqual(S1MiniCPUConfiguration.threads(physicalCores: 8, activeProcessors: 2), 2)
+        XCTAssertEqual(S1MiniCPUConfiguration.threads(physicalCores: 0, activeProcessors: 0), 1)
+    }
+
     func testRuntimeRecommendationMatchesArchitecture() {
         #if arch(arm64)
         XCTAssertEqual(S1MiniRuntime.recommended, .mlx)
@@ -50,6 +57,7 @@ final class S1MiniMLXTests: XCTestCase {
         let engine = S1MiniMLXInferenceEngine.shared
         await engine.unload()
         try await engine.prewarm(from: url)
+        let prefixDigest = await engine.publicPrefixDigestForTesting()
         let prepared = await engine.stateForTesting()
         XCTAssertTrue(prepared.loaded && prepared.warmed)
         XCTAssertEqual(Set(prepared.prefixPositions).count, 1)
@@ -61,6 +69,8 @@ final class S1MiniMLXTests: XCTestCase {
         XCTAssertTrue(first.contains("4182"))
         let after = await engine.stateForTesting()
         XCTAssertEqual(after.prefixPositions, prepared.prefixPositions)
+        let afterDigest = await engine.publicPrefixDigestForTesting()
+        XCTAssertEqual(afterDigest, prefixDigest)
         await engine.unload()
         let unloaded = await engine.stateForTesting()
         XCTAssertFalse(unloaded.loaded || unloaded.warmed)
@@ -90,6 +100,43 @@ final class S1MiniMLXTests: XCTestCase {
         await engine.unload()
     }
 
+    func testRealMLXAllControlsPreserveCacheAndMatchUncachedDecoder() async throws {
+        let url = try realMLXModel()
+        let engine = S1MiniMLXInferenceEngine.shared
+        try await engine.prewarm(from: url)
+        let digest = await engine.publicPrefixDigestForTesting()
+        for style in S1MiniStyling.allCases {
+            for structure in S1MiniStructure.allCases {
+                for context: S1MiniContextSetting in [.general, .email] {
+                    let text = "please send invoice 4182 to Mara tomorrow and do not include the draft"
+                    await engine.configureForTesting(prefix: true)
+                    let cached = try await S1MiniPostProcessingService.process(text: text, modelURL: url,
+                        styling: style, structure: structure, contextSetting: context, context: nil)
+                    await engine.configureForTesting(prefix: false)
+                    let fresh = try await S1MiniPostProcessingService.process(text: text, modelURL: url,
+                        styling: style, structure: structure, contextSetting: context, context: nil)
+                    XCTAssertEqual(cached, fresh, "\(style)/\(structure)/\(context)")
+                    XCTAssertTrue(cached.contains("4182") && cached.lowercased().contains("mara"), "\(style)/\(structure)/\(context): \(cached)")
+                }
+            }
+        }
+        await engine.configureForTesting(prefix: true)
+        let after = await engine.publicPrefixDigestForTesting()
+        XCTAssertEqual(after, digest)
+        await engine.unload()
+    }
+
+    func testRealMLXLongChunkingKeepsEveryNumberAndTheFinalEnding() async throws {
+        let url = try realMLXModel()
+        let text = (1...110).map { "Please keep invoice \($0) and send the report tomorrow." }.joined(separator: " ")
+            + " Do not include the draft."
+        let output = try await cleanup(text, url: url)
+        let numbers = Set(output.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) })
+        XCTAssertEqual(numbers, Set(1...110))
+        XCTAssertTrue(output.lowercased().contains("do not include the draft") || output.lowercased().contains("don't include the draft"))
+        await S1MiniMLXInferenceEngine.shared.unload()
+    }
+
     private func realMLXModel() throws -> URL {
         let path = ProcessInfo.processInfo.environment["S1_MLX_MODEL_PATH"]
         let url = path.map { URL(fileURLWithPath: $0) }
@@ -106,6 +153,4 @@ final class S1MiniMLXTests: XCTestCase {
             structure: .prose, contextSetting: .general, context: nil)
     }
     #endif
-
-
 }

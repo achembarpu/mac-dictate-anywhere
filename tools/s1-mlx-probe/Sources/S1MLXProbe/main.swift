@@ -52,7 +52,7 @@ struct S1MLXProbe {
         guard (6...10).contains(args.count), let iterations = Int(args[3]), (1...10).contains(iterations),
               let kvBits = Int(args[5]), [8, 16].contains(kvBits) else {
             throw NSError(domain: "S1MLXProbe", code: 1, userInfo: [NSLocalizedDescriptionKey:
-                "Usage: S1MLXProbe MODEL_DIRECTORY APP_REPO ITERATIONS OUTPUT_JSON KV_BITS(8|16)"])
+                "Usage: S1MLXProbe MODEL_DIRECTORY APP_REPO ITERATIONS OUTPUT_JSON KV_BITS(8|16) [PREFILL] [prefix|none] [CACHE_MIB] [qwen-card]"])
         }
         let candidate = args.count > 9 && args[9] == "qwen-card"
         let prefill = args.count > 6 ? Int(args[6]) ?? 512 : 512
@@ -68,7 +68,7 @@ struct S1MLXProbe {
         let start = ContinuousClock.now
         let context = try await loadModel(from: directory, using: HFLoader())
         let loadingMs = elapsed(start)
-        let label = "s1-mlx-swift-\(directory.lastPathComponent)-kv\(kvBits)-prefill\(prefill)-prefix\(prefixEnabled)"
+        let label = "native-mlx-swift-\(directory.lastPathComponent)-kv\(kvBits)-prefill\(prefill)-prefix\(prefixEnabled)"
         let publicPrefix = "<|im_start|>system\n\(system)<|im_end|>\n<|im_start|>user\n"
         let prefixTokens = context.tokenizer.encode(text: publicPrefix, addSpecialTokens: false)
         let prefixCache = context.model.newCache(parameters: nil)
@@ -79,6 +79,7 @@ struct S1MLXProbe {
         }
 
         func run(_ text: String, fixture: String, iteration: Int) throws -> Row {
+                if candidate { MLXRandom.seed(UInt64(100 + max(0, iteration))) }
                 let start = ContinuousClock.now
                 let tokenizer = context.tokenizer
                 let inputTokens = tokenizer.encode(text: text, addSpecialTokens: false).count
@@ -99,7 +100,7 @@ struct S1MLXProbe {
                 let stops = Set([tokenizer.eosTokenId, tokenizer.convertTokenToId("<|endoftext|>")].compactMap { $0 })
                 let parameters = GenerateParameters(maxTokens: maximum + 1, kvBits: kvBits == 8 ? 8 : nil,
                     temperature: candidate ? 1 : 0, topP: 1, topK: candidate ? 20 : 0,
-                    presencePenalty: candidate ? 2 : nil, presenceContextSize: candidate ? 1000 : 20,
+                    presencePenalty: candidate ? 2 : nil, presenceContextSize: candidate ? 4096 : 20,
                     prefillStepSize: prefill)
                 let usePrefix = prefixEnabled && tokens.starts(with: prefixTokens)
                 let requestTokens = usePrefix ? Array(tokens.dropFirst(prefixTokens.count)) : tokens

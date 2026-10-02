@@ -57,12 +57,14 @@ final class S1RuntimeBenchmarkTests: XCTestCase {
             XCTAssertEqual(outputs["mlx"], outputs["mlx-uncached"], fixture.id)
             let baselineIssues = Set(fixture.violations(in: try XCTUnwrap(outputs["llama"])))
             let newIssues = Set(fixture.violations(in: try XCTUnwrap(outputs["mlx"])))
+            let f16Issues = Set(fixture.violations(in: try XCTUnwrap(outputs["llama-f16"])))
+            XCTAssertTrue(f16Issues.isSubset(of: baselineIssues), "F16 regression in \(fixture.id)")
             XCTAssertTrue(newIssues.isSubset(of: baselineIssues), "New regression in \(fixture.id): \(newIssues.subtracting(baselineIssues))")
             for mode in modes {
                 BenchmarkStatistics(try XCTUnwrap(samples[mode])).report(component: "s1_runtime", details: "fixture=\(fixture.id) mode=\(mode)")
             }
         }
-        await S1MiniInferenceEngine.shared.configureCacheForTesting(f16: false)
+        await S1MiniInferenceEngine.shared.configureCacheForTesting(f16: nil)
         await mlx.configureForTesting(prefix: true, prefill: 256)
         await S1MiniPostProcessingService.unload()
         XCTAssertGreaterThan(ran, 0)
