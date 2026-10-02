@@ -107,5 +107,17 @@ no new universal or native Intel speed claim follows from this screen. See
 [the upgrade screen](s1-mlx-upgrade-screen.md) and
 [retained evidence](benchmarks/s1-mlx-upgrade-screen-2026-10-03.json).
 
-Quiet-input investigation and useful STT variant screens remain pending.
-Workspace research: `docs/stt-runtime-research.md`.
+The shared acoustic screen now separates quiet Float32 amplitude sensitivity
+from PCM16 quantization. It retains 105 outputs across v3/110M and two speakers.
+On the first clip, quiet Float32 WER rises from 11.76% to 58.82% for v3 and from
+0% to 100% for 110M; a 4× boost restores their original outputs. The second
+speaker's name accuracy improves at 4×, but stronger gains do not help. This is
+test-only evidence: live/VAD and natural-noise checks remain pending before any
+product gain. See [the acoustic report](tdt-acoustic-screen.md).
+
+Fresh normal Team-signed Debug verification at `f1405a1`: **655 total, 574 passed,
+81 skipped, zero failures**. The parent at `638e7c0` passes 638 total / 564 passed /
+74 skipped / zero failures. Both focused Release acoustic runs and script checks
+pass; weight and build/test log hashes are retained. Useful STT variant screens
+and the wider runtime audit remain active. Workspace research:
+`docs/stt-runtime-research.md`.
