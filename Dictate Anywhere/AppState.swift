@@ -125,6 +125,27 @@ final class AppState {
     private var activeRecordingStartupID: UUID?
     private var recordingStartTask: Task<Void, Error>?
     private var startupTask: Task<Void, Never>?
+    /// The startup sequence refreshes these assets before resolving input-source
+    /// profiles. Preparation during that sequence can reuse the same snapshot.
+    private var appleSpeechAssetsRefreshedDuringStartup = false
+    private struct EnginePreparationKey: Equatable {
+        let engine: TranscriptionEngineChoice
+        let model: ParakeetModelChoice
+        let language: SupportedLanguage
+        let appleSpeechLanguage: SupportedLanguage
+        let prewarmModel: Bool
+    }
+
+    private struct EnginePreparation {
+        let id: UUID
+        let key: EnginePreparationKey
+        let task: Task<Void, Never>
+    }
+
+    private var enginePreparation: EnginePreparation?
+    /// Tracks the S1-mini prewarm load so shutdown can wait for the
+    /// blocking C call instead of tearing down underneath it.
+    private var cleanupPrewarmTask: Task<Void, Never>?
     private var hasStarted = false
     private var isShuttingDown = false
 
@@ -274,6 +295,18 @@ final class AppState {
         processingTask = nil
         processingOperationID = nil
 
+        // A prewarm load is a blocking C call that ignores cancellation;
+        // wait for it rather than tearing down underneath it.
+        cleanupPrewarmTask?.cancel()
+        await cleanupPrewarmTask?.value
+        cleanupPrewarmTask = nil
+
+        // A startup load can outlive its cancelled caller. Join it before
+        // cancelling the engine so a late load cannot restore stale state.
+        enginePreparation?.task.cancel()
+        await enginePreparation?.task.value
+        enginePreparation = nil
+
         let engine = sessionEngine ?? activeEngine
         await engine.cancel()
         if let recordingStartTask {
@@ -312,23 +345,78 @@ final class AppState {
     private func runStartupSequence() async {
         let trace = PerfTrace.begin("app.startup")
         defer { trace.end() }
+        // Compilation uses the paste worker queue and is independent of the
+        // model toggle. Await it before enabling the dictation hotkey.
+        let pasteScriptReady = await textInserter.prewarmPasteScript()
+        if !pasteScriptReady {
+            logger.warning("Startup paste script compilation failed; paste will retry on first use")
+        }
+        guard !isShuttingDown else { return }
         await PerfTrace.measure("app.permissionCheck") { await permissions.check() }
         guard !isShuttingDown else { return }
         updateAccessibilityIntegration(granted: permissions.accessibilityGranted, promptIfNeeded: true)
-        await prepareActiveEngine()
-        guard !isShuttingDown else { return }
         await PerfTrace.measure("app.appleSpeechAssetRefresh") {
             await refreshAppleSpeechAssetState()
         }
         guard !isShuttingDown else { return }
-        inputSourceMonitor.startMonitoring()
+        appleSpeechAssetsRefreshedDuringStartup = true
+        defer { appleSpeechAssetsRefreshedDuringStartup = false }
+        let startupInputSourceID = inputSourceIDOverride?() ?? inputSourceMonitor.currentInputSourceID()
         if settings.engineChoice != .assemblyAI,
            settings.inputSourceAutoSwitchEnabled,
-           let inputSourceID = inputSourceMonitor.currentInputSourceID() {
+           let startupInputSourceID {
             await PerfTrace.measure("app.inputSourceApply") {
-                await enqueueInputSourceProfileApply(for: inputSourceID).value
+                await enqueueInputSourceProfileApply(
+                    for: startupInputSourceID,
+                    prewarmModel: false
+                ).value
             }
         }
+        guard !isShuttingDown else { return }
+        await prepareActiveEngine(prewarmModel: settings.prewarmEnginesAtStartup)
+        guard !isShuttingDown else { return }
+        inputSourceMonitor.startMonitoring()
+        // A source can change during model loading. Reconcile it once after
+        // installing the observer so a change during startup is not missed.
+        let currentInputSourceID = inputSourceIDOverride?() ?? inputSourceMonitor.currentInputSourceID()
+        if settings.engineChoice != .assemblyAI,
+           settings.inputSourceAutoSwitchEnabled,
+           let currentInputSourceID,
+           currentInputSourceID != startupInputSourceID {
+            await PerfTrace.measure("app.inputSourceApply") {
+                await enqueueInputSourceProfileApply(
+                    for: currentInputSourceID,
+                    prewarmModel: settings.prewarmEnginesAtStartup
+                ).value
+            }
+        }
+        guard !isShuttingDown else { return }
+        appleSpeechAssetsRefreshedDuringStartup = false
+        await prewarmCleanupEngineIfNeeded()
+    }
+
+    /// Warms the S1-mini cleanup model in the background so the first
+    /// dictation with cleanup doesn't pay the load cost. Silent by design: any
+    /// skip or failure leaves first-use lazy loading unchanged. Never runs
+    /// under the test host, where an 8-second model load per test would be
+    /// pure overhead.
+    private func prewarmCleanupEngineIfNeeded() async {
+        guard !AppDelegate.isRunningTests else { return }
+        guard S1MiniPrewarmPolicy.shouldPrewarm(
+            mode: settings.transcriptPostProcessingMode,
+            language: settings.engineChoice == .appleSpeech
+                ? settings.appleSpeechLanguage : settings.selectedLanguage,
+            prewarmEnabled: settings.prewarmEnginesAtStartup
+        ) else { return }
+        guard let modelURL = try? await s1MiniModelManager.validatedModelURL() else { return }
+        guard !isShuttingDown else { return }
+        let task = Task(priority: .utility) { [weak self] in
+            guard self != nil else { return }
+            _ = await S1MiniPostProcessingService.prewarm(modelURL: modelURL)
+        }
+        cleanupPrewarmTask = task
+        await task.value
+        cleanupPrewarmTask = nil
     }
 
     private func handleAccessibilityPermissionChanged(_ granted: Bool) {
@@ -353,7 +441,42 @@ final class AppState {
 
     // MARK: - Engine Lifecycle
 
-    func prepareActiveEngine() async {
+    func prepareActiveEngine(prewarmModel: Bool = true) async {
+        while let inFlight = enginePreparation {
+            await inFlight.task.value
+            if enginePreparation?.id == inFlight.id {
+                enginePreparation = nil
+            }
+            if inFlight.key == enginePreparationKey(prewarmModel: prewarmModel) {
+                return
+            }
+        }
+        guard !isShuttingDown else { return }
+        let id = UUID()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performPrepareActiveEngine(prewarmModel: prewarmModel)
+        }
+        enginePreparation = EnginePreparation(
+            id: id, key: enginePreparationKey(prewarmModel: prewarmModel), task: task
+        )
+        await task.value
+        if enginePreparation?.id == id {
+            enginePreparation = nil
+        }
+    }
+
+    private func enginePreparationKey(prewarmModel: Bool) -> EnginePreparationKey {
+        EnginePreparationKey(
+            engine: settings.engineChoice,
+            model: settings.parakeetModelChoice,
+            language: settings.selectedLanguage,
+            appleSpeechLanguage: settings.appleSpeechLanguage,
+            prewarmModel: prewarmModel
+        )
+    }
+
+    private func performPrepareActiveEngine(prewarmModel: Bool) async {
         let trace = PerfTrace.begin("stt.prepare")
         defer { trace.end() }
         guard !isShuttingDown else { return }
@@ -378,7 +501,9 @@ final class AppState {
                 settings.legacyAppleSpeechMigrationPending = false
             }
         case .appleSpeech:
-            await refreshAppleSpeechAssetState()
+            if !appleSpeechAssetsRefreshedDuringStartup {
+                await refreshAppleSpeechAssetState()
+            }
             guard !isShuttingDown else { return }
             if !appleSpeechSupportedLanguages.contains(settings.appleSpeechLanguage),
                let fallback = appleSpeechSupportedLanguages.first {
@@ -390,8 +515,8 @@ final class AppState {
         }
 
         let ready = activeEngine.isReady
-        logger.info("prepareActiveEngine: activeEngine.isReady=\(ready, privacy: .public), willCallPrepare=\(!ready, privacy: .public)")
-        if !ready {
+        logger.info("prepareActiveEngine: activeEngine.isReady=\(ready, privacy: .public), willCallPrepare=\(!ready && prewarmModel, privacy: .public)")
+        if !ready, prewarmModel {
             // Set synchronously so the UI sees it before any await yields
             isPreparingEngine = true
             enginePreparationError = nil
@@ -421,24 +546,24 @@ final class AppState {
         // A just-completed prepare may have installed the Apple Speech asset
         // the input-source mapping hint is watching; refresh so the hint
         // clears without waiting for settings to reopen.
-        if settings.engineChoice == .appleSpeech {
+        if settings.engineChoice == .appleSpeech, !ready, prewarmModel {
             appleSpeechInstalledLanguages = await AppleSpeechEngine.installedLanguages()
             guard !isShuttingDown else { return }
         }
         isPreparingEngine = false
     }
 
-    func handleParakeetModelSelectionChange(userInitiated: Bool) async {
+    func handleParakeetModelSelectionChange(userInitiated: Bool, prewarmModel: Bool = true) async {
         let trace = PerfTrace.begin("stt.modelSwitch")
         defer { trace.end() }
         guard status == .idle else { return }
         settings.engineChoice = .parakeet
         settings.userHasChosenEngine = userInitiated
         await parakeetEngine.handleSelectedModelChange()
-        await prepareActiveEngine()
+        await prepareActiveEngine(prewarmModel: prewarmModel)
     }
 
-    func handleEngineSelectionChange(_ choice: TranscriptionEngineChoice) async {
+    func handleEngineSelectionChange(_ choice: TranscriptionEngineChoice, prewarmModel: Bool = true) async {
         let trace = PerfTrace.begin("stt.modelSwitch")
         defer { trace.end() }
         guard status == .idle else { return }
@@ -454,17 +579,17 @@ final class AppState {
         if !selectedPage.isVisible(for: choice) {
             selectedPage = .models
         }
-        await prepareActiveEngine()
+        await prepareActiveEngine(prewarmModel: prewarmModel)
     }
 
-    func handleAppleSpeechLanguageChange(_ language: SupportedLanguage) async {
+    func handleAppleSpeechLanguageChange(_ language: SupportedLanguage, prewarmModel: Bool = true) async {
         let trace = PerfTrace.begin("stt.modelSwitch")
         defer { trace.end() }
         guard status == .idle, settings.engineChoice == .appleSpeech else { return }
         guard appleSpeechSupportedLanguages.contains(language) else { return }
         settings.appleSpeechLanguage = language
         await appleSpeechEngine.invalidatePreparedSession()
-        await prepareActiveEngine()
+        await prepareActiveEngine(prewarmModel: prewarmModel)
     }
 
     /// Refreshes both the supportable and the installed Apple Speech language
@@ -485,18 +610,27 @@ final class AppState {
     @discardableResult
     func enqueueInputSourceProfileApply(
         for inputSourceID: String,
-        showLoadingOverlay: Bool = false
+        showLoadingOverlay: Bool = false,
+        prewarmModel: Bool = true
     ) -> Task<Void, Never> {
         let previous = inputSourceApplyTask
         let task = Task { [weak self] in
             await previous?.value
-            await self?.applyInputSourceProfile(for: inputSourceID, showLoadingOverlay: showLoadingOverlay)
+            await self?.applyInputSourceProfile(
+                for: inputSourceID,
+                showLoadingOverlay: showLoadingOverlay,
+                prewarmModel: prewarmModel
+            )
         }
         inputSourceApplyTask = task
         return task
     }
 
-    func applyInputSourceProfile(for inputSourceID: String, showLoadingOverlay: Bool = false) async {
+    func applyInputSourceProfile(
+        for inputSourceID: String,
+        showLoadingOverlay: Bool = false,
+        prewarmModel: Bool = true
+    ) async {
         guard !isShuttingDown else { return }
         guard settings.engineChoice != .assemblyAI else { return }
         // Looked up (and, for Apple Speech, awaited) before the idle guard so
@@ -558,7 +692,7 @@ final class AppState {
                 settings.selectedLanguage = language
             case .appleSpeech:
                 if showLoadingOverlay { overlay.show(state: .preparingModel(name: "Apple Speech")) }
-                await handleAppleSpeechLanguageChange(language)
+                await handleAppleSpeechLanguageChange(language, prewarmModel: prewarmModel)
                 if showLoadingOverlay { overlay.hide(afterDelay: 0) }
             case .assemblyAI:
                 return
@@ -579,7 +713,10 @@ final class AppState {
                 // languages back to English.
                 settings.parakeetModelChoice = model
                 settings.selectedLanguage = mapping.language
-                await handleParakeetModelSelectionChange(userInitiated: true)
+                await handleParakeetModelSelectionChange(
+                    userInitiated: true,
+                    prewarmModel: prewarmModel
+                )
                 settings.noteAutoSwitchModelChange(hadVocabularyMode: hadVocabularyMode)
                 settings.restoreVocabularyModeAfterAutoSwitchIfPending()
             case .appleSpeech:
@@ -595,7 +732,7 @@ final class AppState {
                 // duplicate-preparation path.
                 settings.appleSpeechLanguage = mapping.language
                 await appleSpeechEngine.invalidatePreparedSession()
-                await handleEngineSelectionChange(.appleSpeech)
+                await handleEngineSelectionChange(.appleSpeech, prewarmModel: prewarmModel)
             case .assemblyAI:
                 break
             }
@@ -1680,8 +1817,11 @@ final class AppState {
         let trace = PerfTrace.begin("insertion.targetActivation")
         defer { trace.end() }
         guard let app = insertionTargetApp, !app.isTerminated else { return }
-        if app.activate() {
-            try? await Task.sleep(for: .milliseconds(120))
+        guard app.activate() else { return }
+        let deadline = ContinuousClock.now + .milliseconds(120)
+        while NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
+            guard !Task.isCancelled, ContinuousClock.now < deadline else { break }
+            try? await Task.sleep(for: .milliseconds(8))
         }
     }
 

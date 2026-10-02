@@ -280,9 +280,15 @@ actor S1MiniInferenceEngine {
         }
         promptEvalTrace.end()
 
+        guard let sampler = llama_sampler_init_greedy() else {
+            throw S1MiniServiceError.invalidOutput
+        }
+        defer { llama_sampler_free(sampler) }
+
         let (output, outputTokenCount) = try sampleOutput(
             context: context,
             vocabulary: vocabulary,
+            sampler: sampler,
             maximumOutputTokens: maximumOutputTokens
         )
         trace.recordCounts(["output_tokens": outputTokenCount, "output_bytes": output.count])
@@ -331,6 +337,7 @@ actor S1MiniInferenceEngine {
     private func sampleOutput(
         context: OpaquePointer,
         vocabulary: OpaquePointer,
+        sampler: UnsafeMutablePointer<llama_sampler>,
         maximumOutputTokens: Int
     ) throws -> (Data, Int) {
         let trace = PerfTrace.begin("cleanup.decode")
@@ -339,7 +346,7 @@ actor S1MiniInferenceEngine {
         var outputTokenCount = 0
         for _ in 0..<maximumOutputTokens {
             try Task.checkCancellation()
-            let token = try greedyToken(context: context, vocabulary: vocabulary)
+            let token = llama_sampler_sample(sampler, context, -1)
             if llama_vocab_is_eog(vocabulary, token) {
                 break
             }
@@ -359,7 +366,9 @@ actor S1MiniInferenceEngine {
         return (output, outputTokenCount)
     }
 
-    private func loadModelIfNeeded(from url: URL) throws -> OpaquePointer {
+    /// Loads the cached model or the model at `url`. Internal (not private)
+    /// so startup prewarm can reuse it without going through a cleanup call.
+    func loadModelIfNeeded(from url: URL) throws -> OpaquePointer {
         let trace = PerfTrace.begin("cleanup.modelLoad")
         defer { trace.end() }
         let path = url.standardizedFileURL.path
@@ -462,27 +471,6 @@ actor S1MiniInferenceEngine {
             Data(bytes.prefix(Int(count)))
         }
     }
-
-    private func greedyToken(
-        context: OpaquePointer,
-        vocabulary: OpaquePointer
-    ) throws -> llama_token {
-        guard let logits = llama_get_logits_ith(context, -1) else {
-            throw S1MiniServiceError.invalidOutput
-        }
-        let count = Int(llama_vocab_n_tokens(vocabulary))
-        guard count > 0 else {
-            throw S1MiniServiceError.invalidOutput
-        }
-
-        var selected = 0
-        var maximum = logits[0]
-        for index in 1..<count where logits[index] > maximum {
-            selected = index
-            maximum = logits[index]
-        }
-        return llama_token(selected)
-    }
 }
 
 enum S1MiniPostProcessingService {
@@ -529,5 +517,29 @@ enum S1MiniPostProcessingService {
         let trace = PerfTrace.begin("cleanup.unload")
         defer { trace.end() }
         await S1MiniInferenceEngine.shared.unload()
+    }
+
+    /// Loads the model outside the dictation path so the first cleanup is
+    /// warm. Errors are swallowed: failure leaves lazy loading unchanged.
+    @discardableResult
+    static func prewarm(modelURL: URL) async -> Bool {
+        do {
+            _ = try await S1MiniInferenceEngine.shared.loadModelIfNeeded(from: modelURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+}
+
+/// Pure gate for S1-mini startup prewarm. Kept separate from orchestration
+/// so the conditions are unit-testable without loading a model.
+enum S1MiniPrewarmPolicy {
+    static func shouldPrewarm(
+        mode: TranscriptPostProcessingMode,
+        language: SupportedLanguage,
+        prewarmEnabled: Bool
+    ) -> Bool {
+        prewarmEnabled && mode == .s1Mini && language == .english
     }
 }

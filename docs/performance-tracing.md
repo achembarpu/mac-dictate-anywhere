@@ -66,7 +66,7 @@ S1-mini's `input_tokens`, `prompt_tokens`, and `output_tokens` are request-local
 | Local cleanup | `cleanup.validate`, `cleanup.request`, `cleanup.modelLoad`, `cleanup.tokenize`, `cleanup.promptEval`, `cleanup.decode`, `cleanup.generate` |
 | Apple Intelligence cleanup | `cleanup.appleIntelligenceSchema`, `cleanup.appleIntelligenceSchemaAccepted`, `cleanup.appleIntelligenceToolsFallback`, `cleanup.appleIntelligenceTools` |
 | Remote cleanup | `cleanup.ollamaReasoningLookup`, `cleanup.ollamaRequest`, `cleanup.ollamaServerTimings`, `cleanup.openRouterRequest`, `cleanup.openAICompatibleRequest`; Ollama's server-reported timings follow the same trace switch |
-| Delivery and restoration | `transcript.normalize`, `transcript.history`, `insertion.targetActivation`, `insertion.deliver`, `insertion.prepare`, `insertion.listEdit`, `insertion.clipboard`, `insertion.pasteScript`, `insertion.pasteScriptCreate`, `insertion.pasteEvent`, `insertion.listEditVerify`, `dictation.teardown`, `audio.microphoneRestore`, `audio.systemRestore` |
+| Delivery and restoration | `transcript.normalize`, `transcript.history`, `insertion.targetActivation`, `insertion.deliver`, `insertion.prepare`, `insertion.listEdit`, `insertion.clipboard`, `insertion.clipboardReady`, `insertion.pasteScript`, `insertion.pasteCompile`, `insertion.pasteEvent`, `insertion.listEditVerify`, `dictation.teardown`, `audio.microphoneRestore`, `audio.systemRestore` |
 | Cancel and recovery paths | `dictation.cancel`, `recovery.captureStart`, `recovery.preserve`, `recovery.discard`, `recovery.reload`, `recovery.transcribe`, `recovery.continue` |
 
 Compare one trace at a time: `dictation.stopToInsertion` ends when delivery
@@ -81,8 +81,10 @@ audio-controller creation, and engine session startup before changing behavior.
 `audio.controllerWait` includes queueing and the caller's timeout; `audio.controllerCreate`
 tracks actual construction and may finish later if CoreAudio is blocked. The
 request-to-recording span ends before an immediate hold-to-record stop begins.
-`insertion.pasteScriptCreate` times object creation only; any implicit AppleScript
-compilation or execution remains inside `insertion.pasteScript`.
+`insertion.pasteCompile` times startup compilation of the cached AppleScript
+on the paste worker queue; execution remains inside `insertion.pasteScript`.
+`insertion.clipboardReady` measures the bounded wait for pasteboard visibility
+after the clipboard write has already been verified.
 Use Instruments' Time Profiler, Allocations, Energy Log, and audio diagnostics
 alongside these application spans for CPU, memory, thermal behavior, callback
 duration, and hardware dropouts; these are not measured by `PerfTrace`.

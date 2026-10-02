@@ -184,6 +184,51 @@ final class S1MiniPostProcessingTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: sourcePath))
     }
 
+    @MainActor
+    func testStartupRefreshAndPrewarmShareOneIntegrityCheck() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("s1-mini-concurrent-validation-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let modelURL = directory.appendingPathComponent(S1MiniModelSpec.filename)
+        try Data().write(to: modelURL)
+        let modelFile = try FileHandle(forWritingTo: modelURL)
+        try modelFile.truncate(atOffset: UInt64(S1MiniModelSpec.byteCount))
+        try modelFile.close()
+        try Data("license".utf8).write(to: directory.appendingPathComponent("LICENSE"))
+
+        let started = expectation(description: "integrity check started")
+        let gate = S1ValidationGate(started: started)
+        let manager = S1MiniModelManager(modelDirectory: directory) { _ in
+            try gate.validate()
+        }
+        let refresh = Task { await manager.refreshInstallationState() }
+        await fulfillment(of: [started], timeout: 5)
+        let prewarm = Task { try await manager.validatedModelURL() }
+        try await Task.sleep(for: .milliseconds(30))
+
+        gate.release()
+        await refresh.value
+        let validatedURL = try await prewarm.value
+        XCTAssertEqual(validatedURL, manager.modelURL)
+        XCTAssertEqual(gate.callCount, 1)
+        XCTAssertTrue(manager.isModelDownloaded)
+        XCTAssertFalse(manager.isVerifying)
+    }
+
+    @MainActor
+    func testRefreshWithoutInstalledModelDoesNotReportDownloadFailure() async {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("s1-mini-not-installed-\(UUID())", isDirectory: true)
+        let manager = S1MiniModelManager(modelDirectory: directory)
+
+        await manager.refreshInstallationState()
+
+        XCTAssertFalse(manager.isModelDownloaded)
+        XCTAssertNil(manager.lastError)
+        XCTAssertFalse(manager.isVerifying)
+    }
+
     func testRealPinnedDownloadInstallAndDeleteWhenEnabled() async throws {
         guard ProcessInfo.processInfo.environment["S1_MINI_DOWNLOAD_TEST"] == "1" else {
             throw XCTSkip("Set S1_MINI_DOWNLOAD_TEST=1 to exercise the live Hugging Face download.")
@@ -309,5 +354,52 @@ final class S1MiniPostProcessingTests: XCTestCase {
             selectedText: nil,
             textAfterCursor: nil
         )
+    }
+
+    func testPrewarmPolicyRequiresS1MiniEnglishAndEnabled() {
+        XCTAssertTrue(S1MiniPrewarmPolicy.shouldPrewarm(
+            mode: .s1Mini, language: .english, prewarmEnabled: true))
+    }
+
+    func testPrewarmPolicyRejectsNonS1MiniModes() {
+        for mode: TranscriptPostProcessingMode in [.none, .fluidAudioVocabulary, .appleIntelligence, .ollama, .openRouter, .openAICompatible] {
+            XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
+                mode: mode, language: .english, prewarmEnabled: true),
+                "mode \(mode) must not prewarm")
+        }
+    }
+
+    func testPrewarmPolicyRejectsNonEnglishAndDisabledToggle() {
+        XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
+            mode: .s1Mini, language: .german, prewarmEnabled: true))
+        XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
+            mode: .s1Mini, language: .english, prewarmEnabled: false))
+    }
+}
+
+private nonisolated final class S1ValidationGate: @unchecked Sendable {
+    private let started: XCTestExpectation
+    private let lock = NSLock()
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private var count = 0
+
+    init(started: XCTestExpectation) { self.started = started }
+
+    var callCount: Int { lock.withLock { count } }
+
+    func validate() throws {
+        let first = lock.withLock {
+            count += 1
+            return count == 1
+        }
+        if first { started.fulfill() }
+        guard releaseSemaphore.wait(timeout: .now() + 5) == .success else {
+            throw S1MiniModelManagerError.checksumMismatch
+        }
+    }
+
+    func release() {
+        releaseSemaphore.signal()
+        releaseSemaphore.signal()
     }
 }

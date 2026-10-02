@@ -19,6 +19,7 @@ final class SettingsLogicTests: XCTestCase {
     private var savedS1MiniAppStyling = S1MiniAppStyling.recommended
     private var savedAssemblyAIPromptOverrides: [String: String] = [:]
     private var savedAssemblyAIInstruction = ""
+    private var savedPrewarmEnginesAtStartup = true
 
     override func setUp() {
         super.setUp()
@@ -37,6 +38,7 @@ final class SettingsLogicTests: XCTestCase {
         savedS1MiniAppStyling = settings.s1MiniAppStyling
         savedAssemblyAIPromptOverrides = settings.assemblyAIPromptOverrides
         savedAssemblyAIInstruction = settings.assemblyAIInstruction
+        savedPrewarmEnginesAtStartup = settings.prewarmEnginesAtStartup
     }
 
     override func tearDown() {
@@ -64,7 +66,16 @@ final class SettingsLogicTests: XCTestCase {
         settings.parakeetModelChoice = savedParakeetModelChoice
         settings.selectedLanguage = savedSelectedLanguage
         settings.transcriptPostProcessingMode = savedMode
+        settings.prewarmEnginesAtStartup = savedPrewarmEnginesAtStartup
         super.tearDown()
+    }
+
+    func testPrewarmEnginesAtStartupPersistsRoundTrip() {
+        let settings = Settings.shared
+        settings.prewarmEnginesAtStartup = false
+        XCTAssertEqual(UserDefaults.standard.object(forKey: "prewarmEnginesAtStartup") as? Bool, false)
+        settings.prewarmEnginesAtStartup = true
+        XCTAssertEqual(UserDefaults.standard.object(forKey: "prewarmEnginesAtStartup") as? Bool, true)
     }
 
     func testHistoryDecodesOlderEntriesWithoutRawText() throws {

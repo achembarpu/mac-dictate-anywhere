@@ -16,9 +16,60 @@ enum TextInsertionResult {
     case failed
 }
 
+/// Compiles and executes the paste script on one serial queue. The queue owns
+/// the non-Sendable NSAppleScript; no other thread reads or executes it.
+private nonisolated final class PasteScriptRunner: @unchecked Sendable {
+    private static let source = """
+        tell application "System Events"
+            keystroke "v" using command down
+        end tell
+        """
+
+    private let queue = DispatchQueue(label: "com.dictate-anywhere.paste-script", qos: .userInitiated)
+    private var cachedScript: NSAppleScript?
+
+    func precompile() async -> Bool {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                continuation.resume(returning: compiledScript() != nil)
+            }
+        }
+    }
+
+    func paste() async -> Bool {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                guard let script = compiledScript() else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                var error: NSDictionary?
+                script.executeAndReturnError(&error)
+                continuation.resume(returning: error == nil)
+            }
+        }
+    }
+
+    private func compiledScript() -> NSAppleScript? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        if let cachedScript { return cachedScript }
+        let trace = PerfTrace.begin("insertion.pasteCompile")
+        var error: NSDictionary?
+        guard let script = NSAppleScript(source: Self.source),
+              script.compileAndReturnError(&error) else {
+            trace.end(outcome: "failed")
+            return nil
+        }
+        cachedScript = script
+        trace.end()
+        return script
+    }
+}
+
 final class TextInserter {
     private var pendingSeparator = ""
     private var pendingSeparatorTargetBundleIdentifier: String?
+    private let pasteScriptRunner = PasteScriptRunner()
 
     // MARK: - Public
 
@@ -73,8 +124,15 @@ final class TextInserter {
             return .copiedOnly
         }
 
-        // Small delay for clipboard to settle
-        try? await Task.sleep(for: .milliseconds(80))
+        // Copying already verified read-back. Only wait if another pasteboard
+        // read cannot yet see the text, with the former delay as a deadline.
+        let clipboardReadyTrace = PerfTrace.begin("insertion.clipboardReady")
+        let clipboardDeadline = ContinuousClock.now + .milliseconds(80)
+        while NSPasteboard.general.string(forType: .string) != insertionText {
+            guard !Task.isCancelled, ContinuousClock.now < clipboardDeadline else { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        clipboardReadyTrace.end()
 
         // Plain-text numbering needs one verified replacement, not a second
         // blind edit after pasting. If the snapshot is stale, leave the text on
@@ -782,24 +840,12 @@ final class TextInserter {
     private func simulatePasteWithAppleScript() async -> Bool {
         let trace = PerfTrace.begin("insertion.pasteScript")
         defer { trace.end() }
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let script = """
-                tell application "System Events"
-                    keystroke "v" using command down
-                end tell
-                """
-                var error: NSDictionary?
-                let createTrace = PerfTrace.begin("insertion.pasteScriptCreate")
-                let scriptObject = NSAppleScript(source: script)
-                createTrace.end(outcome: scriptObject == nil ? "failed" : "success")
-                if let scriptObject {
-                    scriptObject.executeAndReturnError(&error)
-                    continuation.resume(returning: error == nil)
-                } else {
-                    continuation.resume(returning: false)
-                }
-            }
-        }
+        return await pasteScriptRunner.paste()
+    }
+
+    /// Compiles the paste script ahead of first use so no dictation pays
+    /// compile cost. Called at startup regardless of the model prewarm setting.
+    func prewarmPasteScript() async -> Bool {
+        await pasteScriptRunner.precompile()
     }
 }

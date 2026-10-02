@@ -17,6 +17,12 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         #endif
     }
 
+    func testPasteScriptPrecompilesWithoutExecuting() async {
+        let inserter = TextInserter()
+        let ready = await inserter.prewarmPasteScript()
+        XCTAssertTrue(ready)
+    }
+
     func testAudioPollingBenchmark() throws {
         try requireBenchmark()
         let sampleWindow = Array((0..<1_600).map { index in
@@ -119,28 +125,25 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         }
         XCTAssertNil(compileError, "AppleScript compile failed: \(compileError ?? "unknown")")
 
-        #if PIPELINE_CHILD_BENCHMARK
         let inserter = TextInserter()
         let firstCachedStartedAt = ContinuousClock.now
-        inserter.prewarmPasteScript()
+        let firstCachedReady = await inserter.prewarmPasteScript()
         let firstCachedElapsed = firstCachedStartedAt.duration(to: .now)
+        XCTAssertTrue(firstCachedReady)
 
         let cachedStartedAt = ContinuousClock.now
+        var allCachedReady = true
         for _ in 0..<compileCount {
-            inserter.prewarmPasteScript()
+            let ready = await inserter.prewarmPasteScript()
+            allCachedReady = allCachedReady && ready
         }
         let cachedElapsed = cachedStartedAt.duration(to: .now)
+        XCTAssertTrue(allCachedReady)
 
         print(
             "PIPELINE_BENCHMARK component=paste_script_compile count=\(compileCount) "
             + "uncached=\(uncachedElapsed) first_cached=\(firstCachedElapsed) cached=\(cachedElapsed)"
         )
-        #else
-        print(
-            "PIPELINE_BENCHMARK component=paste_script_compile count=\(compileCount) "
-            + "baseline_uncached=\(uncachedElapsed)"
-        )
-        #endif
     }
 
     func testS1MiniPrewarmBenchmark() async throws {
@@ -151,7 +154,6 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
             (.none, .english, true),
             (.s1Mini, .english, false)
         ]
-        #if PIPELINE_CHILD_BENCHMARK
         let enabledCount = cases.reduce(into: 0) { count, value in
             if S1MiniPrewarmPolicy.shouldPrewarm(
                 mode: value.0, language: value.1, prewarmEnabled: value.2
@@ -159,28 +161,24 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
                 count += 1
             }
         }
-        #else
-        let enabledCount = cases.filter {
-            $0.2 && $0.0 == .s1Mini && $0.1 == .english
-        }.count
-        #endif
         XCTAssertEqual(enabledCount, 1)
         print("PIPELINE_BENCHMARK component=s1_mini_prewarm_policy enabled_cases=\(enabledCount)")
 
-        #if PIPELINE_CHILD_BENCHMARK
-        guard let path = ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"],
-              !path.isEmpty else {
-            print("PIPELINE_BENCHMARK component=s1_mini_model_load skipped=no_model_path")
-            return
+        let modelURL: URL
+        if let path = ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"], !path.isEmpty {
+            modelURL = URL(fileURLWithPath: path)
+            try XCTSkipUnless(FileManager.default.fileExists(atPath: modelURL.path), "S1-mini model path does not exist")
+        } else {
+            let manager = S1MiniModelManager()
+            try XCTSkipUnless(manager.isModelDownloaded, "S1-mini is not installed")
+            modelURL = try await manager.validatedModelURL()
         }
-        let modelURL = URL(fileURLWithPath: path)
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: modelURL.path), "S1-mini model path does not exist")
 
         let startedAt = ContinuousClock.now
-        await S1MiniPostProcessingService.prewarm(modelURL: modelURL)
+        let modelReady = await S1MiniPostProcessingService.prewarm(modelURL: modelURL)
         let elapsed = startedAt.duration(to: .now)
         await S1MiniPostProcessingService.unload()
+        XCTAssertTrue(modelReady, "S1-mini model failed to prewarm")
         print("PIPELINE_BENCHMARK component=s1_mini_model_load elapsed=\(elapsed)")
-        #endif
     }
 }

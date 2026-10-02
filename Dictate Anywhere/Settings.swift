@@ -947,6 +947,7 @@ final class Settings {
         static let soundEffectsVolume = "soundEffectsVolume"
         static let showTextPreview = "showTextPreview"
         static let launchAtLogin = "launchAtLogin"
+        static let prewarmEnginesAtStartup = "prewarmEnginesAtStartup"
         static let appAppearanceMode = "appAppearanceMode"
         static let themeMode = "themeMode"
         static let selectedMicrophoneUID = "selectedMicrophoneUID"
@@ -1541,6 +1542,15 @@ final class Settings {
         }
     }
 
+    /// Prewarm the active speech engine and the S1-mini polish model at
+    /// startup so the first dictation is fast. Engines still prepare lazily
+    /// on first use when this is off.
+    var prewarmEnginesAtStartup: Bool {
+        didSet {
+            UserDefaults.standard.set(prewarmEnginesAtStartup, forKey: Keys.prewarmEnginesAtStartup)
+        }
+    }
+
     // MARK: - Initialization
 
     private init() {
@@ -1786,6 +1796,7 @@ final class Settings {
 
         // App behavior
         launchAtLogin = defaults.object(forKey: Keys.launchAtLogin) as? Bool ?? false
+        prewarmEnginesAtStartup = defaults.object(forKey: Keys.prewarmEnginesAtStartup) as? Bool ?? true
         let appearStr = defaults.string(forKey: Keys.appAppearanceMode) ?? AppAppearanceMode.menuBarOnly.rawValue
         appAppearanceMode = AppAppearanceMode(rawValue: appearStr) ?? .menuBarOnly
         let themeStr = defaults.string(forKey: Keys.themeMode) ?? ThemeMode.system.rawValue

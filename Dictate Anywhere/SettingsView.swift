@@ -35,6 +35,15 @@ struct SettingsView: View {
                         title: \.displayName
                     )
                 }
+                DSDivider()
+                DSDetailRow(
+                    label: "Prewarm models at startup",
+                    caption: "Load the selected speech model and eligible S1-mini cleanup model before first use."
+                ) {
+                    Toggle("", isOn: $settings.prewarmEnginesAtStartup)
+                        .labelsHidden()
+                        .toggleStyle(.dsSwitch)
+                }
             }
 
             DSSection(overline: "Display") {

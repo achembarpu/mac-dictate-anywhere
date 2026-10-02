@@ -68,6 +68,97 @@ final class DictationStartupContextTests: XCTestCase {
         return app
     }
 
+    func testModelPrewarmCanBeDeferredWithoutDisablingFirstUsePreparation() async {
+        let engine = StartupContextEngine()
+        engine.isReady = false
+        let app = app(engine: engine, capture: { _ in nil })
+
+        await app.prepareActiveEngine(prewarmModel: false)
+        XCTAssertEqual(engine.prepareCount, 0)
+        XCTAssertFalse(engine.isReady)
+
+        await app.prepareActiveEngine()
+        XCTAssertEqual(engine.prepareCount, 1)
+        XCTAssertTrue(engine.isReady)
+        await app.shutdown()
+    }
+
+    func testConcurrentPreparationJoinsTheInFlightModelLoad() async {
+        let started = expectation(description: "model preparation started")
+        let gate = StartupModelPreparationGate(started: started)
+        let engine = StartupContextEngine()
+        engine.isReady = false
+        engine.onPrepareAsync = { await gate.wait() }
+        let app = app(engine: engine, capture: { _ in nil })
+
+        let startup = Task { await app.prepareActiveEngine() }
+        await fulfillment(of: [started], timeout: 5)
+        let firstUse = Task { await app.prepareActiveEngine() }
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(engine.prepareCount, 1)
+
+        await gate.release()
+        await startup.value
+        await firstUse.value
+        XCTAssertEqual(engine.prepareCount, 1)
+        XCTAssertTrue(engine.isReady)
+        await app.shutdown()
+    }
+
+    func testStartupAppliesInputSourceProfileBeforePrewarmingSpeechModel() async {
+        let settings = Settings.shared
+        let savedModel = settings.parakeetModelChoice
+        let savedMappings = settings.inputSourceMappings
+        let savedAutoSwitch = settings.inputSourceAutoSwitchEnabled
+        let savedPrewarm = settings.prewarmEnginesAtStartup
+        let savedUserChoice = settings.userHasChosenEngine
+        let savedHotkeys = settings.hotkeyBindings
+        let savedCancelShortcut = settings.cancelShortcut
+        defer {
+            settings.parakeetModelChoice = savedModel
+            settings.inputSourceMappings = savedMappings
+            settings.inputSourceAutoSwitchEnabled = savedAutoSwitch
+            settings.prewarmEnginesAtStartup = savedPrewarm
+            settings.userHasChosenEngine = savedUserChoice
+            settings.hotkeyBindings = savedHotkeys
+            settings.cancelShortcut = savedCancelShortcut
+        }
+
+        settings.engineChoice = .parakeet
+        settings.parakeetModelChoice = .multilingual
+        settings.selectedLanguage = .english
+        settings.userHasChosenEngine = true
+        settings.prewarmEnginesAtStartup = true
+        settings.inputSourceAutoSwitchEnabled = true
+        settings.inputSourceMappings = [InputSourceMapping(
+            id: UUID(), inputSourceID: "startup-profile-test", inputSourceDisplayName: "Test",
+            engine: .parakeet, parakeetModel: .multilingual, language: .german
+        )]
+        settings.hotkeyBindings = []
+        settings.cancelShortcut = HotkeyBinding(
+            id: UUID(), keyCode: nil, modifiersRawValue: 0,
+            displayName: "", mode: .handsFreeToggle
+        )
+
+        let prepared = expectation(description: "speech model prepared")
+        let engine = StartupContextEngine()
+        engine.isReady = false
+        engine.onPrepare = { prepared.fulfill() }
+        let app = AppState(
+            permissions: Permissions(statusProvider: { (true, true) }),
+            recoveryStore: DictationRecoveryStore(directory: directory),
+            engine: engine,
+            inputSourceID: { "startup-profile-test" },
+            profileModelAvailable: { _ in true }
+        )
+
+        app.start()
+        await fulfillment(of: [prepared], timeout: 10)
+        XCTAssertEqual(engine.languageAtPreparation, .german)
+        XCTAssertEqual(engine.prepareCount, 1)
+        await app.shutdown()
+    }
+
     func testSlowContextDoesNotDelayListeningAndStopClosesMicrophoneBeforeWaiting() async {
         let captured = expectation(description: "context capture began")
         let gate = StartupContextGate(started: captured)
@@ -299,6 +390,25 @@ private actor StartupContextSequence {
     func capture() async -> DictationContext? { await gates.removeFirst().capture() }
 }
 
+private actor StartupModelPreparationGate {
+    private let started: XCTestExpectation
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(started: XCTestExpectation) { self.started = started }
+
+    func wait() async {
+        await withCheckedContinuation {
+            continuation = $0
+            started.fulfill()
+        }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 @MainActor
 private final class StartupContextEngine: TranscriptionEngine {
     var recoveryCapture: RecoveryAudioCapture?
@@ -312,11 +422,21 @@ private final class StartupContextEngine: TranscriptionEngine {
     var vocabularyAtFinalization: [String] = []
     var appliedContexts: [DictationContext] = []
     var finalizationCount = 0
+    var prepareCount = 0
+    var languageAtPreparation: SupportedLanguage?
+    var onPrepare: (() -> Void)?
+    var onPrepareAsync: (() async -> Void)?
     var finalTranscript = "Recorded words."
     var onCaptureStopped: (() -> Void)?
 
     func levelSamples(count: Int) -> [Float] { [] }
-    func prepare() async throws {}
+    func prepare() async throws {
+        prepareCount += 1
+        languageAtPreparation = Settings.shared.selectedLanguage
+        await onPrepareAsync?()
+        isReady = true
+        onPrepare?()
+    }
     func startRecording(deviceID: AudioDeviceID?) async throws { capturing = true }
     func stopAudioCapture() async { capturing = false; onCaptureStopped?() }
     func stopRecording() async -> String {
