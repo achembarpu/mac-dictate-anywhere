@@ -28,7 +28,7 @@ Ultra/110M have only one screening pass, so their times are provisional.
 | Parakeet Ultra, one pass | 5.80% / 0.683 s | 2.56% / 0.124 s | 0% / 0.178 s |
 | Parakeet 110M, one pass | 6.70% / 0.311 s | Unsupported | Unsupported |
 
-All 45 supplied-language Whistle outputs completed; 15 additional auto-language
+All 45 supplied-language Whistle calls returned successfully; 15 additional auto-language
 outputs were exactly equal. Keep the author's automatic language detection as
 the starting recipe; no benefit from language forcing appeared here. Whistle
 short calls span roughly 22–62 ms; the29.4-second reading takes 170 ms. It makes
@@ -116,3 +116,7 @@ research and the pruned matrix; the full follow-up remains active.
 Primary contracts: [Whistle model card](https://huggingface.co/Cactus-Compute/whistle),
 [official runtime](https://github.com/cactus-compute/needle),
 [pinned native header](https://huggingface.co/Cactus-Compute/needle3/blob/c7c415a3d1b3d929014bc6e866d51ebb971f7089/macos-arm64/needle.h).
+
+The reviewed Whistle C API does not expose EOS/completion or truncation metadata.
+Successful calls above therefore establish returned text, not an explicit decoder
+completion flag. Over-limit audio is rejected rather than silently shortened.

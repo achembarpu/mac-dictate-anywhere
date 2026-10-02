@@ -181,6 +181,12 @@ recipes and [measured outcomes](../../../docs/model-stack-benchmark-results.md).
 
 ## Small candidate screens and resource accounting
 
+`asr-acoustics` separates quiet Float32 input from PCM16 re-quantization and
+screens gain ceilings plus synthetic nonspeech. It uses the existing golden
+references, installed TDT models and shared WER. Select one model/fixture; no
+product audio/default changes. Results and limits are in
+[the acoustic screen](../../../docs/tdt-acoustic-screen.md).
+
 The local Whistle collector is `scripts/evaluate_whistle.py`; installation, pinned
 assets and measured limitations are in [Whistle evaluation](../../../docs/whistle-evaluation.md).
 It skips files beyond the documented 30-second native API limit; it never scores a
