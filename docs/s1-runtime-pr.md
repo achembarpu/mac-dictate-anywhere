@@ -64,3 +64,31 @@ The 21-case authored inventory is a regression gate, not population WER evidence
 
 Publication remains a separate user action. This work is committed locally;
 the branch has not been pushed and no PR has been opened.
+
+## Active STT/runtime follow-up
+
+This branch also carries the shared Whistle screening/golden increment from the
+model-aware branch. Five new audio/text pairs broaden voices, names, numbers
+and quiet/noisy acoustic controls. The collector and process CPU/RSS counters
+use the existing shared Swift scorer and benchmark groups. No Whistle app
+backend or new default is added by this increment.
+
+Whistle: 14.73% WER on nine independent English clips versus v3's 5.36%, with
+summed warm times 0.485 versus 0.658 s. Its tiny CPU archive is attractive;
+quality trails the native models, while one quiet control is substantially
+better. Details and all 136 outputs are in [the report](whistle-evaluation.md)
+and [structured evidence](benchmarks/whistle-screen-2026-10-03.json). Resource
+counters exclude Core ML helpers/accelerator allocations and do not prove
+whole-model RAM or energy savings.
+
+The propagated increment passes normal Team-signed Debug build/test from a
+fresh detached checkout: **653 tests, 573 passed, 80 skipped, zero failures**.
+The parent runs 637 tests, 564 passed, 73 skipped, zero failures; its focused
+Release scorer/native comparisons pass. Existing S1 runtime results above
+remain historical measurements of the prior reviewed implementation.
+
+The wider follow-up is active. Production MLX remains 0.31.4/LM3.31.3 while
+0.32.3/LM3.32.3 is researched for an accuracy/performance A/B and clean API
+migration. The newest core package avoids declaring CUDA plugins on macOS;
+normal validation remains required. Quiet-input investigation and useful STT
+variant screens are pending. Workspace research: `docs/stt-runtime-research.md`.
