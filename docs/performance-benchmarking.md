@@ -84,7 +84,9 @@ time or transcript quality.
 | S1-mini cleanup | With the app's validated installed model, or `S1_MINI_MODEL_PATH`, runs short, long and over-limit text through the real local cleanup service and reports cold/warm request timings. |
 | Apple Intelligence cleanup | Runs a fixed cleanup prompt through the on-device Foundation Models service when available. Guided decoding and planning are visible in performance traces. |
 | Cleanup golden quality | Eleven authored English/German/Chinese/Dutch references check numbers, negation, questions, self-corrections and long endings. Apple is paired with the frozen production baseline; other providers require explicit selection. Reports semantic misses, required facts, original fallback, reference error and latency separately. |
-| Apple Speech golden quality | Replays matching installed locales through two fresh production SpeechAnalyzer sessions, recording preparation, final decode and WER/CER. Does not install missing assets. |
+| Apple Speech golden quality | Replays matching installed locales through two fresh production SpeechAnalyzer sessions, recording preparation, final decode and WER/CER. Asset installation requires explicit `PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1`; framework asset failures are reported as skips. |
+| External cleanup prompts | With an explicit local prompt file and Ollama model, compares verbatim candidate instructions with the app's production prompt on the same weights. Reports required facts and semantic misses independently of protocol completion. Can also score saved model outputs against the exact shared manifest hash. |
+| External speech runtime | With an explicit loopback OpenAI-compatible STT endpoint and model, replays the same licensed speech goldens and WER/CER scorer. Starts no server and downloads no model implicitly. |
 | Model switching | With `RUN_MODEL_SWITCH_BENCHMARK=1` and at least two installed models, times a fixed model-switch sequence. |
 
 Set `PIPELINE_BENCHMARK_MODEL=all` to sweep models already installed on this
@@ -134,6 +136,16 @@ never have their transcript or reference printed by the harness.
 First-visible audio position is the amount fed when text appears, not wall-clock
 user latency. Golden quality inventory uses the manifest's supported languages
 and WER/CER metric, and deliberately has no uncalibrated model-independent gate.
+
+The `cleanup-prompts` and `external-asr-quality` groups are research tools.
+See [candidate evaluation and reproduction](model-candidate-evaluation.md) for
+explicit prompt/model/result-file selection. The default benchmark run skips
+these groups unless their corresponding environment variables are supplied.
+Candidate quality misses remain visible even when the protocol completed;
+test success does not establish that a model is safe to adopt. Only bundled
+public/audio and independently authored text fixtures can have diagnostic
+transcripts printed. A runtime's missing or unreliable truncation metadata must
+not be mistaken for proof of transcript completeness.
 
 When supplying your own audio, optionally set `PIPELINE_BENCHMARK_MAX_WER=0.3`
 to enforce an agreed WER gate for the user audio benchmark. The paired comparison

@@ -149,3 +149,23 @@ p95 latency, population WER or performance across every Mac. Cleanup WER/CER can
 penalize valid editing alternatives; consult semantic misses, lost facts and
 fallback status alongside it. Detailed results belong in
 `docs/model-stack-benchmark-results.md` and its structured evidence file.
+
+Apple Speech asset installation is explicit: set
+`PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1` to use the framework's normal asset cache.
+A supported locale can still fail asset installation; report that fixture as
+unavailable rather than claiming that it passed.
+
+The `cleanup-prompts` group accepts an explicit local
+`PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH` and Ollama model, or
+`PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH` for saved outputs. It reuses these
+references and the same scorer. Incomplete generation preserves the original,
+records `completed=false` and fails the protocol assertion while other cases
+continue. Completed candidate outputs can still fail quality. The saved-output
+scorer checks the manifest hash to avoid comparing different input revisions.
+
+The `external-asr-quality` group accepts `PIPELINE_BENCHMARK_ASR_URL` for a
+loopback OpenAI-compatible speech runtime, `PIPELINE_BENCHMARK_MODEL`, languages
+and repeats. It uses the same licensed audio/reference files and WER/CER code,
+and does not launch a server or download models. See
+[candidate evaluation](../../../docs/model-candidate-evaluation.md) for pinned
+recipes and [measured outcomes](../../../docs/model-stack-benchmark-results.md).
