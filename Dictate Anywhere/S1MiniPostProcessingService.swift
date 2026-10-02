@@ -101,7 +101,7 @@ enum S1MiniContextSetting: String, CaseIterable, Codable, Identifiable, Sendable
     }
 }
 
-enum S1MiniModelSpec {
+nonisolated enum S1MiniModelSpec {
     static let displayName = "S1-mini by Superwhisper"
     static let repository = "superwhisper/s1-mini-GGUF"
     static let revision = "ee2c0f56e56345f475749a44ff2893e21c3cb292"
@@ -128,6 +128,10 @@ nonisolated enum S1MiniPromptBuilder {
         context: String
     ) -> String {
         "[Styling: \(styling.rawValue)] [Structure: \(structure.rawValue)] [Context: \(context)]"
+    }
+
+    static var publicPrefix: String {
+        "<|im_start|>system\n\(systemPrompt)<|im_end|>\n<|im_start|>user\n"
     }
 
     static func prompt(
@@ -605,7 +609,7 @@ enum S1MiniPostProcessingService {
         } catch S1MiniServiceError.transcriptTooLong {
             // The author recommends sentence chunks near 1,000 input tokens.
             // Short dictation keeps the existing single-request fast path.
-            let chunks = try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: modelURL)
+            let chunks = try await transcriptChunks(text, modelURL: modelURL)
             var results: [String] = []
             do {
                 for chunk in chunks {
@@ -634,11 +638,16 @@ enum S1MiniPostProcessingService {
             structure: structure,
             context: context
         )
-        let output = try await S1MiniInferenceEngine.shared.generate(
-            prompt: prompt,
-            transcript: text,
-            modelURL: modelURL
-        )
+        let output: String
+        if modelURL.pathExtension == "gguf" {
+            output = try await S1MiniInferenceEngine.shared.generate(prompt: prompt, transcript: text, modelURL: modelURL)
+        } else {
+            #if arch(arm64)
+            output = try await S1MiniMLXInferenceEngine.shared.generate(prompt: prompt, transcript: text, modelURL: modelURL)
+            #else
+            throw S1MiniServiceError.modelLoadFailed
+            #endif
+        }
 
         guard !output.contains("<think>"), !output.contains("<|im_") else {
             throw S1MiniServiceError.invalidOutput
@@ -663,6 +672,9 @@ enum S1MiniPostProcessingService {
         let trace = PerfTrace.begin("cleanup.unload")
         defer { trace.end() }
         await S1MiniInferenceEngine.shared.unload()
+        #if arch(arm64)
+        await S1MiniMLXInferenceEngine.shared.unload()
+        #endif
     }
 
     static func isPrepared(modelURL: URL) async -> Bool {
@@ -674,11 +686,30 @@ enum S1MiniPostProcessingService {
     @discardableResult
     static func prewarm(modelURL: URL) async -> Bool {
         do {
-            try await S1MiniInferenceEngine.shared.prewarm(from: modelURL)
+            if modelURL.pathExtension == "gguf" {
+                try await S1MiniInferenceEngine.shared.prewarm(from: modelURL)
+            } else {
+                #if arch(arm64)
+                try await S1MiniMLXInferenceEngine.shared.prewarm(from: modelURL)
+                #else
+                throw S1MiniServiceError.modelLoadFailed
+                #endif
+            }
             return true
         } catch {
             return false
         }
+    }
+
+    private static func transcriptChunks(_ text: String, modelURL: URL) async throws -> [String] {
+        if modelURL.pathExtension == "gguf" {
+            return try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: modelURL)
+        }
+        #if arch(arm64)
+        return try await S1MiniMLXInferenceEngine.shared.transcriptChunks(text, modelURL: modelURL)
+        #else
+        throw S1MiniServiceError.modelLoadFailed
+        #endif
     }
 }
 

@@ -310,7 +310,7 @@ final class S1MiniPostProcessingTests: XCTestCase {
 
     func testIntegrityRejectsWrongFileSize() throws {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("s1-mini-invalid-\(UUID().uuidString)")
+            .appendingPathComponent("s1-mini-invalid-\(UUID().uuidString).gguf")
         try Data("not a model".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
 

@@ -83,6 +83,7 @@ recovery|Recovery audio write and read|PipelineWorkloadBenchmarkTests/testRecove
 cleanup|S1-mini prewarm/cleanup and Apple Intelligence|PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark PipelineWorkloadBenchmarkTests/testS1MiniCleanupWithInstalledModel PipelineWorkloadBenchmarkTests/testAppleIntelligenceCleanupWhenAvailable
 s1-prepare|S1 engine loading, preparation and first-use latency|S1PreparationBenchmarkTests/testColdEngineVersusPreparedFirstRequest
 s1-cpu|S1 CPU cache precision and golden cleanup (Intel or Apple Silicon)|S1CPUBenchmarkTests/testCPUCachePrecisionComparison
+s1-runtime|Paired native MLX/llama and prefix accuracy and latency|S1RuntimeBenchmarkTests/testPairedRuntimeGoldenCleanup
 s1-context|Paired S1-mini context allocation and golden cleanup|S1ContextBenchmarkTests/testPairedFreshAndReusedContextGoldenCleanup
 cleanup-quality|Authored cleanup references and Apple session isolation|AppleCleanupBenchmarkTests/testGoldenCleanupAndPreparedSessionIsolation AppleCleanupBenchmarkTests/testLongInputAcrossContextWindows DictationStartupContextTests/testAppleDefaultCleanupWithoutPromptOrContext ProviderCleanupBenchmarkTests/testGoldenCleanupWithSelectedProvider
 apple-speech-quality|Installed Apple locales, golden accuracy and preparation|AppleSpeechBenchmarkTests/testInstalledLocalesGoldenSpeechAndFreshSessionPreparation
@@ -302,7 +303,7 @@ run_benchmark() {
     PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES \
     PIPELINE_BENCHMARK_CLEANUP_GREEDY PIPELINE_BENCHMARK_ASR_URL PIPELINE_BENCHMARK_LANGUAGES \
     PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH PIPELINE_BENCHMARK_ASR_RESULTS_PATH \
-    S1_MINI_MODEL_PATH RUN_MODEL_SWITCH_BENCHMARK; do
+    S1_MINI_MODEL_PATH S1_MLX_MODEL_PATH RUN_MODEL_SWITCH_BENCHMARK; do
     if [[ -n "${!name:-}" ]]; then
       benchmark_test_environment+=("TEST_RUNNER_${name}=${!name}")
     fi
