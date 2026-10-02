@@ -2098,6 +2098,69 @@
   "log_sha256": {
     "/private/tmp/tdt-acoustic-v3.log": "1e9cbc9af5855a6ae6190f783db9fbbfef10eb06347e845a3bc4e59fd1738352",
     "/private/tmp/tdt-acoustic-110m.log": "eabf7e0a4fb4e53e45e3b816b3fa54f523e537bd250546b8ad6e17adda45a811",
-    "/private/tmp/tdt-acoustic-v3-names.log": "72c7a8824b3b6ce048786cca62f373ad843262f46bf00b23e539192c7f67c6cb"
+    "/private/tmp/tdt-acoustic-v3-names.log": "72c7a8824b3b6ce048786cca62f373ad843262f46bf00b23e539192c7f67c6cb",
+    "/private/tmp/tdt-acoustic-fresh-debug-build.log": "0b96e507f7e56d545e399a76335391c315a058b17dc07e788b2855bb30e59472",
+    "/private/tmp/tdt-acoustic-fresh-debug-tests.log": "48b7a97ecd1408ac9245f38286420c21fb65d49a9457e3c60ae4c567d0f59c00",
+    "/private/tmp/tdt-acoustic-mlx-fresh-debug-build.log": "e2854c8b3ffd1cc34a9881b3d7b1a2e33538b6643c833f030efbd38ebd3b6540",
+    "/private/tmp/tdt-acoustic-mlx-fresh-debug-tests.log": "a7bd30c3c0dd955cb14d96e93e616af373aaaf34f43003852c5c52670752cf18"
+  },
+  "collector_branch": "feature/model-aware-transcription",
+  "collector_source_commit": "638e7c0",
+  "source_hash_scope": "Collection source and dependency lock are from the parent branch; the child carries identical collector and golden sources, with additional MLX dependency pins.",
+  "cached_native_weight_files": {
+    "parakeet-tdt-ctc-110m/Preprocessor.mlmodelc/weights/weight.bin": {
+      "bytes": 215951360,
+      "sha256": "a1c90b88b52667ee4f349b39994003cc2a9fb1b12c310752399d90c880286a7b"
+    },
+    "parakeet-tdt-ctc-110m/Decoder.mlmodelc/weights/weight.bin": {
+      "bytes": 7871040,
+      "sha256": "dd90b58597ee2c172c672dffe13b1110898ba07394c1a15efc96cc8c6b18411b"
+    },
+    "parakeet-tdt-ctc-110m/JointDecision.mlmodelc/weights/weight.bin": {
+      "bytes": 2798028,
+      "sha256": "b3f771cb65b190f1873e39629676ed79b65a8361522f451b37bdba8b1106e6ff"
+    },
+    "parakeet-tdt-0.6b-v3/JointDecisionv3.mlmodelc/weights/weight.bin": {
+      "bytes": 12642764,
+      "sha256": "4e0e63d840032f7f07ddb1d64446051166281e5491bf22da8a945c41f6eedb3e"
+    },
+    "parakeet-tdt-0.6b-v3/Preprocessor.mlmodelc/weights/weight.bin": {
+      "bytes": 491072,
+      "sha256": "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea"
+    },
+    "parakeet-tdt-0.6b-v3/Decoder.mlmodelc/weights/weight.bin": {
+      "bytes": 23604992,
+      "sha256": "48adf0f0d47c406c8253d4f7fef967436a39da14f5a65e66d5a4b407be355d41"
+    },
+    "parakeet-tdt-0.6b-v3/Encoder.mlmodelc/weights/weight.bin": {
+      "bytes": 445187200,
+      "sha256": "e2020f323703477a5b21d7c2d282c403e371afb5962e79877e3033e73ba6f421"
+    }
+  },
+  "verification": {
+    "inference_rows": 105,
+    "release_acoustic_runs": "passed; v3 original and names, 110M original; three trials per variant",
+    "parent": {
+      "commit": "638e7c0",
+      "fresh_team_signed_debug_build": "passed",
+      "tests": {
+        "total": 638,
+        "passed": 564,
+        "skipped": 74,
+        "failed": 0
+      }
+    },
+    "mlx_child": {
+      "commit": "f1405a1",
+      "fresh_team_signed_debug_build": "passed",
+      "tests": {
+        "total": 655,
+        "passed": 574,
+        "skipped": 81,
+        "failed": 0
+      }
+    },
+    "script_registry_checks": "passed on both branches",
+    "normal_tests": "acoustic inference skips without explicit benchmark opt-in"
   }
 }

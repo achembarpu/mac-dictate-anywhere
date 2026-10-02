@@ -68,6 +68,13 @@ The standalone [native MLX probe](../tools/s1-mlx-probe/README.md) and
 `PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH` / `--only cleanup-prompts` scorer.
 They do not change the app's runtime or download models implicitly.
 
+`--only asr-acoustics` separates quiet Float32 input from PCM16 quantization
+using one installed TDT model. It preserves the golden reference, tests
+peak-capped gains and synthetic silence/noise controls, and records raw outputs,
+shared error scores, input hashes/RMS/peaks and process CPU/RSS. This is research
+only; transforms are outside decode timers and product audio is unchanged.
+See [the acoustic screen](tdt-acoustic-screen.md) for selection and limitations.
+
 The pending-audio workload shares the production preview predicate and 15-second
 preview bound. Its 60-second speech simulation requests 60 previews, including
 the initial 500 ms guess; it counts SDK overlap windows and the final flush too.

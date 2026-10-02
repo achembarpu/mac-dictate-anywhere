@@ -61,3 +61,14 @@ TDT model, or `PIPELINE_BENCHMARK_FIXTURE=golden-en-fleurs-2` for another golden
 Each run loads one model. Gain labels are ceilings; peaks cap at 0.99 instead of
 clipping. PCM16 comparisons appear when a `-quiet` derivative exists. Normal
 tests skip inference. No models download automatically and no audio leaves the Mac.
+
+## Verification
+
+All three focused signed Release runs pass, retaining 105 outputs. Fresh
+Team-signed Debug build/test passes on the parent at `638e7c0`: **638 total,
+564 passed, 74 skipped, zero failures**. The MLX child at `f1405a1` passes
+**655 total, 574 passed, 81 skipped, zero failures**. Script group/forwarding
+checks pass on both branches. Normal tests skip model inference. The artifact
+records build/test log hashes and reverified native weight hashes. Collection
+uses the parent dependency lock; the child adds MLX pins without changing this
+collector, its goldens or FluidAudio.
