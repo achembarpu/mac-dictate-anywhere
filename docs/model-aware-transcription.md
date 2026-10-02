@@ -149,8 +149,11 @@ prefix. The repetitive invoice fixture checks this safety behavior separately
 from a varied long fixture that must perform its final self-correction.
 
 S1-mini preparation performs a short synthetic cleanup to warm context creation,
-prompt evaluation and generation. It discards that request's context and output;
-subsequent real requests still have independent contexts. Already-warm models
+prompt evaluation and generation. It retains the actor-owned context allocations
+and clears the KV buffers and token positions after each successful request.
+Subsequent requests have independent decoder history. Cancellation or a decode
+error discards the context; unload/model replacement frees it before the weights.
+Already-warm models
 skip this synthetic inference, and unloading clears the warmup marker.
 
 llama.swift 2.10549.0 is already the latest published wrapper tag checked on

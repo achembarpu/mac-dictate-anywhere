@@ -3,12 +3,99 @@ import os
 @testable import Dictate_Anywhere
 
 final class S1MiniPostProcessingTests: XCTestCase {
+    #if DEBUG || PIPELINE_BENCHMARK
+    func testRealContextReuseMatchesFreshRequestsAndClearsHistory() async throws {
+        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check context reuse") }
+        let url = URL(fileURLWithPath: path)
+        let engine = S1MiniInferenceEngine.shared
+        await engine.unload()
+        let fixtures = try GoldenCleanupFixture.all().filter {
+            $0.language == "en" && $0.vocabulary == nil && $0.id != "long-complete-ending"
+        }
+        var baseline: [String: String] = [:]
+        for fixture in fixtures {
+            await engine.discardInferenceContextForTesting()
+            baseline[fixture.id] = try await process(fixture.input, modelURL: url)
+        }
+        // Reverse order so previous requests have different names, numbers,
+        // intent and prompt lengths than the fresh-context baseline.
+        for fixture in fixtures.reversed() {
+            let output = try await process(fixture.input, modelURL: url)
+            XCTAssertEqual(output, baseline[fixture.id], fixture.id)
+            XCTAssertTrue(fixture.violations(in: output).isEmpty, fixture.id)
+            let state = await engine.inferenceContextStateForTesting()
+            XCTAssertTrue(state.allocated)
+            XCTAssertEqual(state.maximumPosition, -1, "A completed request retained KV token positions")
+        }
+        await engine.unload()
+        let state = await engine.inferenceContextStateForTesting()
+        XCTAssertFalse(state.allocated)
+    }
+
+    func testRealModelPathChangeReleasesContextBeforeReplacingWeights() async throws {
+        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check context ownership") }
+        let url = URL(fileURLWithPath: path)
+        let alias = FileManager.default.temporaryDirectory.appendingPathComponent("s1-context-model-\(UUID()).gguf")
+        try FileManager.default.linkItem(at: url, to: alias)
+        defer { try? FileManager.default.removeItem(at: alias) }
+        let engine = S1MiniInferenceEngine.shared
+        await engine.unload()
+        try await engine.prewarm(from: url)
+        _ = try await engine.transcriptChunks("Hello.", modelURL: alias)
+        let state = await engine.inferenceContextStateForTesting()
+        XCTAssertFalse(state.allocated, "A context must not outlive the model it references")
+        let output = try await process("Send invoice 43 on Thursday.", modelURL: alias)
+        XCTAssertTrue(output.contains("43"))
+        XCTAssertTrue(output.lowercased().contains("thursday"))
+        await engine.unload()
+    }
+    #endif
+
+    #if DEBUG
+    func testRealCancellationAfterPromptDiscardsContextAndNextRequestRecovers() async throws {
+        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check cancelled context") }
+        let url = URL(fileURLWithPath: path)
+        let engine = S1MiniInferenceEngine.shared
+        await engine.unload()
+        try await engine.prewarm(from: url)
+        PerfTrace.onIntervalCompleted = { name, _, _ in
+            if name == "cleanup.promptEval" {
+                withUnsafeCurrentTask { $0?.cancel() }
+            }
+        }
+        defer { PerfTrace.onIntervalCompleted = nil }
+        let cancelled = Task {
+            try await self.process("Please send invoice 812 to Mara.", modelURL: url)
+        }
+        do {
+            _ = try await cancelled.value
+            XCTFail("Expected cancellation after prompt evaluation")
+        } catch is CancellationError {
+            // The context contained a real prompt before cancellation.
+        }
+        PerfTrace.onIntervalCompleted = nil
+        let discarded = await engine.inferenceContextStateForTesting()
+        XCTAssertFalse(discarded.allocated)
+        let recovered = try await process("Keep invoice 43 for Nadia.", modelURL: url)
+        XCTAssertTrue(recovered.contains("43"))
+        XCTAssertTrue(recovered.lowercased().contains("nadia"))
+        XCTAssertFalse(recovered.contains("812"))
+        XCTAssertFalse(recovered.lowercased().contains("mara"))
+        await engine.unload()
+    }
+    #endif
+
     func testRealPrewarmRunsInferenceOnceAndKeepsTheNextRequestIndependent() async throws {
         guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check inference prewarm") }
         let url = URL(fileURLWithPath: path)
         await S1MiniPostProcessingService.unload()
         let firstReady = await S1MiniPostProcessingService.prewarm(modelURL: url)
         XCTAssertTrue(firstReady)
+        #if DEBUG || PIPELINE_BENCHMARK
+        let prepared = await S1MiniInferenceEngine.shared.inferenceContextStateForTesting()
+        XCTAssertTrue(prepared.allocated, "Prewarm must retain the inference allocations")
+        XCTAssertEqual(prepared.maximumPosition, -1, "Synthetic warmup must clear its KV cache")
+        #endif
         #if DEBUG
         let events = OSAllocatedUnfairLock(initialState: [String]())
         PerfTrace.onIntervalCompleted = { name, _, _ in

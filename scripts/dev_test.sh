@@ -149,7 +149,7 @@ assert_benchmark_selector_count() {
 /bin/rm -f "$XCODEBUILD_ARGS_LOG"
 "$SCRIPT" benchmark --list > "$TEST_ROOT/benchmark-list.log"
 [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: --list invoked Xcode\n' >&2; exit 1; }
-for group in all asr asr-quality preview audio overlay transcript insertion cloud-request recovery cleanup cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
+for group in all asr asr-quality preview audio overlay transcript insertion cloud-request recovery cleanup s1-context cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
   /usr/bin/grep -Eq "^$group +" "$TEST_ROOT/benchmark-list.log" || {
     printf 'FAIL: group %s missing from --list\n' "$group" >&2
     exit 1
@@ -170,9 +170,13 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 29
+assert_benchmark_selector_count 30
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
+
+"$SCRIPT" benchmark --only s1-context >/dev/null
+assert_benchmark_selector_count 1
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/S1ContextBenchmarkTests/testPairedFreshAndReusedContextGoldenCleanup'
 
 touch "$TEST_ROOT/Signing.local.xcconfig"
 SIGNING_CONFIG_PATH="$TEST_ROOT/Signing.local.xcconfig" \
