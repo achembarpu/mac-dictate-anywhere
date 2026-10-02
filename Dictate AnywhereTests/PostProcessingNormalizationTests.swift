@@ -2,6 +2,17 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class PostProcessingNormalizationTests: XCTestCase {
+    func testLiteralApologyIsPreservedButNewRefusalIsRejected() {
+        let input = "i am sorry Maya but we cannot ship version 2.4 today"
+        XCTAssertFalse(looksLikeNewRefusalMessage(input: input, output: "I am sorry, Maya, but we cannot ship version 2.4 today."))
+        XCTAssertTrue(looksLikeNewRefusalMessage(input: input, output: "I am sorry, but I cannot assist with that request."))
+    }
+
+    func testEnvelopeIsRemovedOnlyWhenModelAddedIt() {
+        XCTAssertEqual(stripCleanupTranscriptEnvelope("<transcript>What time?</transcript>", original: "what time"), "What time?")
+        let literal = "<transcript>Some code</transcript>"
+        XCTAssertEqual(stripCleanupTranscriptEnvelope(literal, original: literal), literal)
+    }
     func testMalformedOrUnknownStructuredOutputPreservesOriginal() {
         let original = "send the full report and its appendix"
         for response in [

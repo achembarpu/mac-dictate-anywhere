@@ -983,7 +983,7 @@ struct AIPostProcessingView: View {
         }
 
         if let capability = ollamaAvailability?.selectedModelReasoningCapability,
-           capability.supportsReasoning {
+           capability.supportsReasoning, capability != .required {
             DSSection(overline: "Reasoning") {
                 DSDetailRow(
                     label: "Reasoning",
@@ -1000,6 +1000,10 @@ struct AIPostProcessingView: View {
                     )
                 }
             }
+        }
+
+        if ollamaAvailability?.selectedModelReasoningCapability == .required {
+            DSHint(text: "This model always uses reasoning. An Instruct model usually cleans short dictation faster.")
         }
 
         let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
@@ -1964,6 +1968,8 @@ struct AIPostProcessingView: View {
         switch capability {
         case .unsupported:
             return ""
+        case .required:
+            return "This model always uses reasoning."
         case .toggle:
             return "Shown only when the selected model reports Ollama thinking support. Automatic keeps the model default; Off disables reasoning to reduce latency."
         case .level:

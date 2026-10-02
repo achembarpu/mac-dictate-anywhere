@@ -674,6 +674,7 @@ enum OllamaReasoningCapability: String, Sendable {
     case unsupported = "unsupported"
     case toggle = "toggle"
     case level = "level"
+    case required = "required"
 
     var supportsReasoning: Bool {
         self != .unsupported
@@ -703,6 +704,8 @@ enum OllamaReasoningSetting: String, CaseIterable, Sendable {
         switch capability {
         case .unsupported:
             return []
+        case .required:
+            return [.automatic]
         case .toggle:
             return [.automatic, .disabled, .enabled]
         case .level:
@@ -714,6 +717,8 @@ enum OllamaReasoningSetting: String, CaseIterable, Sendable {
         switch capability {
         case .unsupported:
             return self
+        case .required:
+            return .automatic
         case .toggle:
             switch self {
             case .automatic, .disabled, .enabled:

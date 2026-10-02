@@ -567,7 +567,7 @@ enum S1MiniPostProcessingService {
         }
 
         let cleaned = normalizePostProcessedTranscript(output)
-        if looksLikeRefusalMessage(cleaned) || looksLikeGeneratedContent(input: text, output: cleaned) {
+        if looksLikeNewRefusalMessage(input: text, output: cleaned) || looksLikeGeneratedContent(input: text, output: cleaned) {
             return text
         }
         return cleaned
