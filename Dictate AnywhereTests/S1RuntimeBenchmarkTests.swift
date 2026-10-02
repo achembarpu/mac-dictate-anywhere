@@ -58,8 +58,13 @@ final class S1RuntimeBenchmarkTests: XCTestCase {
             let baselineIssues = Set(fixture.violations(in: try XCTUnwrap(outputs["llama"])))
             let newIssues = Set(fixture.violations(in: try XCTUnwrap(outputs["mlx"])))
             let f16Issues = Set(fixture.violations(in: try XCTUnwrap(outputs["llama-f16"])))
+            let baselineLost = Set(fixture.lostFacts(in: try XCTUnwrap(outputs["llama"])))
+            let newLost = Set(fixture.lostFacts(in: try XCTUnwrap(outputs["mlx"])))
+            let f16Lost = Set(fixture.lostFacts(in: try XCTUnwrap(outputs["llama-f16"])))
             XCTAssertTrue(f16Issues.isSubset(of: baselineIssues), "F16 regression in \(fixture.id)")
             XCTAssertTrue(newIssues.isSubset(of: baselineIssues), "New regression in \(fixture.id): \(newIssues.subtracting(baselineIssues))")
+            XCTAssertTrue(f16Lost.isSubset(of: baselineLost), "F16 lost facts in \(fixture.id)")
+            XCTAssertTrue(newLost.isSubset(of: baselineLost), "MLX lost facts in \(fixture.id): \(newLost.subtracting(baselineLost))")
             for mode in modes {
                 BenchmarkStatistics(try XCTUnwrap(samples[mode])).report(component: "s1_runtime", details: "fixture=\(fixture.id) mode=\(mode)")
             }

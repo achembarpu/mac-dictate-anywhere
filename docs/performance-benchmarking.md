@@ -56,13 +56,24 @@ explicit billable-provider opt-in. Benchmarks
 compile both app and tests with `-O` for consistent helper comparisons.
 
 `--only s1-context` compares fresh and reused S1 allocations on identical cleanup
-goldens. `--only asr-file` runs complete golden files through installed native
+goldens. `--only s1-runtime` compares reused GGUF/Q8, tuned Metal/FP16 and
+cached/uncached native MLX through the production service over 21 English cases.
+`--only s1-prepare` checks graph-cold versus prepared first use; `--only s1-cpu`
+compares GGUF CPU cache precision. These use installed app models and never
+download implicitly. See [S1 integration results](s1-runtime-integration.md).
+`--only asr-file` runs complete golden files through installed native
 speech models without live previews; select models, language and repeats
 with the existing `PIPELINE_BENCHMARK_*` settings. `PIPELINE_BENCHMARK_FIXTURE`
 accepts one exact ID or a comma-separated list; unknown or duplicate IDs fail.
 Saved external speech outputs
 can be checked with `PIPELINE_BENCHMARK_ASR_RESULTS_PATH` and
 `--only external-asr-quality`; the manifest hash must match the bundled inventory.
+The standalone [native MLX probe](../tools/s1-mlx-probe/README.md) and
+`scripts/evaluate_s1_mlx.py` collect S1 outputs for the existing
+`PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH` / `--only cleanup-prompts` scorer.
+The Swift collector includes both original and S1 stress references, recording
+their hashes; saved candidate scoring reports content checks, WER and completion.
+The collectors do not change the app's runtime or download models implicitly.
 
 `--only audio-conversion` compares continuous capture conversion with the frozen
 reset-per-block path at 16, 44.1 and 48 kHz. Input buffers are prepared outside

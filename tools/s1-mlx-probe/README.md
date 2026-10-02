@@ -4,8 +4,9 @@ This standalone Swift executable tunes the native Apple Silicon cleanup backend.
 The app uses the same pinned libraries; this collector records raw model outputs.
 Use `scripts/dev.sh benchmark --release --only s1-runtime,s1-prepare` to measure
 the complete production service and its safety gates.
-The historical [evaluation](../../docs/s1-mlx-evaluation.md) retains measured outputs and
-explains the limits of the comparison with production llama.cpp.
+The [integration report](../../docs/s1-runtime-integration.md) records the paired
+app comparison, runtime defaults and rejected variants. The historical
+[evaluation](../../docs/s1-mlx-evaluation.md) retains the earlier prototype results.
 
 ## Reproduce
 
@@ -43,7 +44,7 @@ Run from the app repository root, using absolute model/output paths:
 ```sh
 swift build --package-path tools/s1-mlx-probe --configuration release
 swift run --package-path tools/s1-mlx-probe --configuration release --skip-build \
-  S1MLXProbe /ABSOLUTE/PATH/4bit "$PWD" 3 /ABSOLUTE/PATH/results.json 16
+  S1MLXProbe /ABSOLUTE/PATH/4bit "$PWD" 3 /ABSOLUTE/PATH/results.json 16 256 prefix 64
 ```
 
 The positional arguments are model directory, app repository, repeats, output
@@ -60,7 +61,7 @@ PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH=/ABSOLUTE/PATH/results.json \
 
 The probe reads the production system prompt and shared golden manifest. It
 uses the trained styling/context prefix, empty thinking block, greedy sampling,
-512-token prefill and input-derived output limit, including one EOS probe.
+configurable prefill and input-derived output limit, including one EOS probe.
 Only English goldens without vocabulary are eligible. Inputs above 1,000 tokens
 fail explicitly; this executable is a single-pass experiment. Each request
 starts with a new cache and records actual EOS completion. One synthetic request
@@ -72,21 +73,24 @@ loading and the app's postprocessing/fallback gates. Per-fixture first shape
 use remains visible in the three trials. This is neither live dictation nor a
 complete production lifecycle implementation.
 
-A production integration still needs the existing chunk/fallback rules, bounded
-cancellation and unload, cache/download validation, settings-driven preparation,
-model footprint/energy checks, and tests on additional supported Macs. Retain
-llama.cpp for Intel. The 4-bit native result justifies that work; the much slower
-Python loop and quantized MLX KV experiment are retained as rejected variants.
+The app integration includes the shared chunk/fallback rules, bounded cancellation
+and unload, verified installation, selected-model preparation and Intel's llama.cpp
+path. The collector deliberately measures raw single-pass output; use the registered
+app benchmark for production behavior. Additional Mac hardware and energy checks
+remain outside the available measurements.
 
 ## Runtime matrix
 
 Optional positional arguments after KV_BITS are prefill size, `prefix`/`none`,
 allocator cache limit in MiB, and `qwen-card` for the pinned Qwen3.5-0.8B candidate.
+The last argument can instead be `fp16` to cast floating model tensors to FP16
+while keeping packed integer weights unchanged. This is a benchmark experiment:
+the measured cast dropped a negation, so production keeps the original BF16 tensors.
 S1 always uses its trained prompt, greedy sampling and author token budget.
 Prefix mode copies only the public system-prompt cache and checks its offsets.
 
 ```sh
-.build/release/S1MLXProbe /path/to/4bit /path/to/app/repo 3 /tmp/s1.json 16 256 prefix 64
+tools/s1-mlx-probe/.build/release/S1MLXProbe /path/to/4bit /path/to/app/repo 3 /tmp/s1.json 16 256 prefix 64
 ```
 
 Qwen uses its own chat template, thinking disabled, temperature 1, top-p 1,
@@ -102,3 +106,5 @@ For group32/128 comparisons, convert the same pinned author snapshot with
 `q_bits=4`, `q_group_size=32` or `128`, affine mode and remote code disabled.
 Keep inference serial and avoid concurrent builds during latency measurements.
 Final results and rejected variants are in the integration benchmark report.
+New collector outputs also record both fixture hashes, system-prompt/dependency
+hashes, allocator limit, floating tensor policy and candidate seeds for reuse.

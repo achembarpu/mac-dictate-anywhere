@@ -14,11 +14,15 @@ responses preserve the entire input. Cancellation checks every output token and
 joins GPU work before returning or unloading. Prewarm exercises short and batched
 prefill plus autoregressive kernels with synthetic input, outside usage time.
 
-Measured tuning uses normal KV, prefill steps of 256 and a bounded 64 MiB temporary
+Measured tuning preserves the original BF16 floating tensors and uses normal KV,
+prefill steps of 256 and a bounded 64 MiB temporary
 allocator cache. 128/256/512/1024 prefill and cached/uncached comparisons are retained
 in the standalone probe. The registered `s1-runtime` benchmark uses the actual app
 service, normalization and safety gates, alternating backend order. It includes
 21 authored English references (14 new stress cases), five trials and all outputs.
+Casting native floating tensors to FP16 saved little time and lost a negation;
+it remains a rejected developer experiment, distinct from the beneficial FP16
+KV choice for llama.cpp Metal.
 
 The stronger references exposed loss of a numeric minus sign in both 4-bit and
 8-bit S1. Shared safeguards retain the original when an explicit numeric minus
