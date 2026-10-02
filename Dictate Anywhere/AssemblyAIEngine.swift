@@ -244,6 +244,10 @@ final class AssemblyAIEngine: TranscriptionEngine {
     func installAudioCaptureControllerForTesting(_ controller: AudioCaptureController) {
         audioCaptureController = controller
     }
+
+    func installConnectionWarmUpForTesting(_ task: Task<Void, Never>) {
+        warmUpTask = task
+    }
     #endif
 
     func stopAudioCapture() {
@@ -263,10 +267,12 @@ final class AssemblyAIEngine: TranscriptionEngine {
         defer { trace.end() }
         stopAudioCapture()
         await stopLivePreview()
-        let warmUpTrace = PerfTrace.begin("stt.warmConnectionWait")
-        await warmUpTask?.value
+        // Connection preparation is speculative, not a dependency of the
+        // transcription request. A slow /warm must not delay Stop by its
+        // ten-second timeout. Keep it owned until this request completes.
+        let connectionPreparation = warmUpTask
         warmUpTask = nil
-        warmUpTrace.end()
+        defer { connectionPreparation?.cancel() }
 
         let snapshot = stateLock.withLock {
             (samples: fullRecordingSamples, exceededLimit: recordingExceededLimit)

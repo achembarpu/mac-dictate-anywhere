@@ -3,6 +3,23 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class AssemblyAIEngineTests: XCTestCase {
+    #if DEBUG
+    func testStopDoesNotWaitForSpeculativeConnectionPreparation() async {
+        let engine = AssemblyAIEngine()
+        let warmUp = Task { _ = try? await Task.sleep(for: .seconds(30)) }
+        engine.installConnectionWarmUpForTesting(warmUp)
+        let stopped = expectation(description: "Stop completes before connection preparation")
+        let stop = Task {
+            _ = await engine.stopRecording() // Empty audio: no remote request.
+            stopped.fulfill()
+        }
+        await fulfillment(of: [stopped], timeout: 1)
+        XCTAssertTrue(warmUp.isCancelled, "Stop must retain ownership and cancel speculative work")
+        warmUp.cancel()
+        await stop.value
+        await warmUp.value
+    }
+    #endif
     func testRegionsUseDocumentedHosts() {
         XCTAssertEqual(AssemblyAIRegion.global.baseURL.host, "dictation.assemblyai.com")
         XCTAssertEqual(AssemblyAIRegion.unitedStates.baseURL.host, "dictation.us.assemblyai.com")
