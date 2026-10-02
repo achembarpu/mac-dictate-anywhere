@@ -75,6 +75,10 @@ insertion|Insertion formatting and paste-script caching|PipelinePerformanceBench
 cloud-request|AssemblyAI request encoding without network|PipelineWorkloadBenchmarkTests/testAssemblyAIRequestEncoding
 recovery|Recovery audio write and read|PipelineWorkloadBenchmarkTests/testRecoveryWriteAndRead
 cleanup|S1-mini prewarm/cleanup and Apple Intelligence|PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark PipelineWorkloadBenchmarkTests/testS1MiniCleanupWithInstalledModel PipelineWorkloadBenchmarkTests/testAppleIntelligenceCleanupWhenAvailable
+cleanup-quality|Authored cleanup references and Apple session isolation|AppleCleanupBenchmarkTests/testGoldenCleanupAndPreparedSessionIsolation AppleCleanupBenchmarkTests/testLongInputAcrossContextWindows ProviderCleanupBenchmarkTests/testGoldenCleanupWithSelectedProvider
+apple-speech-quality|Installed Apple locales, golden accuracy and preparation|AppleSpeechBenchmarkTests/testInstalledLocalesGoldenSpeechAndFreshSessionPreparation
+cleanup-prompts|Explicit local external-prompt and saved-model evaluation|CleanupPromptBenchmarkTests/testExternalPromptAgainstProductionCleanup CleanupPromptBenchmarkTests/testSavedCandidateOutputsUseGoldenScorer
+external-asr-quality|Explicit local ASR runtime evaluation using golden speech|ExternalSpeechBenchmarkTests/testLocalRuntimeGoldenSpeech
 model-switch|Installed-model switch timings (opt-in)|ModelSwitchBenchmarkTests/testModelSwitchTimings
 EOF
 }
@@ -284,6 +288,11 @@ run_benchmark() {
     PIPELINE_BENCHMARK_REFERENCE_PATH PIPELINE_BENCHMARK_MAX_WER \
     PIPELINE_BENCHMARK_FIXTURE PIPELINE_BENCHMARK_GOLDEN PIPELINE_BENCHMARK_METRIC \
     PIPELINE_BENCHMARK_DOWNLOAD_MODELS PIPELINE_BENCHMARK_ENCODER \
+    PIPELINE_BENCHMARK_CLEANUP_PROVIDER PIPELINE_BENCHMARK_CLEANUP_MODEL \
+    PIPELINE_BENCHMARK_CLEANUP_URL PIPELINE_BENCHMARK_CLEANUP_API_KEY \
+    PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES \
+    PIPELINE_BENCHMARK_CLEANUP_GREEDY PIPELINE_BENCHMARK_ASR_URL PIPELINE_BENCHMARK_LANGUAGES \
+    PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH \
     S1_MINI_MODEL_PATH RUN_MODEL_SWITCH_BENCHMARK; do
     if [[ -n "${!name:-}" ]]; then
       benchmark_test_environment+=("TEST_RUNNER_${name}=${!name}")

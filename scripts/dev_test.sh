@@ -26,6 +26,13 @@ printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_FIXTURE:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_METRIC:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_DOWNLOAD_MODELS:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_ENCODER:-}" > "$XCODEBUILD_ENV_LOG"
+printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_MODEL:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_GREEDY:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_URL:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_LANGUAGES:-}" > "$XCODEBUILD_RESEARCH_ENV_LOG"
 EOF
 cat > "$MOCK_BIN/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -52,6 +59,7 @@ chmod +x "$MOCK_BIN/pgrep" "$MOCK_BIN/rm" "$MOCK_BIN/xcodebuild" "$MOCK_BIN/unam
 PATH="$MOCK_BIN:$PATH"
 export HOME="$TEST_HOME" PATH RM_LOG XCODEBUILD_ARGS_LOG="$TEST_ROOT/xcodebuild-args.log"
 export XCODEBUILD_ENV_LOG="$TEST_ROOT/xcodebuild-env.log"
+export XCODEBUILD_RESEARCH_ENV_LOG="$TEST_ROOT/xcodebuild-research-env.log"
 
 unset DERIVED_DATA_PATH
 default_path="$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"
@@ -141,7 +149,7 @@ assert_benchmark_selector_count() {
 /bin/rm -f "$XCODEBUILD_ARGS_LOG"
 "$SCRIPT" benchmark --list > "$TEST_ROOT/benchmark-list.log"
 [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: --list invoked Xcode\n' >&2; exit 1; }
-for group in all asr asr-quality preview audio overlay transcript insertion cloud-request recovery cleanup model-switch; do
+for group in all asr asr-quality preview audio overlay transcript insertion cloud-request recovery cleanup cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
   /usr/bin/grep -Eq "^$group +" "$TEST_ROOT/benchmark-list.log" || {
     printf 'FAIL: group %s missing from --list\n' "$group" >&2
     exit 1
@@ -162,7 +170,7 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 22
+assert_benchmark_selector_count 29
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 
@@ -183,6 +191,12 @@ for invalid in unknown '' ',overlay' 'overlay,' 'overlay,,audio'; do
   fi
   [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: invalid group invoked Xcode\n' >&2; exit 1; }
 done
+
+"$SCRIPT" benchmark --only cleanup-quality,apple-speech-quality >/dev/null
+assert_benchmark_selector_count 4
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AppleCleanupBenchmarkTests/testLongInputAcrossContextWindows'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ProviderCleanupBenchmarkTests/testGoldenCleanupWithSelectedProvider'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AppleSpeechBenchmarkTests/testInstalledLocalesGoldenSpeechAndFreshSessionPreparation'
 if "$SCRIPT" benchmark --only >/dev/null 2>&1 || \
    "$SCRIPT" benchmark --only --list >/dev/null 2>&1 || \
    "$SCRIPT" test --only overlay >/dev/null 2>&1; then
@@ -206,7 +220,21 @@ for scenario in testDownloadModelsIntoApplicationCache testGoldenSpeechReference
   fi
 done
 
+PIPELINE_BENCHMARK_CLEANUP_MODEL=candidate \
+  PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH='/fixture/prompt with spaces.md' \
+  PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES=512 PIPELINE_BENCHMARK_CLEANUP_GREEDY=1 \
+  PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH='/fixture/outputs.json' \
+  PIPELINE_BENCHMARK_ASR_URL=http://127.0.0.1:8010/v1 PIPELINE_BENCHMARK_LANGUAGES=en,de \
+  "$SCRIPT" benchmark --only cleanup-prompts,external-asr-quality >/dev/null
+assert_benchmark_selector_count 3
+expected_research_environment=$'candidate\n/fixture/prompt with spaces.md\n512\n1\n/fixture/outputs.json\nhttp://127.0.0.1:8010/v1\nen,de'
+if [[ "$(<"$XCODEBUILD_RESEARCH_ENV_LOG")" != "$expected_research_environment" ]]; then
+  printf 'FAIL: candidate benchmark settings were not forwarded exactly\n' >&2
+  exit 1
+fi
+
 printf 'Development script architecture selection tests passed.\n'
 printf 'Development script clean safety tests passed.\n'
 printf 'Benchmark discovery, focused/combined/default selection, signing and invalid-input tests passed.\n'
 printf 'Golden speech benchmark forwarding tests passed.\n'
+printf 'Candidate benchmark forwarding tests passed.\n'

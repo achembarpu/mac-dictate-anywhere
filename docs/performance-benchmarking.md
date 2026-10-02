@@ -48,7 +48,11 @@ building. Groups are registered with their descriptions and Xcode test
 selectors in one catalog in `scripts/dev.sh`. Add new benchmark selectors
 there to make them available through `--list` and focused runs. Use
 `--only asr-quality` for golden quality, paired policies, model setup and encoder
-comparisons; `--only cleanup` runs the local cleanup checks. Benchmarks
+comparisons; `--only cleanup` runs the local cleanup checks. `--only cleanup-quality`
+runs the authored cleanup references and paired Apple/context-window checks;
+`--only apple-speech-quality` tests installed Apple locale assets with fresh
+prepared sessions. See the golden inventory for provider/model selection and
+explicit billable-provider opt-in. Benchmarks
 compile both app and tests with `-O` for consistent helper comparisons.
 
 The pending-audio workload shares the production preview predicate and 15-second
@@ -78,7 +82,9 @@ time or transcript quality.
 | S1-mini policy | Exercises the production startup-prewarm decision matrix. |
 | S1-mini preparation | Measures production weight loading plus one synthetic inference warmup with the app's validated installed model, or an explicit `S1_MINI_MODEL_PATH`; never downloads. Already-warm models skip synthetic inference. |
 | S1-mini cleanup | With the app's validated installed model, or `S1_MINI_MODEL_PATH`, runs short, long and over-limit text through the real local cleanup service and reports cold/warm request timings. |
-| Apple Intelligence cleanup | Runs a fixed cleanup prompt through the on-device Foundation Models service when available. Schema success and fallback are visible in performance traces. |
+| Apple Intelligence cleanup | Runs a fixed cleanup prompt through the on-device Foundation Models service when available. Guided decoding and planning are visible in performance traces. |
+| Cleanup golden quality | Eleven authored English/German/Chinese/Dutch references check numbers, negation, questions, self-corrections and long endings. Apple is paired with the frozen production baseline; other providers require explicit selection. Reports semantic misses, required facts, original fallback, reference error and latency separately. |
+| Apple Speech golden quality | Replays matching installed locales through two fresh production SpeechAnalyzer sessions, recording preparation, final decode and WER/CER. Does not install missing assets. |
 | Model switching | With `RUN_MODEL_SWITCH_BENCHMARK=1` and at least two installed models, times a fixed model-switch sequence. |
 
 Set `PIPELINE_BENCHMARK_MODEL=all` to sweep models already installed on this

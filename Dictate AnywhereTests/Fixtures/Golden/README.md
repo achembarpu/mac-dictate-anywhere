@@ -84,3 +84,68 @@ the same model, fixture, machine, SDK revision and build configuration. The pair
 policy benchmark checks mean final error and total processing time against the
 parent policy; the broader quality inventory reports errors without arbitrary
 universal thresholds. Consult `docs/performance-benchmarking.md` for limitations.
+
+## Cleanup references
+
+`cleanup-golden-manifest.json` contains eleven independently authored synthetic
+transcripts and edited references (project-authored test data, not external
+recordings). These cover English, German, Dutch and Chinese, factual details,
+questions, spoken corrections, known spellings, quoted instructions, apologies
+and a 683-word transcript with a checked final paragraph. The Apple context test
+derives three distinct invoice batches and numbered paragraphs from that long
+input, to check multi-session ordering and preservation without rewarding
+accidental duplicate removal. All checked anchors must actually occur in input.
+
+`requiredFacts` separates factual preservation from desired improvements such
+as removing superseded wording. `required`/`forbidden`/`question` record cleanup
+quality misses; valid contractions and common number/time formats may have
+explicit alternatives. References remain independent of model outputs. A safe
+original-text fallback is reported as fallback, not successful editing.
+
+```sh
+# Apple Intelligence: frozen pre-follow-up decoder comparison, single-use
+# prepared sessions, multilingual fixtures, and multi-context-window content.
+scripts/dev.sh benchmark --release --only cleanup-quality
+
+# Explicit real provider/model; normal app caches and production services.
+PIPELINE_BENCHMARK_CLEANUP_PROVIDER=ollama \
+PIPELINE_BENCHMARK_CLEANUP_MODEL=qwen3:4b-instruct \
+scripts/dev.sh benchmark --release --only cleanup-quality
+
+PIPELINE_BENCHMARK_CLEANUP_PROVIDER=ollama \
+PIPELINE_BENCHMARK_CLEANUP_MODEL=llama3.2:3b \
+scripts/dev.sh benchmark --release --only cleanup-quality
+
+PIPELINE_BENCHMARK_CLEANUP_PROVIDER=s1 \
+scripts/dev.sh benchmark --release --only cleanup-quality
+
+PIPELINE_BENCHMARK_CLEANUP_PROVIDER=compatible \
+PIPELINE_BENCHMARK_CLEANUP_URL=http://127.0.0.1:11434/v1 \
+PIPELINE_BENCHMARK_CLEANUP_MODEL=qwen3:4b-instruct \
+scripts/dev.sh benchmark --release --only cleanup-quality
+
+# Installed Apple Speech locales only; never downloads assets implicitly.
+scripts/dev.sh benchmark --release --only apple-speech-quality
+```
+
+Provider benchmarks accept `PIPELINE_BENCHMARK_ITERATIONS` (1–10) and
+`PIPELINE_BENCHMARK_FIXTURE`. S1-mini tests its supported English cleanup path and
+omits custom-vocabulary cases. Llama3.2 tests English/German; Dutch and Chinese
+are outside its card's stated languages. OpenRouter tests require explicit
+`PIPELINE_BENCHMARK_CLEANUP_PROVIDER=openrouter`, model, and
+`PIPELINE_BENCHMARK_CLEANUP_API_KEY`; they make billable requests. Never commit
+keys or benchmark transcripts from private dictation.
+
+`LegacyAppleCleanupBenchmark.swift` freezes the production Apple implementation
+at `54a27e9` for future comparisons. It is test-only. The normal app never invokes
+that baseline, old tools, old output cap or an experimental decoder. Each Apple
+fixture gives the new prepared session at least one second of lead time, per
+Apple's docs; that wait is outside request latency. Product recording does not
+insert such a delay. Apple Speech compares two fresh sessions using the same
+production preset; the first is not a forced OS/model-cache-cold measurement.
+
+Single-run cleanup measurements and two Apple Speech sessions do not establish
+p95 latency, population WER or performance across every Mac. Cleanup WER/CER can
+penalize valid editing alternatives; consult semantic misses, lost facts and
+fallback status alongside it. Detailed results belong in
+`docs/model-stack-benchmark-results.md` and its structured evidence file.
