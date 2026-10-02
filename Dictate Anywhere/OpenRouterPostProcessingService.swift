@@ -44,14 +44,12 @@ enum OpenRouterPostProcessingService {
         let supportedParameters: Set<String>?
         let contextLength: Int?
         let maximumCompletionTokens: Int?
-        let usesSamplingDefaults: Bool
 
         init(id: String, supportsStructuredOutputs: Bool, supportsAudioInput: Bool,
-             supportedParameters: Set<String>? = nil, contextLength: Int? = nil, maximumCompletionTokens: Int? = nil, usesSamplingDefaults: Bool = false) {
+             supportedParameters: Set<String>? = nil, contextLength: Int? = nil, maximumCompletionTokens: Int? = nil) {
             self.id = id; self.supportsStructuredOutputs = supportsStructuredOutputs
             self.supportsAudioInput = supportsAudioInput; self.supportedParameters = supportedParameters
             self.contextLength = contextLength; self.maximumCompletionTokens = maximumCompletionTokens
-            self.usesSamplingDefaults = usesSamplingDefaults
         }
     }
 
@@ -187,27 +185,24 @@ enum OpenRouterPostProcessingService {
         let availability = Availability(models: models, apiKeyStatus: apiKeyStatus(apiKey: apiKey, apiKeyEnvironmentVariable: apiKeyEnvironmentVariable))
         let capabilities = matchingAvailableModel(for: trimmedModel, in: availability)
         let instructions = remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
-        var options = CleanupChatOptions(temperature: nil)
+        var options = CleanupChatOptions()
         if let capabilities {
             options.structuredOutput = capabilities.supportedParameters == nil || capabilities.supportsStructuredOutputs
-            if capabilities.supportedParameters?.contains("temperature") == true, !capabilities.usesSamplingDefaults {
-                options.temperature = 0
-            }
         }
         return try await RemoteCleanupProcessing.process(
             text: text, instructions: instructions, vocabulary: vocabulary, context: context,
             contextLength: capabilities?.contextLength ?? 8_192,
             maximumCompletionTokens: capabilities?.maximumCompletionTokens
         ) { chunk in
-            // At most one retry per explicitly unsupported option.
-            for attempt in 0..<3 {
+            // At most one retry for an explicitly unsupported schema.
+            for attempt in 0..<2 {
                 do {
                     return try await performChatCompletionRequest(model: trimmedModel, apiKey: apiKey,
                         instructions: instructions,
                         prompt: remotePostProcessingRequestPrompt(text: chunk, vocabulary: vocabulary, context: context),
                         options: options, session: session)
                 } catch let error as ServiceError {
-                    guard case .serverMessage(let message) = error, attempt < 2, options.adapt(to: message) else { throw error }
+                    guard case .serverMessage(let message) = error, attempt == 0, options.adapt(to: message) else { throw error }
                 }
             }
             throw CleanupResponseError.incompleteResponse
@@ -234,8 +229,6 @@ enum OpenRouterPostProcessingService {
             }
         }
 
-        struct SamplingDefaults: Decodable { let temperature: Double? }
-        struct Reasoning: Decodable {}
         struct TopProvider: Decodable {
             let contextLength: Int?
             let maxCompletionTokens: Int?
@@ -244,8 +237,6 @@ enum OpenRouterPostProcessingService {
         let id: String
         let contextLength: Int?
         let topProvider: TopProvider?
-        let defaultParameters: SamplingDefaults?
-        let reasoning: Reasoning?
         let supportedParameters: [String]?
         let architecture: ArchitectureResponse?
 
@@ -253,8 +244,6 @@ enum OpenRouterPostProcessingService {
             case id
             case contextLength = "context_length"
             case topProvider = "top_provider"
-            case defaultParameters = "default_parameters"
-            case reasoning
             case supportedParameters = "supported_parameters"
             case architecture
         }
@@ -291,13 +280,13 @@ enum OpenRouterPostProcessingService {
             let inputModalities = Set((model.architecture?.inputModalities ?? []).map { $0.lowercased() })
             return Model(
                 id: trimmedID,
-                supportsStructuredOutputs: supportedParameters.contains("structured_outputs")
-                    || supportedParameters.contains("response_format"),
+                // response_format alone can mean JSON mode rather than a
+                // strict schema. OpenRouter advertises the latter separately.
+                supportsStructuredOutputs: supportedParameters.contains("structured_outputs"),
                 supportsAudioInput: inputModalities.contains("audio"),
                 supportedParameters: model.supportedParameters == nil ? nil : supportedParameters,
                 contextLength: [model.contextLength, model.topProvider?.contextLength].compactMap { $0 }.filter { $0 > 0 }.min(),
-                maximumCompletionTokens: model.topProvider?.maxCompletionTokens.flatMap { $0 > 0 ? $0 : nil },
-                usesSamplingDefaults: model.defaultParameters?.temperature != nil || model.reasoning != nil
+                maximumCompletionTokens: model.topProvider?.maxCompletionTokens.flatMap { $0 > 0 ? $0 : nil }
             )
         }
         .sorted {
@@ -340,7 +329,6 @@ enum OpenRouterPostProcessingService {
                 ]
             ]
         ]
-        if let temperature = options.temperature { payload["temperature"] = temperature }
 
         if options.structuredOutput {
             payload["provider"] = ["require_parameters": true]

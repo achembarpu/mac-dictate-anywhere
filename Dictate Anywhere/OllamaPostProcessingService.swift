@@ -200,9 +200,13 @@ enum OllamaPostProcessingService {
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.timeoutInterval = 120
-                var options: [String: Any] = ["num_ctx": contextLength, "num_predict": -1]
-                // Preserve curated sampling from the installed model package.
-                if let details, !details.hasSamplingPreset { options["temperature"] = 0 }
+                // Keep model/server sampling defaults. Greedy structured
+                // decoding looped on the real Llama long-input benchmark.
+                // Bound non-thinking output using the same conservative
+                // budget reserved by planning, and reject length completion.
+                let outputBudget = TranscriptCleanupPlan.outputReserve(inputTokens: TranscriptCleanupPlan.estimatedTokens(chunk))
+                let predictionLimit = details?.thinking?.values == [.toggle(false)] ? outputBudget : -1
+                let options: [String: Any] = ["num_ctx": contextLength, "num_predict": predictionLimit]
                 var payload: [String: Any] = [
                     "model": trimmedModel, "system": instructions,
                     "prompt": remotePostProcessingRequestPrompt(text: chunk, vocabulary: vocabulary, context: context),
@@ -717,9 +721,11 @@ enum OllamaPostProcessingService {
 
     private static func modelDetails(baseURL: String, model: String, session: URLSession = .shared) async throws -> OllamaModelDetails {
         let key = reasoningCapabilityCacheKey(baseURL: baseURL, model: model)
-        if let cached = await OllamaModelDetailsCache.shared.value(for: key) { return cached }
+        // Injected transports must not consume or populate production metadata.
+        let cachesDetails = session === URLSession.shared
+        if cachesDetails, let cached = await OllamaModelDetailsCache.shared.value(for: key) { return cached }
         let details = try await fetchModelDetails(baseURL: baseURL, model: model, session: session)
-        await OllamaModelDetailsCache.shared.set(details, for: key)
+        if cachesDetails { await OllamaModelDetailsCache.shared.set(details, for: key) }
         return details
     }
 

@@ -260,6 +260,7 @@ func remotePostProcessingInstructions(
     - If the transcript contains a question, keep it as a cleaned-up question. Never answer it.
     - Auto structure into paragraphs and list items with proper punctuation when appropriate.
     - Stay faithful to the original transcript's tone.
+    - Resolve clear spoken self-corrections by keeping the final choice and removing the superseded wording. Preserve uncertain corrections unchanged.
     - Never use em dashes in cleaned output. Replace them with commas, periods, colons, semicolons, or parentheses as appropriate.
     - Always respond in the same language and script as the transcript. Never translate the transcript into another language.
     - If the transcript is already clean, ambiguous, or too short to improve safely, keep it unchanged.
@@ -274,6 +275,7 @@ func remotePostProcessingInstructions(
 
     OUTPUT:
     - Return JSON matching the provided schema.
+    - The JSON has exactly two keys: action and text. text is the complete cleaned transcript, or null when action is pasteTranscriptAsIs.
     - Use action pasteCleanedText when you made any safe cleanup or normalization change.
     - Use action pasteTranscriptAsIs only when nothing should change.
     - Never return commentary, explanations, quotes, or markdown.

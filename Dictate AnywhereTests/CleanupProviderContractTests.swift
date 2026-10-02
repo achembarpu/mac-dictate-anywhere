@@ -101,11 +101,40 @@ final class CleanupProviderContractTests: XCTestCase {
         XCTAssertTrue(payloads.allSatisfy { $0["temperature"] == nil }, "Unknown model sampling belongs to its server")
     }
 
+    func testOllamaNonThinkingBudgetAndTransportMetadataAreIsolated() async throws {
+        let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
+        let discoveries = OSAllocatedUnfairLock(initialState: 0)
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            if request.url?.path.hasSuffix("show") == true {
+                let discovery = discoveries.withLock { $0 += 1; return $0 }
+                let limit = discovery == 1 ? 4_096 : 8_192
+                return (200, Data("{\"thinking\":{\"values\":[false]},\"model_info\":{\"llama.context_length\":\(limit)}}".utf8))
+            }
+            let payload = try Self.payload(request)
+            requests.withLock { $0.append(payload) }
+            return (200, Data(#"{"done":true,"done_reason":"stop","response":"{\"action\":\"pasteCleanedText\",\"text\":\"Hello.\"}"}"#.utf8))
+        } }
+        let model = UUID().uuidString
+        for _ in 0..<2 {
+            _ = try await OllamaPostProcessingService.process(text: "hello", baseURL: "http://cleanup.test",
+                model: model, prompt: "Correct punctuation.", session: session)
+        }
+        let payloads = requests.withLock { $0 }
+        XCTAssertEqual(discoveries.withLock { $0 }, 2)
+        for (index, payload) in payloads.enumerated() {
+            let options = try XCTUnwrap(payload["options"] as? [String: Any])
+            XCTAssertEqual(options["num_ctx"] as? Int, index == 0 ? 4_096 : 8_192)
+            XCTAssertEqual(options["num_predict"] as? Int, TranscriptCleanupPlan.outputReserve(inputTokens: 5))
+            XCTAssertNil(options["temperature"], "Preserve server defaults even without an author preset")
+            XCTAssertEqual(payload["think"] as? Bool, false)
+        }
+    }
+
     func testOpenRouterUsesCatalogDefaultsAndRequiresSchemaCapableRouting() async throws {
         let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
         CleanupHTTPStub.handler.withLock { $0 = { request in
             if request.url?.path.hasSuffix("models") == true {
-                return (200, Data(#"{"data":[{"id":"test/curated","context_length":16384,"supported_parameters":["temperature","structured_outputs"],"default_parameters":{"temperature":0.7},"top_provider":{"context_length":8192,"max_completion_tokens":4096}}]}"#.utf8))
+                return (200, Data(#"{"data":[{"id":"test/curated","context_length":16384,"supported_parameters":["temperature","structured_outputs"],"default_parameters":{"temperature":0.7},"top_provider":{"context_length":8192,"max_completion_tokens":4096}},{"id":"test/json-only","context_length":8192,"supported_parameters":["response_format"],"reasoning":{"mandatory":true}}]}"#.utf8))
             }
             let payload = try Self.payload(request)
             requests.withLock { $0.append(payload) }
@@ -119,6 +148,12 @@ final class CleanupProviderContractTests: XCTestCase {
         XCTAssertNil(payload["temperature"])
         XCTAssertNotNil(payload["response_format"])
         XCTAssertEqual((payload["provider"] as? [String: Any])?["require_parameters"] as? Bool, true)
+        _ = try await OpenRouterPostProcessingService.process(text: "hello", model: "test/json-only",
+            prompt: "Correct punctuation.", apiKey: "contract-test-key", apiKeyEnvironmentVariable: "", session: session)
+        let jsonOnly = try XCTUnwrap(requests.withLock { $0.last })
+        XCTAssertNil(jsonOnly["temperature"])
+        XCTAssertNil(jsonOnly["response_format"], "JSON mode support does not establish strict-schema support")
+        XCTAssertNil(jsonOnly["provider"])
     }
 
     func testOllamaRetriesExplicitCloudFormatRejectionOnce() async throws {
@@ -183,8 +218,7 @@ final class CleanupProviderContractTests: XCTestCase {
             if expected == .required || expected == .level { XCTAssertNil(details.thinkValue(for: .disabled)) }
         }
         var options = CleanupChatOptions()
-        XCTAssertTrue(options.adapt(to: "Unsupported value: temperature only supports the default"))
-        XCTAssertNil(options.temperature)
+        // Sampling is never sent, so a temperature error is not retryable.
         XCTAssertFalse(options.adapt(to: "Unsupported value: temperature only supports the default"))
         XCTAssertFalse(options.adapt(to: "Input exceeds the maximum context length"))
         XCTAssertTrue(options.adapt(to: "json_schema is not supported"))

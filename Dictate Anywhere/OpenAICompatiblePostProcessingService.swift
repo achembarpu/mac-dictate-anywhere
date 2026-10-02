@@ -69,18 +69,18 @@ enum OpenAICompatiblePostProcessingService {
 
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let instructions = remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
-        var options = CleanupChatOptions(temperature: nil)
+        var options = CleanupChatOptions()
         return try await RemoteCleanupProcessing.process(
             text: text, instructions: instructions, vocabulary: vocabulary, context: context
         ) { chunk in
-            for attempt in 0..<3 {
+            for attempt in 0..<2 {
                 do {
                     return try await performChatCompletionRequest(baseURL: baseURL, model: trimmedModel,
                         apiKey: trimmedAPIKey, instructions: instructions,
                         prompt: remotePostProcessingRequestPrompt(text: chunk, vocabulary: vocabulary, context: context),
                         options: options, session: session)
                 } catch let error as ServiceError {
-                    guard case .serverMessage(let message) = error, attempt < 2, options.adapt(to: message) else { throw error }
+                    guard case .serverMessage(let message) = error, attempt == 0, options.adapt(to: message) else { throw error }
                 }
             }
             throw CleanupResponseError.incompleteResponse
@@ -197,7 +197,6 @@ enum OpenAICompatiblePostProcessingService {
                 ]
             ]
         ]
-        if let temperature = options.temperature { payload["temperature"] = temperature }
 
         if options.structuredOutput {
             payload["response_format"] = [

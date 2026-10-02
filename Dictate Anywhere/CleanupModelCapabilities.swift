@@ -30,14 +30,7 @@ nonisolated struct OllamaModelDetails: Decodable, Sendable {
     }
     let thinking: Thinking?
     let modelInfo: ModelInfo?
-    let parameters: String?
-    enum CodingKeys: String, CodingKey { case thinking, parameters; case modelInfo = "model_info" }
-
-    var hasSamplingPreset: Bool {
-        parameters?.split(separator: "\n").contains {
-            $0.split(whereSeparator: \.isWhitespace).first == "temperature"
-        } ?? false
-    }
+    enum CodingKeys: String, CodingKey { case thinking; case modelInfo = "model_info" }
 
     /// A bounded dictation working set; don't allocate a model's entire training
     /// context (potentially hundreds of thousands of tokens) to clean a note.
@@ -85,12 +78,10 @@ nonisolated enum CleanupRequestAdaptation {
 
 nonisolated struct CleanupChatOptions: Sendable {
     var structuredOutput = true
-    var temperature: Double? = 0
 
     mutating func adapt(to message: String) -> Bool {
         switch CleanupRequestAdaptation.unsupportedParameter(in: message) {
         case .structuredOutput where structuredOutput: structuredOutput = false; return true
-        case .temperature where temperature != nil: temperature = nil; return true
         default: return false
         }
     }
