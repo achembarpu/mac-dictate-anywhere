@@ -105,6 +105,12 @@ debug logging is disabled unless explicitly enabled in a local Debug build.
 Use a separate stable `DERIVED_DATA_PATH` for each worktree to avoid sharing
 Xcode build products.
 
+The [hardware defaults and optimized encoder evidence](model-hardware-defaults.md)
+record which execution paths the app chooses internally. Hardware comparisons
+remain developer benchmarks; the app has no processor tuning workflow or
+startup calibration. The latest comparison uses five paired repeats with both
+app and harness optimized, retaining first-use and warm trials separately.
+
 The bundled [golden reference inventory](../Dictate%20AnywhereTests/Fixtures/Golden/README.md)
 includes exact references, license, source IDs, hashes and reproduction commands.
 For example, select `PIPELINE_BENCHMARK_MODEL=multilingual` and

@@ -11,7 +11,7 @@ Empty/error finals retain the existing preview fallback.
 | Parakeet Ultra | Same v3-family overlap path and Neural Engine encoder placement. Opt-in model choice; existing selections and the default stay v3. |
 | Parakeet TDT 0.6B v2 | Bounded 15 s previews; authoritative SDK batch finalizer uses the already-retained original recording. Its mel-context and gap-repair path preserves speech lost by the live overlap preset. |
 | Parakeet TDT-CTC 110M | Same SDK overlap session, preserving the model's decoder layer count and SDK handling. |
-| SenseVoice Small | Streaming Silero VAD identifies pause cuts; merge toward 15 s and cap at 30 s. Keep every captured sample, including quiet gaps and the last short tail. Auto-detect language, retain punctuated inverse-text-normalized output (`textNorm=14`) and existing int8 ANE/fp32 CPU selection. Recovery uses the same segmenter. |
+| SenseVoice Small | Streaming Silero VAD identifies pause cuts; merge toward 15 s and cap at 30 s. Keep every captured sample, including quiet gaps and the last short tail. Auto-detect language, retain punctuated inverse-text-normalized output (`textNorm=14`) and existing int8 ANE/fp32 non-ANE selection. Recovery uses the same segmenter. |
 | Parakeet EOU | Keep selected 320 ms native streaming tier and SDK endpoint behavior; use native finish output. |
 | Nemotron English | Keep the user's 560/1120/2240 ms tier; use native finish output. |
 | Nemotron multilingual | Keep full-vocabulary 1120 ms native streaming and selected language. |
@@ -116,6 +116,11 @@ Keep the SDK Neural Engine placement. The reusable encoder benchmark permits
 future hardware-specific reevaluation. Decoder/joint and preprocessing placement
 remain the SDK's model-specific defaults.
 
+Hardware choices stay internal for a ready-to-use experience. There is no new
+acceleration setting or in-app tuning step. See
+[hardware defaults](model-hardware-defaults.md) for each model's Apple Silicon,
+Intel and Rosetta path, upstream evidence, and preparation behavior.
+
 The app's CTC vocabulary mode is now offered only for TDT batch models. The native
 streaming finish paths did not apply it. Multilingual Nemotron has a separate
 SDK decode-time bias API with different weights; adding that mode needs its own
@@ -125,7 +130,7 @@ rare-name accuracy and false-insertion evaluation.
 
 The [author's model card](https://huggingface.co/superwhisper/s1-mini) recommends
 the trained control prompt, empty think block, greedy decoding, Q4_K_M weights,
-and roughly 1,000-token input chunks. Keep those settings, Metal loading on
+and roughly 1,000-token input chunks. Keep those settings, the app's Metal loading on
 Apple Silicon, and the existing 4,096-token context and Q8 KV cache. Short input
 uses the existing single request. Long input splits at sentence boundaries where
 possible and otherwise at word boundaries using the pinned model's tokenizer.

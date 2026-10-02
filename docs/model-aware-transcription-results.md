@@ -38,6 +38,16 @@ or live UI latency measurements.
   compile. That earlier encoder-only audit used an unoptimized test harness;
   app/SDK inference was Release-optimized. Do not compare its absolute timing
   with the final optimized-harness policy table.
+- The optimized hardware follow-up closes that harness gap: v3 and Ultra each
+  run all 11 supported goldens five times per placement, with alternating order.
+  All 110 paired comparisons retain equal WER (220 decodes). Warm fixture medians
+  favor Neural Engine in every case; summed GPU fixture medians take 1.34× v3's
+  and 4.71× Ultra's time on M3 Max / 36 GiB / macOS 26.7.1 (25G241). Keep the
+  documented default internally, without a processor picker or tuning workflow.
+  The [hardware report](benchmarks/model-hardware-defaults-2026-10-02.json)
+  retains all five trials, runtime-source hashes and reverified weight hashes.
+  See [hardware defaults](model-hardware-defaults.md) for model constraints and
+  Intel/Rosetta paths. These results are specific to one Mac and workload.
 - Ultra's local English results are mixed, while the German case improves.
   Retain v3 selections/default and expose Ultra explicitly. Do not rank models
   from this small inventory, which includes a shared English speaker and
