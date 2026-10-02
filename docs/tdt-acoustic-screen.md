@@ -62,6 +62,12 @@ Each run loads one model. Gain labels are ceilings; peaks cap at 0.99 instead of
 clipping. PCM16 comparisons appear when a `-quiet` derivative exists. Normal
 tests skip inference. No models download automatically and no audio leaves the Mac.
 
+Follow-up: `reference-gain4` is now available for an unattenuated source. Set
+`PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS` to exact comma-separated variant names to
+run only the required comparisons. The original 105-row artifact records the
+collector before this addition. Six new outputs on naturally quiet AMI speech
+improve WER but still lose a negation; see [the follow-up](phonon-coreml-screen.md).
+
 ## Verification
 
 All three focused signed Release runs pass, retaining 105 outputs. Fresh

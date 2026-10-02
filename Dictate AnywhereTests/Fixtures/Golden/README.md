@@ -1,6 +1,6 @@
 # Human speech golden references
 
-These 20 audio/reference pairs are test resources, also available to
+These 23 audio/reference pairs are test resources, also available to
 `scripts/dev.sh benchmark`. No speech model generated or corrected the references.
 The manifest records language, metric, sample count, pinned source, source IDs,
 transformations, and SHA-256 hashes. Ordinary tests validate every pair without
@@ -12,6 +12,7 @@ model inference, downloads, microphone access, or cloud calls.
 | `golden-en-boundaries` | 72.665 s, multiple decoder windows and shifted speech seams | Those six readings joined with 200 ms silence after each |
 | `golden-en-fleurs-1` … `golden-en-fleurs-3` | Female/male English: percentage/negation, Indian proper names, technical vocabulary and a sports list | FLEURS `en_us` test split |
 | `golden-en-fleurs-1-quiet`, `golden-en-fleurs-1-noise` | Same exact human speech/reference, -20 dB amplitude or 10 dB seeded white-noise SNR | Derived acoustic controls from `en-fleurs-1` |
+| `golden-en-ami-1` … `golden-en-ami-3` | Spontaneous headset speech: repetitions/fillers and 25 minutes, negation/question, names and a self-correction; 22.0/9.7/13.0 s | Human word annotations, AMI ES2002a scenario meeting, two speakers |
 | `golden-zh-1`, `golden-zh-2` | Mandarin readings from male and female speakers, 10.38/6.84 s | FLEURS `cmn_hans_cn` test split |
 | `golden-nl-1`, `golden-nl-2` | Dutch, two distinct utterances, 6.48/9.66 s | FLEURS `nl_nl` test split |
 | `golden-de-1`, `golden-de-2` | German, two distinct utterances, 17.94/11.16 s | FLEURS `de_de` test split |
@@ -19,12 +20,19 @@ model inference, downloads, microphone access, or cloud calls.
 | `golden-zh-boundaries` | 37.44 s, pauses, repeated utterances and multiple segments | `zh-1`, `zh-2`, `zh-1`, `zh-2`, with 750 ms silence after each |
 
 The joined files test boundary handling; they are constructed recordings, not
-natural bilingual conversations. These are clean read-speech samples, not a
-representative noisy microphone or spontaneous-dictation evaluation. The original six LibriSpeech English
+natural bilingual conversations. The read-speech subset is not a representative
+noisy microphone or spontaneous-dictation evaluation. The original six LibriSpeech English
 clips share a speaker/chapter. The new FLEURS English clips broaden voices and
 modern vocabulary; they are still read speech. Quiet/noise variants are controlled
 transformations, not natural microphone noise, and are correlated with their source.
 Report those controls separately rather than inflating independent corpus size. Dutch and German selections are male recordings.
+AMI adds spontaneous utterances from a role-play design meeting, including
+natural pauses, laughter and possible headset crosstalk. Its references are for
+the dominant annotated speaker. Two clips share a speaker and all share a room/
+session; do not count them as independent speakers or population WER evidence.
+The exact reference preserves fillers/repeats and unfinished phrases. WER can
+penalize a recognizer that deliberately omits these; inspect factual omissions
+separately. These are not recordings from the app's microphone pipeline.
 Keep the existing synthetic Mandarin fixtures for controlled numbers, questions,
 and named entities as a complementary test set.
 
@@ -46,9 +54,23 @@ original and derived fixture data; the repository's code license does not replac
   references are the corresponding normalized transcription column of
   `data/<configuration>/test.tsv`. The manifest includes the utterance ID and
   original audio filename for each selection.
+- **AMI Meeting Corpus**, AMI Project consortium; J. Carletta (2006),
+  “Announcing the AMI Meeting Corpus,” ELRA Newsletter 11(1), pp. 3–5.
+  [Official corpus and attribution](https://groups.inf.ed.ac.uk/ami/corpus/),
+  [signals/transcription licence and downloads](https://groups.inf.ed.ac.uk/ami/download/).
+  Manual annotations `ami_public_manual_1.6.2.zip` and ES2002a Headset-0/1
+  recordings. [Source provenance](ami-source-provenance.json) pins download URLs,
+  original hashes, channel mappings, annotation IDs and exact crop samples.
+  No ASR supplied or corrected these reference words.
 
 Changes: original clips were decoded and stored as 16 kHz mono PCM16 WAV with
-no cropping, loudness normalization, speech removal, or time stretching.
+no loudness normalization, speech removal, or time stretching. AMI is cropped
+to full annotated utterances; the first crop ends 66 ms before its annotation
+segment end, retaining all words and avoiding the next speaker's onset. It
+copies exact PCM16 source samples, with no resampling or gain. Reproduce it with
+`python3 scripts/extract_ami_goldens.py --source-dir /path/to/downloaded/sources`
+from a checkout without these three clips. The extractor verifies pinned source
+hashes, all lexical timings and original channel mapping before writing.
 The two explicitly tagged acoustic controls are the exception: quiet multiplies
 samples by 0.1; noise adds white Gaussian noise (NumPy PCG64 seed 2468) with
 noise power one-tenth of source signal power, scaling the whole result to peak 0.99

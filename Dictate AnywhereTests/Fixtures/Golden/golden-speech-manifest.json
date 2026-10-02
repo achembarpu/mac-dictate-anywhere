@@ -365,5 +365,75 @@
     ],
     "audioSHA256": "b538f2d118700f3a1e1b5822c235362693d10e8d99a1d31f4547d8eb773f2e26",
     "referenceSHA256": "67134a4bb4c5323296141592d6e883b7d74bf7d54a739c9d7dbc6dd8c7958a8a"
+  },
+  {
+    "id": "golden-en-ami-1",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-ami-1.wav",
+    "reference": "golden-en-ami-1.txt",
+    "sampleCount": 351600,
+    "source": "https://groups.inf.ed.ac.uk/ami/",
+    "sourceId": "ES2002a/B/ES2002a.sync.74",
+    "tags": [
+      "human",
+      "spontaneous-speech",
+      "scenario-meeting",
+      "headset",
+      "short",
+      "female",
+      "numbers",
+      "fillers",
+      "repetition"
+    ],
+    "audioSHA256": "2d4588f18c847cb06576446d092297aa9d75bfcb973e9c4324d6315d15458106",
+    "referenceSHA256": "0e31b3804cfd1dce055657bf4e3d769a2c0c8f3b8014f366132b61398a8c101c"
+  },
+  {
+    "id": "golden-en-ami-2",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-ami-2.wav",
+    "reference": "golden-en-ami-2.txt",
+    "sampleCount": 154816,
+    "source": "https://groups.inf.ed.ac.uk/ami/",
+    "sourceId": "ES2002a/A/ES2002a.sync.6",
+    "tags": [
+      "human",
+      "spontaneous-speech",
+      "scenario-meeting",
+      "headset",
+      "short",
+      "male",
+      "question",
+      "negation",
+      "fillers",
+      "crosstalk"
+    ],
+    "audioSHA256": "ece20ee5c1d5b2259e041db0683456a4fc274e341229c83f89f2cbe19736be90",
+    "referenceSHA256": "6a2e5afa6c4bfc068aa04af5899c7216d154dd0e7a99c4fce7f16d0405e9b06e"
+  },
+  {
+    "id": "golden-en-ami-3",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-ami-3.wav",
+    "reference": "golden-en-ami-3.txt",
+    "sampleCount": 208048,
+    "source": "https://groups.inf.ed.ac.uk/ami/",
+    "sourceId": "ES2002a/B/ES2002a.sync.78",
+    "tags": [
+      "human",
+      "spontaneous-speech",
+      "scenario-meeting",
+      "headset",
+      "short",
+      "female",
+      "proper-names",
+      "self-correction",
+      "fillers"
+    ],
+    "audioSHA256": "4ecaafb47f2e77be241a0a779df832d359097f22d165515d230ea3ad0c5b7af3",
+    "referenceSHA256": "aaab52106fa7f63ab4e29230646c99b4c03a01406138d33ab65000ace80ae297"
   }
 ]

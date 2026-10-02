@@ -1,0 +1,63 @@
+{
+  "source": "https://groups.inf.ed.ac.uk/ami/",
+  "licence": "CC BY 4.0",
+  "licence_source": "https://groups.inf.ed.ac.uk/ami/download/",
+  "annotations_url": "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip",
+  "annotations_sha256": "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d",
+  "clips": [
+    {
+      "id": "golden-en-ami-1",
+      "meeting": "ES2002a",
+      "speaker": "B",
+      "channel": 1,
+      "segment_id": "ES2002a.sync.74",
+      "word_range": [
+        "ES2002a.B.words4",
+        "ES2002a.B.words71"
+      ],
+      "start_sample": 886640,
+      "end_sample": 1238240,
+      "signal_url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2002a/audio/ES2002a.Headset-1.wav",
+      "signal_sha256": "285ed5b5eaa4f871cc146900d0cf87487ca757aa57a7062def2eb49feaabc23d",
+      "words_xml_sha256": "a51156e0b3f1b05d9d1a631206d523c5247d2d6fd851ecfe826317ab261cc17a",
+      "audio_sha256": "2d4588f18c847cb06576446d092297aa9d75bfcb973e9c4324d6315d15458106",
+      "reference_sha256": "0e31b3804cfd1dce055657bf4e3d769a2c0c8f3b8014f366132b61398a8c101c"
+    },
+    {
+      "id": "golden-en-ami-2",
+      "meeting": "ES2002a",
+      "speaker": "A",
+      "channel": 0,
+      "segment_id": "ES2002a.sync.6",
+      "word_range": [
+        "ES2002a.A.words13",
+        "ES2002a.A.words48"
+      ],
+      "start_sample": 2118080,
+      "end_sample": 2272896,
+      "signal_url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2002a/audio/ES2002a.Headset-0.wav",
+      "signal_sha256": "3bf0627106d6b6f02e5cc8b69f283b70303275c6b354aef3bdc7a50762d3f25e",
+      "words_xml_sha256": "03e7f37c4b3519ee78396779bbc90e2778b7b7ccd7a7388f7fa3a22cb31f7044",
+      "audio_sha256": "ece20ee5c1d5b2259e041db0683456a4fc274e341229c83f89f2cbe19736be90",
+      "reference_sha256": "6a2e5afa6c4bfc068aa04af5899c7216d154dd0e7a99c4fce7f16d0405e9b06e"
+    },
+    {
+      "id": "golden-en-ami-3",
+      "meeting": "ES2002a",
+      "speaker": "B",
+      "channel": 1,
+      "segment_id": "ES2002a.sync.78",
+      "word_range": [
+        "ES2002a.B.words74",
+        "ES2002a.B.words109"
+      ],
+      "start_sample": 1428480,
+      "end_sample": 1636528,
+      "signal_url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2002a/audio/ES2002a.Headset-1.wav",
+      "signal_sha256": "285ed5b5eaa4f871cc146900d0cf87487ca757aa57a7062def2eb49feaabc23d",
+      "words_xml_sha256": "a51156e0b3f1b05d9d1a631206d523c5247d2d6fd851ecfe826317ab261cc17a",
+      "audio_sha256": "4ecaafb47f2e77be241a0a779df832d359097f22d165515d230ea3ad0c5b7af3",
+      "reference_sha256": "aaab52106fa7f63ab4e29230646c99b4c03a01406138d33ab65000ace80ae297"
+    }
+  ]
+}

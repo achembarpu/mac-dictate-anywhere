@@ -69,6 +69,7 @@ asr|Installed-model speech accuracy and latency|RecoveryASRSmokeTests/testRepeat
 asr-quality|Golden speech, model-policy and encoder comparisons|RecoveryASRSmokeTests/testDownloadModelsIntoApplicationCache RecoveryASRSmokeTests/testModelAwareBatchComparisonBenchmark RecoveryASRSmokeTests/testGoldenSpeechReferenceBenchmark RecoveryASRSmokeTests/testTDTEncoderPlacementBenchmark
 asr-file|Installed models on complete golden files without live previews|GoldenFileASRBenchmarkTests/testInstalledModelsDecodeCompleteGoldenFiles
 asr-acoustics|TDT quiet Float32/PCM16 and gain/nonspeech research screen|AcousticASRBenchmarkTests/testQuietFloatAudioAndPCM16GainScreen
+asr-candidates|Native Core ML candidate screen on shared English goldens|NativeCandidateASRBenchmarkTests/testNativeCoreMLCandidateOnGoldenFiles
 preview|Non-streaming pending-audio work|RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark
 audio|Meter polling and PCM buffer construction|PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark PipelineWorkloadBenchmarkTests/testPCMBufferConstruction
 overlay|Preview observation and suffix cost|OverlayContentTests OverlayPerformanceBenchmarkTests
@@ -287,7 +288,7 @@ run_benchmark() {
   # xcodebuild does not pass ordinary shell variables to its test host. Xcode
   # strips TEST_RUNNER_ and forwards only these explicitly opted-in settings.
   for name in DICTATE_ANYWHERE_PERF_TRACE PIPELINE_BENCHMARK_ITERATIONS \
-    PIPELINE_BENCHMARK_MODEL PIPELINE_BENCHMARK_AUDIO_PATH \
+    PIPELINE_BENCHMARK_MODEL PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS PIPELINE_BENCHMARK_AUDIO_PATH \
     PIPELINE_BENCHMARK_REFERENCE_PATH PIPELINE_BENCHMARK_MAX_WER \
     PIPELINE_BENCHMARK_FIXTURE PIPELINE_BENCHMARK_GOLDEN PIPELINE_BENCHMARK_METRIC \
     PIPELINE_BENCHMARK_DOWNLOAD_MODELS PIPELINE_BENCHMARK_ENCODER \

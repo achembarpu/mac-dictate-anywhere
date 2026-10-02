@@ -30,6 +30,7 @@ final class AcousticASRBenchmarkTests: XCTestCase {
         let quietFloat = audio.map { $0 * 0.1 }
         var variants: [(name: String, samples: [Float], reference: String)] = [
             ("reference-pcm16", audio, try fixture.referenceText),
+            ("reference-gain4", amplify(audio, gain: 4), try fixture.referenceText),
             ("reference-gain64", amplify(audio, gain: 64), try fixture.referenceText)
         ]
         for gain: Float in [1, 4, 16, 64] {
@@ -52,6 +53,16 @@ final class AcousticASRBenchmarkTests: XCTestCase {
         }
         variants.append(("uniform-noise", noise, ""))
         variants.append(("uniform-noise-gain16", amplify(noise, gain: 16), ""))
+        if let selection = env["PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS"] {
+            let names = selection.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            guard Set(names).count == names.count else {
+                XCTFail("Select each acoustic variant once")
+                return
+            }
+            variants = try names.map { name in
+                try XCTUnwrap(variants.first { $0.name == name }, "Unknown acoustic variant: \(name)")
+            }
+        }
         let iterations = max(1, min(10, Int(env["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))
         let manager = AsrManager(config: BatchTranscriptionPolicy.asrConfig)
         do {

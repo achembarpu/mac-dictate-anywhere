@@ -74,6 +74,14 @@ peak-capped gains and synthetic silence/noise controls, and records raw outputs,
 shared error scores, input hashes/RMS/peaks and process CPU/RSS. This is research
 only; transforms are outside decode timers and product audio is unchanged.
 See [the acoustic screen](tdt-acoustic-screen.md) for selection and limitations.
+`PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS=reference-pcm16,reference-gain4` selects only
+those variants, avoiding unnecessary gain sweeps on follow-up clips.
+
+`--only asr-candidates` screens the pinned SDK's Core ML Phonon-2 default against
+v3/Ultra using English goldens and the same shared scorer. Explicit downloads
+use the normal app cache; cached-only runs stay local. This group accepts a
+comma-separated `PIPELINE_BENCHMARK_FIXTURE` list to bound new-clip comparisons.
+See [the native Phonon screen](phonon-coreml-screen.md) for results and reuse.
 
 The pending-audio workload shares the production preview predicate and 15-second
 preview bound. Its 60-second speech simulation requests 60 previews, including

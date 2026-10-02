@@ -21,6 +21,7 @@ EOF
 cat > "$MOCK_BIN/xcodebuild" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$XCODEBUILD_ARGS_LOG"
+printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS:-}" > "$XCODEBUILD_ACOUSTIC_ENV_LOG"
 printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_FIXTURE:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_GOLDEN:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_METRIC:-}" \
@@ -61,6 +62,7 @@ PATH="$MOCK_BIN:$PATH"
 export HOME="$TEST_HOME" PATH RM_LOG XCODEBUILD_ARGS_LOG="$TEST_ROOT/xcodebuild-args.log"
 export XCODEBUILD_ENV_LOG="$TEST_ROOT/xcodebuild-env.log"
 export XCODEBUILD_RESEARCH_ENV_LOG="$TEST_ROOT/xcodebuild-research-env.log"
+export XCODEBUILD_ACOUSTIC_ENV_LOG="$TEST_ROOT/xcodebuild-acoustic-env.log"
 
 unset DERIVED_DATA_PATH
 default_path="$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"
@@ -150,7 +152,7 @@ assert_benchmark_selector_count() {
 /bin/rm -f "$XCODEBUILD_ARGS_LOG"
 "$SCRIPT" benchmark --list > "$TEST_ROOT/benchmark-list.log"
 [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: --list invoked Xcode\n' >&2; exit 1; }
-for group in all asr asr-quality asr-file asr-acoustics preview audio overlay transcript insertion cloud-request recovery cleanup s1-context cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
+for group in all asr asr-quality asr-file asr-acoustics asr-candidates preview audio overlay transcript insertion cloud-request recovery cleanup s1-context cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
   /usr/bin/grep -Eq "^$group +" "$TEST_ROOT/benchmark-list.log" || {
     printf 'FAIL: group %s missing from --list\n' "$group" >&2
     exit 1
@@ -171,7 +173,7 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 33
+assert_benchmark_selector_count 34
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 
@@ -244,6 +246,15 @@ if [[ "$(<"$XCODEBUILD_RESEARCH_ENV_LOG")" != "$expected_research_environment" ]
 fi
 
 printf 'Development script architecture selection tests passed.\n'
+PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS=reference-pcm16,reference-gain4 \
+  "$SCRIPT" benchmark --only asr-acoustics >/dev/null
+assert_benchmark_selector_count 1
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AcousticASRBenchmarkTests/testQuietFloatAudioAndPCM16GainScreen'
+if [[ "$(<"$XCODEBUILD_ACOUSTIC_ENV_LOG")" != 'reference-pcm16,reference-gain4' ]]; then
+  printf 'FAIL: acoustic variant selection was not forwarded exactly\n' >&2
+  exit 1
+fi
+
 printf 'Development script clean safety tests passed.\n'
 printf 'Benchmark discovery, focused/combined/default selection, signing and invalid-input tests passed.\n'
 printf 'Golden speech benchmark forwarding tests passed.\n'
