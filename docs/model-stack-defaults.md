@@ -30,6 +30,13 @@ replaced with greedy. Sampling stays server-managed even for packages without
 an explicit preset: forcing greedy decoding caused a real Llama long-input
 loop. Completion limits reject truncated output instead of pasting a fragment.
 
+A non-thinking `thinking.values` declaration or a completion capability list
+without `thinking` establishes the safe output ceiling. Missing metadata and
+thinking-capable models keep natural EOS. A real small-model schema loop ran
+for 120 seconds before this capability check; the bounded rerun returned or
+rejected short requests in roughly 0.3–0.9 seconds. Schema completion does not
+guarantee that a fine-tune supports the app's instruction format.
+
 ## Completeness and preparation
 
 All compatible chat paths reject reported truncation, filtering, refusal and

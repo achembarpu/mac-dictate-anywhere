@@ -30,6 +30,7 @@ actor AppleIntelligenceCleanupEngine {
     private var prepared: Prepared?
     private var preparationID: UUID?
     private static let maximumPassageTokens = 1_024
+    private static let shortInputByteLimit = 1_024
     private let model = SystemLanguageModel.default
 
     func prewarm(instructions: String, prefix: String) async -> Bool {
@@ -80,7 +81,7 @@ actor AppleIntelligenceCleanupEngine {
             return inputTokens <= Self.maximumPassageTokens && fixedTokens + requestTokens + TranscriptCleanupPlan.outputReserve(inputTokens: inputTokens)
                 <= model.contextSize
         }
-        let isLongInput = text.utf8.count > Self.maximumPassageTokens
+        let isLongInput = text.utf8.count > Self.shortInputByteLimit
         let passages: [TranscriptCleanupChunk]
         if isLongInput {
             // Give long source paragraphs independent sessions. Even pairs

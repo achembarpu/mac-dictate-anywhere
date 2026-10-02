@@ -108,7 +108,8 @@ final class CleanupProviderContractTests: XCTestCase {
             if request.url?.path.hasSuffix("show") == true {
                 let discovery = discoveries.withLock { $0 += 1; return $0 }
                 let limit = discovery == 1 ? 4_096 : 8_192
-                return (200, Data("{\"thinking\":{\"values\":[false]},\"model_info\":{\"llama.context_length\":\(limit)}}".utf8))
+                let metadata = discovery == 1 ? #""thinking":{"values":[false]}"# : #""capabilities":["completion","tools"]"#
+                return (200, Data("{\(metadata),\"model_info\":{\"llama.context_length\":\(limit)}}".utf8))
             }
             let payload = try Self.payload(request)
             requests.withLock { $0.append(payload) }
@@ -126,7 +127,8 @@ final class CleanupProviderContractTests: XCTestCase {
             XCTAssertEqual(options["num_ctx"] as? Int, index == 0 ? 4_096 : 8_192)
             XCTAssertEqual(options["num_predict"] as? Int, TranscriptCleanupPlan.outputReserve(inputTokens: 5))
             XCTAssertNil(options["temperature"], "Preserve server defaults even without an author preset")
-            XCTAssertEqual(payload["think"] as? Bool, false)
+            if index == 0 { XCTAssertEqual(payload["think"] as? Bool, false) }
+            else { XCTAssertNil(payload["think"], "A completion-only model needs no fabricated thinking flag") }
         }
     }
 
@@ -223,5 +225,16 @@ final class CleanupProviderContractTests: XCTestCase {
         XCTAssertFalse(options.adapt(to: "Input exceeds the maximum context length"))
         XCTAssertTrue(options.adapt(to: "json_schema is not supported"))
         XCTAssertFalse(options.structuredOutput)
+    }
+
+    func testMissingMetadataDoesNotEstablishNonThinkingGeneration() throws {
+        for (json, expected) in [(#"{"capabilities":["completion","tools"]}"#, true),
+                                 (#"{"capabilities":["completion","thinking"]}"#, false),
+                                 (#"{"capabilities":["embedding"]}"#, false),
+                                 (#"{"capabilities":["completion"],"thinking":{"values":[true]}}"#, false),
+                                 (#"{}"#, false)] {
+            let details = try JSONDecoder().decode(OllamaModelDetails.self, from: Data(json.utf8))
+            XCTAssertEqual(details.isKnownNonThinking, expected)
+        }
     }
 }

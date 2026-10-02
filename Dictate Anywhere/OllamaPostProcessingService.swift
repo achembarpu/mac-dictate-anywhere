@@ -205,7 +205,7 @@ enum OllamaPostProcessingService {
                 // Bound non-thinking output using the same conservative
                 // budget reserved by planning, and reject length completion.
                 let outputBudget = TranscriptCleanupPlan.outputReserve(inputTokens: TranscriptCleanupPlan.estimatedTokens(chunk))
-                let predictionLimit = details?.thinking?.values == [.toggle(false)] ? outputBudget : -1
+                let predictionLimit = details?.isKnownNonThinking == true ? outputBudget : -1
                 let options: [String: Any] = ["num_ctx": contextLength, "num_predict": predictionLimit]
                 var payload: [String: Any] = [
                     "model": trimmedModel, "system": instructions,

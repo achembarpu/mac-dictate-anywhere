@@ -29,8 +29,15 @@ nonisolated struct OllamaModelDetails: Decodable, Sendable {
         }
     }
     let thinking: Thinking?
+    let capabilities: [String]?
     let modelInfo: ModelInfo?
-    enum CodingKeys: String, CodingKey { case thinking; case modelInfo = "model_info" }
+    enum CodingKeys: String, CodingKey { case thinking, capabilities; case modelInfo = "model_info" }
+
+    var isKnownNonThinking: Bool {
+        if let values = thinking?.values { return values == [.toggle(false)] }
+        guard let capabilities, capabilities.contains("completion") else { return false }
+        return !capabilities.contains("thinking")
+    }
 
     /// A bounded dictation working set; don't allocate a model's entire training
     /// context (potentially hundreds of thousands of tokens) to clean a note.
