@@ -34,7 +34,8 @@ printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_MODEL:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_URL:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_LANGUAGES:-}" \
-  "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_RESULTS_PATH:-}" > "$XCODEBUILD_RESEARCH_ENV_LOG"
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_RESULTS_PATH:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_S1_MODES:-}" > "$XCODEBUILD_RESEARCH_ENV_LOG"
 EOF
 cat > "$MOCK_BIN/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -251,10 +252,11 @@ PIPELINE_BENCHMARK_CLEANUP_MODEL=candidate \
   PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH='/fixture/outputs.json' \
   PIPELINE_BENCHMARK_ASR_URL=http://127.0.0.1:8010/v1 PIPELINE_BENCHMARK_LANGUAGES=en,de \
   PIPELINE_BENCHMARK_ASR_RESULTS_PATH='/fixture/speech outputs.json' \
+  PIPELINE_BENCHMARK_S1_MODES=mlx,mlx-uncached \
   "$SCRIPT" benchmark --only cleanup-prompts,external-asr-quality >/dev/null
 assert_benchmark_selector_count 5
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AppleCleanupPromptBenchmarkTests/testCandidatePromptsAgainstGoldenReferences'
-expected_research_environment=$'candidate\n/fixture/prompt with spaces.md\n512\n1\n/fixture/outputs.json\nhttp://127.0.0.1:8010/v1\nen,de\n/fixture/speech outputs.json'
+expected_research_environment=$'candidate\n/fixture/prompt with spaces.md\n512\n1\n/fixture/outputs.json\nhttp://127.0.0.1:8010/v1\nen,de\n/fixture/speech outputs.json\nmlx,mlx-uncached'
 if [[ "$(<"$XCODEBUILD_RESEARCH_ENV_LOG")" != "$expected_research_environment" ]]; then
   printf 'FAIL: candidate benchmark settings were not forwarded exactly\n' >&2
   exit 1
