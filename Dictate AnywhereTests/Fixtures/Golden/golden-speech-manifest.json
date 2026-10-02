@@ -271,5 +271,99 @@
     ],
     "audioSHA256": "94f11900e501c375327de3db034d88b6e814a754ee44c56b1181bc8b14aa6b39",
     "referenceSHA256": "3ddd21e3c575ff51e5e2f50ac908c099cce306961be62423203ebe8cd35a0a02"
+  },
+  {
+    "id": "golden-en-fleurs-1",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-fleurs-1.wav",
+    "reference": "golden-en-fleurs-1.txt",
+    "sampleCount": 126720,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04",
+    "sourceId": "en_us:1980:9055240296608129734.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "female",
+      "numbers"
+    ],
+    "audioSHA256": "0994878385cb563cc94cd7302c3adac1a5022d97284e880fa5bbd31bd0ebf747",
+    "referenceSHA256": "acf253190ddc2497be5ded18fd36b4b6e0358458a8c956f236181105cb0c3ec5"
+  },
+  {
+    "id": "golden-en-fleurs-1-quiet",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-fleurs-1-quiet.wav",
+    "reference": "golden-en-fleurs-1-quiet.txt",
+    "sampleCount": 126720,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04",
+    "sourceId": "en_us:1980:9055240296608129734.wav; multiply samples by 0.1 (-20 dB amplitude)",
+    "tags": [
+      "human",
+      "read-speech",
+      "female",
+      "numbers",
+      "derived-control",
+      "quiet"
+    ],
+    "audioSHA256": "8b8f17bb761903d571251c590565d7d885b0102f92d85cc83f839f67183788e5",
+    "referenceSHA256": "acf253190ddc2497be5ded18fd36b4b6e0358458a8c956f236181105cb0c3ec5"
+  },
+  {
+    "id": "golden-en-fleurs-1-noise",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-fleurs-1-noise.wav",
+    "reference": "golden-en-fleurs-1-noise.txt",
+    "sampleCount": 126720,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04",
+    "sourceId": "en_us:1980:9055240296608129734.wav; add seeded white noise at 10 dB SNR; seed2468; peak rescale only if above0.99",
+    "tags": [
+      "human",
+      "read-speech",
+      "female",
+      "numbers",
+      "derived-control",
+      "noise"
+    ],
+    "audioSHA256": "24b67bb4efc8ef69a9589885b77568b35452a4bb93a03c9321e5af0bc2fd0af6",
+    "referenceSHA256": "acf253190ddc2497be5ded18fd36b4b6e0358458a8c956f236181105cb0c3ec5"
+  },
+  {
+    "id": "golden-en-fleurs-2",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-fleurs-2.wav",
+    "reference": "golden-en-fleurs-2.txt",
+    "sampleCount": 146240,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04",
+    "sourceId": "en_us:1669:8173060820032255320.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "male",
+      "proper-names"
+    ],
+    "audioSHA256": "509bc6279b6549a1ed01a712950f0593e43380204f77f39a4fdd11bd216c68c0",
+    "referenceSHA256": "96aeea484eefa6f95b21bb82b2d5ca4dd4790a7a20449888bf79c3f8792e7e6a"
+  },
+  {
+    "id": "golden-en-fleurs-3",
+    "language": "en",
+    "metric": "wer",
+    "audio": "golden-en-fleurs-3.wav",
+    "reference": "golden-en-fleurs-3.txt",
+    "sampleCount": 166080,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04",
+    "sourceId": "en_us:1832:18066939864018796519.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "female",
+      "numbers"
+    ],
+    "audioSHA256": "b538f2d118700f3a1e1b5822c235362693d10e8d99a1d31f4547d8eb773f2e26",
+    "referenceSHA256": "67134a4bb4c5323296141592d6e883b7d74bf7d54a739c9d7dbc6dd8c7958a8a"
   }
 ]

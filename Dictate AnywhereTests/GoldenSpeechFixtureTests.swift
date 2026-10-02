@@ -41,6 +41,20 @@ final class GoldenSpeechFixtureTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(fixtures.first { $0.language == "nl" }).supports(.multilingual))
     }
 
+    func testDerivedAcousticControlsKeepTheIndependentReference() throws {
+        let fixtures = try GoldenSpeechFixture.all()
+        let original = try XCTUnwrap(fixtures.first { $0.id == "golden-en-fleurs-1" })
+        for suffix in ["quiet", "noise"] {
+            let derived = try XCTUnwrap(fixtures.first { $0.id == original.id + "-" + suffix })
+            XCTAssertEqual(try derived.referenceText, try original.referenceText)
+            XCTAssertEqual(derived.sampleCount, original.sampleCount)
+            XCTAssertEqual(derived.referenceSHA256, original.referenceSHA256)
+            XCTAssertNotEqual(derived.audioSHA256, original.audioSHA256)
+            XCTAssertTrue(derived.tags.contains("derived-control"))
+            XCTAssertTrue(derived.sourceId.contains(original.sourceId))
+        }
+    }
+
     private func hash(_ url: URL) throws -> String {
         SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
     }

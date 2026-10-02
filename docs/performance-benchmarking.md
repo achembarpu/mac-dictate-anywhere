@@ -204,3 +204,20 @@ XCTest performance tests run one unrecorded warm-up plus the configured
 measurement iterations ([Apple documentation](https://developer.apple.com/documentation/xctest/xctmeasureoptions/iterationcount)).
 XCTest memory metrics measure memory change during the block, not the app's
 high-water mark ([Apple documentation](https://developer.apple.com/documentation/xctest/xctmemorymetric)).
+
+## Bounded Whistle screens and process resources
+
+[Whistle evaluation](whistle-evaluation.md) uses the existing `asr-file` and
+`external-asr-quality` groups with the expanded 20-pair golden inventory.
+`scripts/evaluate_whistle.py` selects local pinned assets and accepts repeated
+`--fixture ID` filters; it never starts a server or downloads weights. Skip
+unsupported languages and audio beyond the native 30-second limit explicitly.
+Use a single pass to screen candidates; repeat only useful finalists.
+
+`ASR_FILE_RESULT` now includes per-request process CPU milliseconds and cumulative
+process peak RSS bytes. CPU time sums threads and can exceed wall time; it
+excludes Core ML helpers and accelerator work. Process RSS excludes helper/GPU/ANE
+allocations, includes the app/test harness, and retains the peak of earlier cases.
+Use isolated processes for memory comparisons, and never label these counters
+as total model/system RAM or energy. `ASR_SAVED_RESULT` emits structured shared
+WER/CER scores, preserving candidate output and iteration identity.

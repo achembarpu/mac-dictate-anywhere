@@ -24,7 +24,11 @@ final class ExternalSpeechBenchmarkTests: XCTestCase {
             let fixture = try XCTUnwrap(fixtures[row.fixture])
             XCTAssertFalse(row.output.isEmpty, row.fixture)
             let rate = try fixture.errorRate(hypothesis: row.output)
-            print("ASR_SAVED model=\(row.model) fixture=\(row.fixture) iteration=\(row.iteration) latency_ms=\(row.latencyMs) error_rate=\(rate)")
+            let scored: [String: Any] = ["model": row.model, "fixture": row.fixture,
+                "iteration": row.iteration, "latency_ms": row.latencyMs,
+                "error_rate": rate, "metric": fixture.metric.rawValue, "output": row.output]
+            let data = try JSONSerialization.data(withJSONObject: scored, options: [.sortedKeys])
+            print("ASR_SAVED_RESULT " + String(decoding: data, as: UTF8.self))
         }
         #endif
     }

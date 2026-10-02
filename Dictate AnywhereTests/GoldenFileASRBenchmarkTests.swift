@@ -39,14 +39,18 @@ final class GoldenFileASRBenchmarkTests: XCTestCase {
                 let firstMs = BenchmarkStatistics.elapsedMilliseconds(from: firstStart)
                 var latencies: [Double] = []
                 for iteration in 0..<iterations {
+                    let resourcesBefore = try BenchmarkProcessResources.sample()
                     let start = ContinuousClock.now
                     let output = try await engine.transcribeRecording(at: url)
                     let latency = BenchmarkStatistics.elapsedMilliseconds(from: start)
+                    let resourcesAfter = try BenchmarkProcessResources.sample()
                     latencies.append(latency)
                     XCTAssertFalse(output.isEmpty, "\(model.rawValue)/\(fixture.id)")
                     let row: [String: Any] = ["model": model.rawValue, "fixture": fixture.id,
                         "iteration": iteration, "latency_ms": latency, "first_file_ms": firstMs,
                         "audio_seconds": Double(fixture.sampleCount) / 16_000,
+                        "cpu_ms": resourcesAfter.cpuMilliseconds - resourcesBefore.cpuMilliseconds,
+                        "process_peak_rss_bytes": resourcesAfter.peakResidentBytes,
                         "error_rate": try fixture.errorRate(hypothesis: output), "output": output,
                         "path": "production_recording_file"]
                     let data = try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys])

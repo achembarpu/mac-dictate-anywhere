@@ -1,6 +1,6 @@
 # Human speech golden references
 
-These 15 audio/reference pairs are test resources, also available to
+These 20 audio/reference pairs are test resources, also available to
 `scripts/dev.sh benchmark`. No speech model generated or corrected the references.
 The manifest records language, metric, sample count, pinned source, source IDs,
 transformations, and SHA-256 hashes. Ordinary tests validate every pair without
@@ -10,6 +10,8 @@ model inference, downloads, microphone access, or cloud calls.
 | --- | --- | --- |
 | `golden-en-1` … `golden-en-6` | Six English readings, 4.8–29.4 s, including proper names | LibriSpeech validation subset, first six records |
 | `golden-en-boundaries` | 72.665 s, multiple decoder windows and shifted speech seams | Those six readings joined with 200 ms silence after each |
+| `golden-en-fleurs-1` … `golden-en-fleurs-3` | Female/male English: percentage/negation, Indian proper names, technical vocabulary and a sports list | FLEURS `en_us` test split |
+| `golden-en-fleurs-1-quiet`, `golden-en-fleurs-1-noise` | Same exact human speech/reference, -20 dB amplitude or 10 dB seeded white-noise SNR | Derived acoustic controls from `en-fleurs-1` |
 | `golden-zh-1`, `golden-zh-2` | Mandarin readings from male and female speakers, 10.38/6.84 s | FLEURS `cmn_hans_cn` test split |
 | `golden-nl-1`, `golden-nl-2` | Dutch, two distinct utterances, 6.48/9.66 s | FLEURS `nl_nl` test split |
 | `golden-de-1`, `golden-de-2` | German, two distinct utterances, 17.94/11.16 s | FLEURS `de_de` test split |
@@ -18,8 +20,11 @@ model inference, downloads, microphone access, or cloud calls.
 
 The joined files test boundary handling; they are constructed recordings, not
 natural bilingual conversations. These are clean read-speech samples, not a
-representative noisy microphone or spontaneous-dictation evaluation. The English
-clips share a speaker/chapter. Dutch and German selections are male recordings.
+representative noisy microphone or spontaneous-dictation evaluation. The original six LibriSpeech English
+clips share a speaker/chapter. The new FLEURS English clips broaden voices and
+modern vocabulary; they are still read speech. Quiet/noise variants are controlled
+transformations, not natural microphone noise, and are correlated with their source.
+Report those controls separately rather than inflating independent corpus size. Dutch and German selections are male recordings.
 Keep the existing synthetic Mandarin fixtures for controlled numbers, questions,
 and named entities as a complementary test set.
 
@@ -44,6 +49,10 @@ original and derived fixture data; the repository's code license does not replac
 
 Changes: original clips were decoded and stored as 16 kHz mono PCM16 WAV with
 no cropping, loudness normalization, speech removal, or time stretching.
+The two explicitly tagged acoustic controls are the exception: quiet multiplies
+samples by 0.1; noise adds white Gaussian noise (NumPy PCG64 seed 2468) with
+noise power one-tenth of source signal power, scaling the whole result to peak 0.99
+only if needed. References remain the source text.
 The long English composite stores float32 WAV to preserve the originally decoded
 samples used in the paired timing benchmark. Joined files concatenate the exact
 source references with spaces and insert the silence described above.
@@ -169,3 +178,17 @@ and repeats. It uses the same licensed audio/reference files and WER/CER code,
 and does not launch a server or download models. See
 [candidate evaluation](../../../docs/model-candidate-evaluation.md) for pinned
 recipes and [measured outcomes](../../../docs/model-stack-benchmark-results.md).
+
+## Small candidate screens and resource accounting
+
+The local Whistle collector is `scripts/evaluate_whistle.py`; installation, pinned
+assets and measured limitations are in [Whistle evaluation](../../../docs/whistle-evaluation.md).
+It skips files beyond the documented 30-second native API limit; it never scores a
+truncated prefix against a complete reference. Saved outputs use the existing
+`external-asr-quality` scorer, now emitting `ASR_SAVED_RESULT` JSON rows.
+
+`asr-file` also records CPU time across all process threads and cumulative process
+peak RSS. These include the XCTest/app harness; they are not isolated model memory
+or energy. Use separate model runs for memory comparisons. Start with a small
+fixture/model screen and advance only useful candidates. Rejected historical
+configurations and their evidence remain documented, without an automatic rerun.
