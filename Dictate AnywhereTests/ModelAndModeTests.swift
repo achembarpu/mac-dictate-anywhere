@@ -186,6 +186,21 @@ final class ModelAndModeTests: XCTestCase {
         XCTAssertFalse(ParakeetModelChoice.multilingual.usesTrueStreaming)
     }
 
+    func testModelStreamingClassificationIsComplete() {
+        let streaming: Set<ParakeetModelChoice> = [
+            .parakeetEou320, .nemotron560, .nemotron1120,
+            .nemotron2240, .nemotronMultilingual
+        ]
+        let batch: Set<ParakeetModelChoice> = [
+            .multilingual, .multilingualUltra, .englishOnly, .compactEnglish, .senseVoice
+        ]
+
+        XCTAssertEqual(Set(ParakeetModelChoice.allCases), streaming.union(batch))
+        XCTAssertTrue(streaming.isDisjoint(with: batch))
+        XCTAssertTrue(streaming.allSatisfy(\.usesTrueStreaming))
+        XCTAssertTrue(batch.allSatisfy { !$0.usesTrueStreaming })
+    }
+
     func testModelChoiceRawValuesRoundTrip() {
         for choice in ParakeetModelChoice.allCases {
             XCTAssertEqual(ParakeetModelChoice(rawValue: choice.rawValue), choice)
