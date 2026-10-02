@@ -121,3 +121,26 @@ Fresh normal Team-signed Debug verification at `f1405a1`: **655 total, 574 passe
 pass; weight and build/test log hashes are retained. Useful STT variant screens
 and the wider runtime audit remain active. Workspace research:
 `docs/stt-runtime-research.md`.
+
+## Native Phonon screen and spontaneous references
+
+The shared increment adds three human-referenced AMI meeting clips and a pinned
+extractor/provenance, bringing the speech inventory to 23 pairs. `asr-candidates`
+screens SDK candidates without a new product model option; explicit downloads
+use the normal persistent SDK app cache. Acoustic variant selection bounds
+follow-up comparisons. No runtime default or dependency changes here.
+
+Phonon-2's native Core ML default: 135 outputs across it, v3 and Ultra. Short
+readings are similar in time, with 8.93% WER versus v3's 5.36%. The constructed
+long file takes 221.4 ms versus Ultra's 228.9/v3's327.2, with 5.75% WER versus
+v3's4.02%. Smaller installed cache alone does not justify adding a model option.
+Meeting WER needs filler/numeral interpretation; all three models miss a
+negative clause on a quiet male clip. Six focused gain outputs improve v3 WER
+22.58% ->9.68% there, but do not restore negation; product gain stays pending.
+
+See [the native screen](phonon-coreml-screen.md) and its linked 141-output
+artifact for raw text, hashes, timing/resources, reuse and limitations. Fresh
+normal Team Debug at `5d24ebc`: **656 total, 574 passed, 82 skipped, zero failures**.
+The parent at `f6e75b0` passes 639 total/564 passed/75 skipped/zero failures.
+Focused Release screens, script forwarding and exact source-sample checks pass. The prior MLX speed/quality and
+Intel-selection evidence remains applicable to unchanged runtime code.
