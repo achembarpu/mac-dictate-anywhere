@@ -2754,7 +2754,11 @@
     "/private/tmp/phonon-coreml-ami.log": "9dbe76e927c1100b6f1ecbe74f87529435223f89d884badde341e5c643e079f3",
     "/private/tmp/phonon-coreml-v3-ami.log": "67b121962405c4e4ffa74b81d64a9b9f6e2d32d93d37ed559430428a931a022c",
     "/private/tmp/phonon-coreml-ultra-ami.log": "38327f45241c63a6f40990ef015cc9095e2757f9d07d622cfcdfe15167628b71",
-    "/private/tmp/ami-modest-gain-v3.log": "e39da0d6df85e6491bd266d681a5e3b8fe4a58ff27939f022d0a2af4535ab23c"
+    "/private/tmp/ami-modest-gain-v3.log": "e39da0d6df85e6491bd266d681a5e3b8fe4a58ff27939f022d0a2af4535ab23c",
+    "/private/tmp/phonon-fresh-debug-build.log": "f8595de0a15ffae63b1e12b1851dceb2ff82bffe6d481d4ebcf763e47354d214",
+    "/private/tmp/phonon-fresh-debug-tests.log": "c89af598b0a7e574a386555fbb0ea25a70af55c488a2d54493cd55f966066f56",
+    "/private/tmp/phonon-mlx-fresh-debug-build.log": "65ef70858388c4ee35fb52d2fe16f261cb284a7847fc5b06a10d403e70ca43fb",
+    "/private/tmp/phonon-mlx-fresh-debug-tests.log": "8cd76dd742afd2bb35f4a2c825db47e4c4e0f618c6abca180128f63ba28bea70"
   },
   "per_fixture_medians": [
     {
@@ -3072,5 +3076,33 @@
       "error_rate": 0.05263157894736842,
       "output": "Popular sports include football, basketball, volleyball, water polo, fencing, rugby, cycling, ice hockey, roller hockey, and F1 motor race."
     }
-  ]
+  ],
+  "verification": {
+    "native_release_outputs": 135,
+    "gain_release_outputs": 6,
+    "script_registry_and_forwarding": "passed both branches",
+    "golden_source_samples": "all three crops match original source PCM bytes exactly",
+    "parent": {
+      "commit": "f6e75b0",
+      "fresh_team_debug_build": "passed",
+      "tests": {
+        "total": 639,
+        "passed": 564,
+        "skipped": 75,
+        "failed": 0
+      }
+    },
+    "mlx_child": {
+      "commit": "5d24ebc",
+      "fresh_team_debug_build": "passed",
+      "tests": {
+        "total": 656,
+        "passed": 574,
+        "skipped": 82,
+        "failed": 0
+      }
+    },
+    "review": "No new product runtime/default/dependency change. Checked explicit download opt-in, local cache-only load, fresh decoder state, timing boundaries, cancellation cleanup, fixture/reference integrity and correlated-corpus limits."
+  },
+  "source_hash_scope": "Collector and dependency-lock hashes are from the parent collection checkout. The child has identical shared collector/fixtures/ASR config plus additional MLX dependency pins."
 }

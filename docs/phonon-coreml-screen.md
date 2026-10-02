@@ -93,3 +93,15 @@ avoiding automatic SDK redownload/recovery. No audio uploads or microphone use.
 135 native and six gain outputs, per-fixture medians, source/model/fixture/log
 hashes, cache sizes and process resources. It retains both inventory hashes;
 new metadata/selection guards do not change the measured decode boundaries.
+
+## Verification
+
+Fresh normal Team-signed Debug build/test passes on parent `f6e75b0`: **639 total,
+564 passed, 75 skipped, zero failures**; MLX child `5d24ebc`: **656 total,
+574 passed, 82 skipped, zero failures**. The new inference case skips in normal
+tests, while all 23 golden formats/hashes/references are validated. Six signed
+Release candidate runs (135 outputs), the gain run (six outputs), script group/
+forwarding checks and exact original-PCM comparisons pass. Review checked explicit
+download opt-in, cache-only loading, fresh decoder state, cancellation cleanup,
+timing boundaries and evidence limits. No new product defaults or dependency
+changes follow from this screen. Log hashes are retained in the artifact.
