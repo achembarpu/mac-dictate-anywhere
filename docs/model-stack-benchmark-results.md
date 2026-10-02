@@ -103,6 +103,25 @@ An idle evaluation server was resident during each standalone memory probe;
 there was no concurrent model inference. File/HTTP and native live-replay work
 are different paths, so no direct native speedup ratio is asserted.
 
+## Context reuse and native runtime follow-up
+
+[S1 context reuse](s1-context-reuse.md) retains one cleared actor-owned allocation
+per loaded model. Seventy paired outputs are identical, with roughly 23–26 ms
+saved on short requests. Fresh signed Debug has 636 tests, 563 passed, 73 skipped,
+zero failed; an installed-model S1 run has 26 passed and one download test skipped.
+
+[Complete-file ASR comparison](phonon-file-comparison.md) adds 210 native and
+21 Phonon trials through comparable whole-file paths. Phonon and v3 take about
+0.33 s on the 72.67-second boundary file; Ultra/v2/110M are faster there. This
+replaces speculation based on incomparable live-preview timing.
+
+[Native S1 MLX exploration](s1-mlx-evaluation.md) retains a runnable locked Swift
+package, Python reference collector and 147 completed outputs with shared fact/
+meaning checks. Native 4-bit is promising; Python and quantized native KV paths
+are slower. Production backend integration remains a separate acceptance task.
+These later reports retain their own source and runtime hashes; the historical
+follow-up measurements above are not relabeled as current-source reruns.
+
 ## Limits and reproducibility
 
 Use the existing `scripts/dev.sh benchmark --release --only GROUP` workflow.

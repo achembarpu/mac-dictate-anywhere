@@ -63,6 +63,10 @@ can be checked with `PIPELINE_BENCHMARK_ASR_RESULTS_PATH` and
 `--only external-asr-quality`; the manifest hash must match the bundled inventory.
 See [S1 context reuse](s1-context-reuse.md) and
 [Phonon file comparison](phonon-file-comparison.md) for measurements and limits.
+The standalone [native MLX probe](../tools/s1-mlx-probe/README.md) and
+`scripts/evaluate_s1_mlx.py` collect S1 outputs for the existing
+`PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH` / `--only cleanup-prompts` scorer.
+They do not change the app's runtime or download models implicitly.
 
 The pending-audio workload shares the production preview predicate and 15-second
 preview bound. Its 60-second speech simulation requests 60 previews, including

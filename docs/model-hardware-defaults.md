@@ -60,9 +60,12 @@ with the SDK rather than offering a download that cannot run.
 
 Core ML and MLX are frameworks, while CPU/GPU/Neural Engine are processors.
 [MLX](https://github.com/ml-explore/mlx) supports CPU/GPU execution and unified
-memory on Apple Silicon. It is not used by this app. Adding a second runtime
-requires model integration and accuracy/performance evidence, not a processor
-toggle. No such benefit is established for these workloads.
+memory on Apple Silicon. Production S1 continues to use llama.cpp. A standalone
+[native S1 MLX evaluation](s1-mlx-evaluation.md) shows promising 4-bit latency
+on M3 Max with preserved checked facts. Adoption still requires application
+lifecycle, installation and additional-device verification; a hardware toggle
+would not perform that integration. MLX's quantized KV cache was substantially
+slower in this workload, so retain its normal cache for further evaluation.
 
 ## Preparation and different Macs
 
