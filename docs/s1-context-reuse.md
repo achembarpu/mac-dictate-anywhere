@@ -15,7 +15,7 @@ recreate and prepare its context.
 
 ## Verification
 
-Fresh Team-signed Debug build and normal suite: 634 total, 563 passed, 71 skipped,
+Fresh Team-signed Debug build and normal suite: 636 total, 563 passed, 73 skipped,
 zero failed. A separate installed-model run enables all S1 lifecycle/golden tests:
 27 total, 26 passed, one explicit network-download test skipped, zero failed.
 Tests compare reversed request order against fresh contexts, inspect empty KV
@@ -31,18 +31,22 @@ it does not change between the two allocation policies.
 
 | Short fixture | Fresh p50 | Reused p50 |
 | --- | ---: | ---: |
-| Numbers/negation | 195.9 ms | 171.1 ms |
-| Question | 76.9 ms | 51.6 ms |
-| Correction | 86.7 ms | 60.3 ms |
-| Already clean | 87.3 ms | 59.6 ms |
-| Dictated instruction | 99.4 ms | 72.5 ms |
-| Literal apology | 121.6 ms | 93.9 ms |
+| Numbers/negation | 197.5 ms | 171.2 ms |
+| Question | 77.5 ms | 51.7 ms |
+| Correction | 84.4 ms | 61.0 ms |
+| Already clean | 84.4 ms | 61.1 ms |
+| Dictated instruction | 98.0 ms | 74.7 ms |
+| Literal apology | 121.0 ms | 97.9 ms |
 
-Short requests save roughly 25–28 ms. Long requests varied from 3.68 to 7.45
-seconds across the two modes; no reliable long-input speedup is claimed. Model
+Short requests save roughly 23–26 ms. Long medians are 3.794 s fresh and 3.754 s
+reused, with a 3.643–3.807 s range. Earlier samples varied from 3.68 to 7.45 s;
+no reliable broader long-input speedup is claimed. Model
 weights stay loaded in both modes. The fresh probe also performs explicit KV
 clearing, so this isolates allocation policy rather than duplicating every
-instruction of the historical implementation. Chunk planning is outside the
+instruction of the historical implementation. Synthetic preparation is outside
+both timers; fresh also releases that context before timing. Each timed fresh request allocates once
+and releases once; the initial probe included an extra synthetic-context release
+and is retained as superseded evidence. Chunk planning is outside the
 timer; request tokenization, context allocation/release, generation and clearing
 are inside. These are single-Mac diagnostic measurements, not population latency.
 

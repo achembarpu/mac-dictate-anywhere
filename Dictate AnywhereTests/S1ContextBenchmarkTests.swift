@@ -32,13 +32,14 @@ final class S1ContextBenchmarkTests: XCTestCase {
             for iteration in 0..<iterations {
                 let modes = iteration.isMultiple(of: 2) ? ["fresh", "reuse"] : ["reuse", "fresh"]
                 for mode in modes {
-                    // Both modes begin with a warm graph. Fresh discards that
-                    // allocation at every chunk, including free cost in timing.
+                    // Warm the graph in both modes, then release the synthetic
+                    // fresh allocation outside timing. A timed fresh request
+                    // allocates once and frees once, like the original policy.
                     try await engine.prewarm(from: url)
+                    if mode == "fresh" { await engine.discardInferenceContextForTesting() }
                     let started = ContinuousClock.now
                     var outputs: [String] = []
                     for chunk in chunks {
-                        if mode == "fresh" { await engine.discardInferenceContextForTesting() }
                         outputs.append(try await S1MiniPostProcessingService.process(
                             text: chunk, modelURL: url, styling: .semiFormal,
                             structure: .prose, contextSetting: .general, context: nil
