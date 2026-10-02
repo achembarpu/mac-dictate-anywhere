@@ -199,7 +199,8 @@ fileprivate let remotePostProcessingOutputSchema: [String: Any] = [
             "type": ["string", "null"]
         ]
     ],
-    "required": ["action", "text"]
+    "required": ["action", "text"],
+    "additionalProperties": false
 ]
 
 private func decodeRemotePostProcessingResult(from response: String) -> RemotePostProcessingResult? {
@@ -288,6 +289,12 @@ func cleanedRemotePostProcessingResponse(from rawResponse: String, originalText:
         }
     }
 
+    // A broken structured envelope is never transcript text. This also rejects
+    // incomplete JSON from endpoints that omit finish_reason metadata.
+    if normalized.hasPrefix("{") || normalized.hasPrefix("[")
+        || normalized.contains("\"action\"") || normalized.contains("<think>") {
+        return originalText
+    }
     let cleaned = normalizePostProcessedTranscript(normalized)
     if looksLikeRefusalMessage(cleaned) || looksLikeGeneratedContent(input: originalText, output: cleaned) {
         return originalText
@@ -953,6 +960,8 @@ enum OllamaPostProcessingService {
     private struct GenerateResponse: Decodable {
         let response: String?
         let thinking: String?
+        let done: Bool?
+        let doneReason: String?
         let error: String?
         let totalDuration: Int64?
         let loadDuration: Int64?
@@ -964,6 +973,8 @@ enum OllamaPostProcessingService {
         enum CodingKeys: String, CodingKey {
             case response
             case thinking
+            case done
+            case doneReason = "done_reason"
             case error
             case totalDuration = "total_duration"
             case loadDuration = "load_duration"
@@ -1068,6 +1079,9 @@ enum OllamaPostProcessingService {
             throw ServiceError.serverMessage(error)
         }
 
+        guard decoded.done != false, decoded.doneReason == nil || decoded.doneReason == "stop" else {
+            throw CleanupResponseError.incompleteResponse
+        }
         guard let responseText = decoded.response?.trimmingCharacters(in: .whitespacesAndNewlines),
               !responseText.isEmpty else {
             throw ServiceError.emptyResponse
@@ -1521,55 +1535,6 @@ enum OpenRouterPostProcessingService {
         }
     }
 
-    private struct ChatCompletionResponse: Decodable {
-        struct Choice: Decodable {
-            struct Message: Decodable {
-                struct ContentPart: Decodable {
-                    let text: String?
-                }
-
-                let content: Content
-
-                enum Content: Decodable {
-                    case text(String)
-                    case parts([ContentPart])
-
-                    init(from decoder: Decoder) throws {
-                        let container = try decoder.singleValueContainer()
-                        if let string = try? container.decode(String.self) {
-                            self = .text(string)
-                            return
-                        }
-                        if let parts = try? container.decode([ContentPart].self) {
-                            self = .parts(parts)
-                            return
-                        }
-                        throw DecodingError.typeMismatch(
-                            Content.self,
-                            DecodingError.Context(
-                                codingPath: decoder.codingPath,
-                                debugDescription: "Unsupported message content."
-                            )
-                        )
-                    }
-
-                    var textValue: String {
-                        switch self {
-                        case .text(let value):
-                            return value
-                        case .parts(let parts):
-                            return parts.compactMap(\.text).joined(separator: "\n")
-                        }
-                    }
-                }
-            }
-
-            let message: Message
-        }
-
-        let choices: [Choice]
-    }
-
     private struct ErrorResponse: Decodable {
         struct ErrorPayload: Decodable {
             let message: String?
@@ -1659,12 +1624,8 @@ enum OpenRouterPostProcessingService {
         }
         try validate(response: response, data: data)
 
-        let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
-        guard let responseText = decoded.choices.first?.message.content.textValue
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !responseText.isEmpty else {
-            throw ServiceError.emptyResponse
-        }
+        let decoded = try JSONDecoder().decode(CleanupChatCompletion.self, from: data)
+        let responseText = try decoded.completeText()
 
         logger.info(
             "chat completion request kind=full-transcript structured_outputs=\(useStructuredOutputs, privacy: .public)"
@@ -1839,55 +1800,6 @@ enum OpenAICompatiblePostProcessingService {
         let id: String
     }
 
-    private struct ChatCompletionResponse: Decodable {
-        struct Choice: Decodable {
-            struct Message: Decodable {
-                struct ContentPart: Decodable {
-                    let text: String?
-                }
-
-                let content: Content
-
-                enum Content: Decodable {
-                    case text(String)
-                    case parts([ContentPart])
-
-                    init(from decoder: Decoder) throws {
-                        let container = try decoder.singleValueContainer()
-                        if let string = try? container.decode(String.self) {
-                            self = .text(string)
-                            return
-                        }
-                        if let parts = try? container.decode([ContentPart].self) {
-                            self = .parts(parts)
-                            return
-                        }
-                        throw DecodingError.typeMismatch(
-                            Content.self,
-                            DecodingError.Context(
-                                codingPath: decoder.codingPath,
-                                debugDescription: "Unsupported message content."
-                            )
-                        )
-                    }
-
-                    var textValue: String {
-                        switch self {
-                        case .text(let value):
-                            return value
-                        case .parts(let parts):
-                            return parts.compactMap(\.text).joined(separator: "\n")
-                        }
-                    }
-                }
-            }
-
-            let message: Message
-        }
-
-        let choices: [Choice]
-    }
-
     private struct ErrorResponse: Decodable {
         struct ErrorPayload: Decodable {
             let message: String?
@@ -1999,12 +1911,8 @@ enum OpenAICompatiblePostProcessingService {
         }
         try validate(response: response, data: data)
 
-        let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
-        guard let responseText = decoded.choices.first?.message.content.textValue
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !responseText.isEmpty else {
-            throw ServiceError.emptyResponse
-        }
+        let decoded = try JSONDecoder().decode(CleanupChatCompletion.self, from: data)
+        let responseText = try decoded.completeText()
 
         logger.info(
             "chat completion request kind=full-transcript structured_outputs=\(useStructuredOutputs, privacy: .public)"
