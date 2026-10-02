@@ -26,6 +26,7 @@ final class CleanupPromptBenchmarkTests: XCTestCase {
             let rate = GoldenSpeechFixture.errorRate(reference: fixture.reference, hypothesis: row.output,
                 metric: fixture.language == "zh" ? .cer : .wer)
             print("CLEANUP_SAVED model=\(row.model) fixture=\(row.fixture) iteration=\(row.iteration) latency_ms=\(row.latencyMs) error_rate=\(rate) completed=\(row.completed) issues=\(issues.count) lost_facts=\(lost.count)")
+            XCTAssertTrue(row.completed, "\(row.fixture): saved generation did not finish")
             if !issues.isEmpty || !lost.isEmpty { print("CLEANUP_SAVED_ISSUES fixture=\(row.fixture) issues=\(issues) lost=\(lost) output=\(row.output)") }
         }
         #endif
@@ -61,53 +62,61 @@ final class CleanupPromptBenchmarkTests: XCTestCase {
                 // Alternate order; both sides use the same installed weights.
                 for candidate in (iteration.isMultiple(of: 2) ? [false, true] : [true, false]) {
                     let start = ContinuousClock.now
-                    let output: String
-                    if candidate {
-                        let chunks = try await TranscriptCleanupPlan.chunks(fixture.input) { input in
-                            let bytes = input.utf8.count
-                            return bytes <= maximumInputBytes && instructions.utf8.count + bytes
-                                + TranscriptCleanupPlan.outputReserve(inputTokens: bytes) + 512 <= 8_192
-                        }
-                        var outputs: [String] = []
-                        for chunk in chunks {
-                            try Task.checkCancellation()
-                            guard !chunk.text.isEmpty else { outputs.append(chunk.original); continue }
-                            var request = URLRequest(url: url)
-                            request.httpMethod = "POST"
-                            request.timeoutInterval = 120
-                            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                            var options: [String: Any] = ["num_ctx": 8_192,
-                                "num_predict": TranscriptCleanupPlan.outputReserve(inputTokens: chunk.text.utf8.count)]
-                            if env["PIPELINE_BENCHMARK_CLEANUP_GREEDY"] == "1" { options["temperature"] = 0 }
-                            request.httpBody = try JSONSerialization.data(withJSONObject: ["model": model,
-                                "system": instructions, "prompt": chunk.text, "stream": false,
-                                "keep_alive": "10m", "options": options])
-                            let (data, response) = try await URLSession.shared.data(for: request)
-                            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                                throw CleanupResponseError.incompleteResponse
+                    var output = fixture.input
+                    var completed = true
+                    do {
+                        if candidate {
+                            let chunks = try await TranscriptCleanupPlan.chunks(fixture.input) { input in
+                                let bytes = input.utf8.count
+                                return bytes <= maximumInputBytes && instructions.utf8.count + bytes
+                                    + TranscriptCleanupPlan.outputReserve(inputTokens: bytes) + 512 <= 8_192
                             }
-                            let decoded = try JSONDecoder().decode(CandidateResponse.self, from: data)
-                            guard decoded.done == true, decoded.doneReason == "stop", !decoded.response.isEmpty else {
-                                throw CleanupResponseError.incompleteResponse
+                            var outputs: [String] = []
+                            for chunk in chunks {
+                                try Task.checkCancellation()
+                                guard !chunk.text.isEmpty else { outputs.append(chunk.original); continue }
+                                var request = URLRequest(url: url)
+                                request.httpMethod = "POST"
+                                request.timeoutInterval = 120
+                                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                                var options: [String: Any] = ["num_ctx": 8_192,
+                                    "num_predict": TranscriptCleanupPlan.outputReserve(inputTokens: chunk.text.utf8.count)]
+                                if env["PIPELINE_BENCHMARK_CLEANUP_GREEDY"] == "1" { options["temperature"] = 0 }
+                                request.httpBody = try JSONSerialization.data(withJSONObject: ["model": model,
+                                    "system": instructions, "prompt": chunk.text, "stream": false,
+                                    "keep_alive": "10m", "options": options])
+                                let (data, response) = try await URLSession.shared.data(for: request)
+                                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                                    throw CleanupResponseError.incompleteResponse
+                                }
+                                let decoded = try JSONDecoder().decode(CandidateResponse.self, from: data)
+                                guard decoded.done == true, decoded.doneReason == "stop", !decoded.response.isEmpty else {
+                                    print("CLEANUP_PROMPT_INCOMPLETE fixture=\(fixture.id) reason=\(decoded.doneReason ?? "unknown") output_chars=\(decoded.response.count)")
+                                    throw CleanupResponseError.incompleteResponse
+                                }
+                                outputs.append(chunk.replacingText(with: decoded.response.trimmingCharacters(in: .whitespacesAndNewlines)))
                             }
-                            outputs.append(chunk.replacingText(with: decoded.response.trimmingCharacters(in: .whitespacesAndNewlines)))
+                            output = outputs.joined()
+                        } else {
+                            output = try await OllamaPostProcessingService.process(text: fixture.input,
+                                baseURL: baseURL, model: model,
+                                prompt: "Remove filler words and correct punctuation. Preserve all factual details and final intent.",
+                                vocabulary: fixture.vocabulary ?? [])
                         }
-                        output = outputs.joined()
-                    } else {
-                        output = try await OllamaPostProcessingService.process(text: fixture.input,
-                            baseURL: baseURL, model: model,
-                            prompt: "Remove filler words and correct punctuation. Preserve all factual details and final intent.",
-                            vocabulary: fixture.vocabulary ?? [])
+                    } catch {
+                        completed = false
+                        print("CLEANUP_PROMPT_ERROR candidate=\(candidate) fixture=\(fixture.id) error=\(error.localizedDescription)")
                     }
                     let issues = fixture.violations(in: output), lost = fixture.lostFacts(in: output)
                     let rate = GoldenSpeechFixture.errorRate(reference: fixture.reference, hypothesis: output,
                         metric: fixture.language == "zh" ? .cer : .wer)
-                    print("CLEANUP_PROMPT label=\(label) candidate=\(candidate) model=\(model) fixture=\(fixture.id) iteration=\(iteration) latency_ms=\(BenchmarkStatistics.elapsedMilliseconds(from: start)) error_rate=\(rate) issues=\(issues.count) lost_facts=\(lost.count) output_chars=\(output.count)")
+                    print("CLEANUP_PROMPT label=\(label) candidate=\(candidate) model=\(model) fixture=\(fixture.id) iteration=\(iteration) latency_ms=\(BenchmarkStatistics.elapsedMilliseconds(from: start)) error_rate=\(rate) completed=\(completed) changed=\(output != fixture.input) issues=\(issues.count) lost_facts=\(lost.count) output_chars=\(output.count)")
                     if !issues.isEmpty || !lost.isEmpty {
                         print("CLEANUP_PROMPT_ISSUES candidate=\(candidate) fixture=\(fixture.id) issues=\(issues) lost=\(lost) output=\(output)")
                     }
                     // Completion is a protocol gate. Candidate quality is
                     // reported, never counted as proof that it is safe to adopt.
+                    XCTAssertTrue(completed, "\(fixture.id): incomplete generation (candidate=\(candidate)); original preserved")
                     ran += 1
                 }
             }
