@@ -57,6 +57,13 @@ vocabulary or context. Cancellation invalidates in-flight preparation before a
 new session can reuse it.
 
 
+Startup/settings preparation and preparation during recording respect the
+existing prewarm toggle. Recording starts capture first, then overlaps cleanup
+preparation with speech. Cancel stops capture before joining a preload; shutdown
+joins preparation and clears unused Apple sessions. Apple describes prewarm as
+best-effort background preparation and recommends at least one second of lead
+time. The product adds no one-second delay at Stop.
+
 ## Verification and limits
 
 The follow-up passed 622 Team-signed Debug tests (558 passed, 64 opt-in skips),

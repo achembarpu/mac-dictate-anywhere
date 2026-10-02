@@ -212,6 +212,61 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testAppleCleanupPreparationTracksPromptVocabularyAndOptOut() async {
+        guard #available(macOS 26, *) else { return }
+        let settings = Settings.shared
+        let savedPrompt = settings.aiPostProcessingPrompt
+        let savedVocabulary = settings.customVocabulary
+        defer { settings.aiPostProcessingPrompt = savedPrompt; settings.customVocabulary = savedVocabulary }
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .appleIntelligence
+        settings.prewarmEnginesAtStartup = true
+        var calls = 0
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: { mode in
+            XCTAssertEqual(mode, .appleIntelligence)
+            calls += 1
+            return true
+        })
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        settings.aiPostProcessingPrompt = "Keep all numbers."
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        await app.prepareCleanupEngineIfNeeded()
+        settings.customVocabulary = ["Metal"]
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertEqual(calls, 3)
+        settings.prewarmEnginesAtStartup = false
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertEqual(calls, 3)
+        await app.shutdown()
+    }
+
+    func testApplePreparationOverlapsRecordingWithoutBlockingMicrophone() async {
+        guard #available(macOS 26, *) else { return }
+        Settings.shared.engineChoice = .parakeet
+        Settings.shared.transcriptPostProcessingMode = .appleIntelligence
+        Settings.shared.prewarmEnginesAtStartup = true
+        let started = expectation(description: "Apple cleanup preparation began")
+        let gate = StartupModelPreparationGate(started: started)
+        let engine = StartupContextEngine()
+        let app = app(engine: engine, capture: { _ in nil }, cleanupPreparation: { _ in
+            XCTAssertTrue(engine.capturing, "Cleanup must not postpone microphone capture")
+            await gate.wait()
+            return true
+        })
+        await app.startDictation()
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertEqual(app.status, .recording)
+        let cancellation = Task { await app.cancelDictation() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while engine.capturing, ContinuousClock.now < deadline { await Task.yield() }
+        XCTAssertFalse(engine.capturing, "Cancellation must stop capture before waiting for preparation")
+        await gate.release()
+        await cancellation.value
+        await app.shutdown()
+    }
+
     func testStartupAppliesInputSourceProfileBeforePrewarmingSpeechModel() async {
         let settings = Settings.shared
         let savedModel = settings.parakeetModelChoice
