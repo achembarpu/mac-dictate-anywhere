@@ -145,6 +145,13 @@ All measured rows, runtime versions/digests and memory probes are retained in
 [the evidence report](model-stack-benchmark-results.md) and its JSON. The
 evaluation servers were stopped; caches remain available for future work.
 
+The later [complete-file comparison](phonon-file-comparison.md) removes repeated
+native previews from timing: all ten installed choices run the same seven English
+files, three warm repeats each. Phonon totals 0.707 s across fixture medians versus
+v3's 0.799 s; the 72.67-second clip takes 0.329 s versus v3's 0.327 s. Ultra, v2,
+110M and SenseVoice are competitive or faster depending on the fixture. Do not
+infer a large native-app speedup from the earlier live-replay table.
+
 ## Reproduction
 
 Use `scripts/dev.sh benchmark --release --only cleanup-prompts` with

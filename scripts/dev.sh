@@ -67,6 +67,7 @@ benchmark_catalog() {
   cat <<'EOF'
 asr|Installed-model speech accuracy and latency|RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark RecoveryASRSmokeTests/testInstalledMandarinASRBenchmark RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark
 asr-quality|Golden speech, model-policy and encoder comparisons|RecoveryASRSmokeTests/testDownloadModelsIntoApplicationCache RecoveryASRSmokeTests/testModelAwareBatchComparisonBenchmark RecoveryASRSmokeTests/testGoldenSpeechReferenceBenchmark RecoveryASRSmokeTests/testTDTEncoderPlacementBenchmark
+asr-file|Installed models on complete golden files without live previews|GoldenFileASRBenchmarkTests/testInstalledModelsDecodeCompleteGoldenFiles
 preview|Non-streaming pending-audio work|RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark
 audio|Meter polling and PCM buffer construction|PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark PipelineWorkloadBenchmarkTests/testPCMBufferConstruction
 overlay|Preview observation and suffix cost|OverlayContentTests OverlayPerformanceBenchmarkTests
@@ -79,7 +80,7 @@ s1-context|Paired S1-mini context allocation and golden cleanup|S1ContextBenchma
 cleanup-quality|Authored cleanup references and Apple session isolation|AppleCleanupBenchmarkTests/testGoldenCleanupAndPreparedSessionIsolation AppleCleanupBenchmarkTests/testLongInputAcrossContextWindows ProviderCleanupBenchmarkTests/testGoldenCleanupWithSelectedProvider
 apple-speech-quality|Installed Apple locales, golden accuracy and preparation|AppleSpeechBenchmarkTests/testInstalledLocalesGoldenSpeechAndFreshSessionPreparation
 cleanup-prompts|Explicit local external-prompt and saved-model evaluation|CleanupPromptBenchmarkTests/testExternalPromptAgainstProductionCleanup CleanupPromptBenchmarkTests/testSavedCandidateOutputsUseGoldenScorer
-external-asr-quality|Explicit local ASR runtime evaluation using golden speech|ExternalSpeechBenchmarkTests/testLocalRuntimeGoldenSpeech
+external-asr-quality|Explicit local ASR runtime and saved-output evaluation|ExternalSpeechBenchmarkTests/testLocalRuntimeGoldenSpeech ExternalSpeechBenchmarkTests/testSavedFileOutputsUseGoldenScorer
 model-switch|Installed-model switch timings (opt-in)|ModelSwitchBenchmarkTests/testModelSwitchTimings
 EOF
 }
@@ -293,7 +294,7 @@ run_benchmark() {
     PIPELINE_BENCHMARK_CLEANUP_URL PIPELINE_BENCHMARK_CLEANUP_API_KEY \
     PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES \
     PIPELINE_BENCHMARK_CLEANUP_GREEDY PIPELINE_BENCHMARK_ASR_URL PIPELINE_BENCHMARK_LANGUAGES \
-    PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH \
+    PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH PIPELINE_BENCHMARK_ASR_RESULTS_PATH \
     S1_MINI_MODEL_PATH RUN_MODEL_SWITCH_BENCHMARK; do
     if [[ -n "${!name:-}" ]]; then
       benchmark_test_environment+=("TEST_RUNNER_${name}=${!name}")

@@ -55,6 +55,15 @@ prepared sessions. See the golden inventory for provider/model selection and
 explicit billable-provider opt-in. Benchmarks
 compile both app and tests with `-O` for consistent helper comparisons.
 
+`--only s1-context` compares fresh and reused S1 allocations on identical cleanup
+goldens. `--only asr-file` runs complete golden files through installed native
+speech models without live previews; select models, fixture, language and repeats
+with the existing `PIPELINE_BENCHMARK_*` settings. Saved external speech outputs
+can be checked with `PIPELINE_BENCHMARK_ASR_RESULTS_PATH` and
+`--only external-asr-quality`; the manifest hash must match the bundled inventory.
+See [S1 context reuse](s1-context-reuse.md) and
+[Phonon file comparison](phonon-file-comparison.md) for measurements and limits.
+
 The pending-audio workload shares the production preview predicate and 15-second
 preview bound. Its 60-second speech simulation requests 60 previews, including
 the initial 500 ms guess; it counts SDK overlap windows and the final flush too.

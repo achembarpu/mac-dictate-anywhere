@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import XCTest
 @testable import Dictate_Anywhere
 
@@ -6,6 +7,28 @@ import XCTest
 /// CER scorer as the app's native engines. Does not install or launch a server.
 @MainActor
 final class ExternalSpeechBenchmarkTests: XCTestCase {
+    func testSavedFileOutputsUseGoldenScorer() throws {
+        #if !PIPELINE_BENCHMARK
+        throw XCTSkip("Use scripts/dev.sh benchmark --only external-asr-quality")
+        #else
+        guard let path = ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_ASR_RESULTS_PATH"] else {
+            throw XCTSkip("Select saved external speech results")
+        }
+        let report = try JSONDecoder().decode(SavedResults.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        let manifest = try GoldenSpeechFixture.resource("golden-speech-manifest.json")
+        let hash = SHA256.hash(data: try Data(contentsOf: manifest)).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(report.manifestSHA256, hash, "Candidate used different golden audio/references")
+        let fixtures = Dictionary(uniqueKeysWithValues: try GoldenSpeechFixture.all().map { ($0.id, $0) })
+        XCTAssertFalse(report.rows.isEmpty)
+        for row in report.rows {
+            let fixture = try XCTUnwrap(fixtures[row.fixture])
+            XCTAssertFalse(row.output.isEmpty, row.fixture)
+            let rate = try fixture.errorRate(hypothesis: row.output)
+            print("ASR_SAVED model=\(row.model) fixture=\(row.fixture) iteration=\(row.iteration) latency_ms=\(row.latencyMs) error_rate=\(rate)")
+        }
+        #endif
+    }
+
     func testLocalRuntimeGoldenSpeech() async throws {
         #if !PIPELINE_BENCHMARK
         throw XCTSkip("Use scripts/dev.sh benchmark --only external-asr-quality")
@@ -55,4 +78,16 @@ final class ExternalSpeechBenchmarkTests: XCTestCase {
     }
 
     private struct Transcript: Decodable { let text: String; let truncated: Bool? }
+
+    private struct SavedResults: Decodable {
+        let manifestSHA256: String
+        let rows: [Row]
+        enum CodingKeys: String, CodingKey { case manifestSHA256 = "manifest_sha256", rows }
+        struct Row: Decodable {
+            let fixture: String, model: String, output: String
+            let iteration: Int
+            let latencyMs: Double
+            enum CodingKeys: String, CodingKey { case fixture, model, output, iteration; case latencyMs = "latency_ms" }
+        }
+    }
 }

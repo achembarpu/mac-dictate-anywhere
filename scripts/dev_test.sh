@@ -32,7 +32,8 @@ printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_MODEL:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_GREEDY:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_URL:-}" \
-  "${TEST_RUNNER_PIPELINE_BENCHMARK_LANGUAGES:-}" > "$XCODEBUILD_RESEARCH_ENV_LOG"
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_LANGUAGES:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_RESULTS_PATH:-}" > "$XCODEBUILD_RESEARCH_ENV_LOG"
 EOF
 cat > "$MOCK_BIN/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -149,7 +150,7 @@ assert_benchmark_selector_count() {
 /bin/rm -f "$XCODEBUILD_ARGS_LOG"
 "$SCRIPT" benchmark --list > "$TEST_ROOT/benchmark-list.log"
 [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: --list invoked Xcode\n' >&2; exit 1; }
-for group in all asr asr-quality preview audio overlay transcript insertion cloud-request recovery cleanup s1-context cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
+for group in all asr asr-quality asr-file preview audio overlay transcript insertion cloud-request recovery cleanup s1-context cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
   /usr/bin/grep -Eq "^$group +" "$TEST_ROOT/benchmark-list.log" || {
     printf 'FAIL: group %s missing from --list\n' "$group" >&2
     exit 1
@@ -170,13 +171,17 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 30
+assert_benchmark_selector_count 32
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 
 "$SCRIPT" benchmark --only s1-context >/dev/null
 assert_benchmark_selector_count 1
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/S1ContextBenchmarkTests/testPairedFreshAndReusedContextGoldenCleanup'
+
+"$SCRIPT" benchmark --only asr-file >/dev/null
+assert_benchmark_selector_count 1
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/GoldenFileASRBenchmarkTests/testInstalledModelsDecodeCompleteGoldenFiles'
 
 touch "$TEST_ROOT/Signing.local.xcconfig"
 SIGNING_CONFIG_PATH="$TEST_ROOT/Signing.local.xcconfig" \
@@ -229,9 +234,10 @@ PIPELINE_BENCHMARK_CLEANUP_MODEL=candidate \
   PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES=512 PIPELINE_BENCHMARK_CLEANUP_GREEDY=1 \
   PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH='/fixture/outputs.json' \
   PIPELINE_BENCHMARK_ASR_URL=http://127.0.0.1:8010/v1 PIPELINE_BENCHMARK_LANGUAGES=en,de \
+  PIPELINE_BENCHMARK_ASR_RESULTS_PATH='/fixture/speech outputs.json' \
   "$SCRIPT" benchmark --only cleanup-prompts,external-asr-quality >/dev/null
-assert_benchmark_selector_count 3
-expected_research_environment=$'candidate\n/fixture/prompt with spaces.md\n512\n1\n/fixture/outputs.json\nhttp://127.0.0.1:8010/v1\nen,de'
+assert_benchmark_selector_count 4
+expected_research_environment=$'candidate\n/fixture/prompt with spaces.md\n512\n1\n/fixture/outputs.json\nhttp://127.0.0.1:8010/v1\nen,de\n/fixture/speech outputs.json'
 if [[ "$(<"$XCODEBUILD_RESEARCH_ENV_LOG")" != "$expected_research_environment" ]]; then
   printf 'FAIL: candidate benchmark settings were not forwarded exactly\n' >&2
   exit 1
