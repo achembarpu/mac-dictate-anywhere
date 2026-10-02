@@ -87,8 +87,25 @@ The parent runs 637 tests, 564 passed, 73 skipped, zero failures; its focused
 Release scorer/native comparisons pass. Existing S1 runtime results above
 remain historical measurements of the prior reviewed implementation.
 
-The wider follow-up is active. Production MLX remains 0.31.4/LM3.31.3 while
-0.32.3/LM3.32.3 is researched for an accuracy/performance A/B and clean API
-migration. The newest core package avoids declaring CUDA plugins on macOS;
-normal validation remains required. Quiet-input investigation and useful STT
-variant screens are pending. Workspace research: `docs/stt-runtime-research.md`.
+The wider follow-up is active. A native dependency screen tested MLX 0.32.3 /
+LM 3.32.3 with balanced and remainder prefill, then stopped one conservative
+TurboQuant variant after its long-input speed gate. The new normal-KV paths
+are 4–9% slower on most short inputs and 26% slower on the long case; TurboQuant
+is about twice as slow. Keep the faster 0.31.4 / LM 3.31.3 pins. Preserve all
+192 raw/scored outputs and the standalone candidate patch for future work.
+Normal validation remains enabled. The update also requires a real stream API
+migration; its `Stream()` now creates a new stream rather than selecting the
+default graph stream.
+
+The focused app gate now selects only requested modes and records process
+CPU/RSS, avoiding unchanged backend runs. Its 126 outputs over 21 cases have
+zero checked fact/meaning misses and exact cached/uncached agreement. Current
+cached p50 is 103.4 ms on numbers/negation and 2.529 s on the long case. Fresh
+normal Team-signed Debug verification at `5019e19`: **654 tests, 574 passed,
+80 skipped, zero failures**. Runtime defaults and Intel selection are unchanged;
+no new universal or native Intel speed claim follows from this screen. See
+[the upgrade screen](s1-mlx-upgrade-screen.md) and
+[retained evidence](benchmarks/s1-mlx-upgrade-screen-2026-10-03.json).
+
+Quiet-input investigation and useful STT variant screens remain pending.
+Workspace research: `docs/stt-runtime-research.md`.

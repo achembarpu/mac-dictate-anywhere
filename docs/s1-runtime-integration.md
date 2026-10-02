@@ -215,3 +215,13 @@ contaminated matrix timings are excluded. The seven-case prototype remains
 
 [PR description and readiness notes](s1-runtime-pr.md) cover this branch's scoped
 diff. No branch has been pushed and no PR has been opened.
+
+## Subsequent dependency screen
+
+The [2026-10-03 screen](s1-mlx-upgrade-screen.md) tests newer MLX core/LM,
+balanced/remainder prefill and one conservative TurboQuant candidate. All tested
+upgrade modes regress warm latency on this host. Production keeps the original
+pins/defaults; 126 fresh app outputs retain exact prefix agreement and zero
+checked fact/meaning misses. The benchmark can select only the required modes
+and now records process CPU/RSS. The separate report retains every rejected
+output and a probe-only reproduction patch; historical results above are unchanged.
