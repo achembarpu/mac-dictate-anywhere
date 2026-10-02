@@ -47,6 +47,8 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 
 ### Download
 
+The release app is universal: it runs natively on Apple silicon (M-series) and Intel Macs with macOS 14 or later. Apple silicon uses `arm64`; Intel uses `x86_64`. Rosetta is not required. Models that need the Apple Neural Engine or Apple Intelligence still require supported Apple silicon hardware.
+
 1. Download the latest notarized `.dmg` from [Releases](../../releases)
 2. Open the DMG and drag **Dictate Anywhere** to your Applications folder
 3. Launch the app and grant the required permissions
@@ -234,6 +236,16 @@ scripts/dev.sh stop
 Use `--configuration Debug` or `--configuration Release` with `build`. Tests run only with `Debug` because Release is not testable. The default is `Debug`, and `--release` is an alias for `--configuration Release`. Provisioning updates are disabled by default; pass `--allow-provisioning-updates` when you explicitly want Xcode to update signing assets. Release builds use the production signing identity and team. They do not package, notarize, update the appcast, or change production Release settings.
 
 Set the optional `DERIVED_DATA_PATH` environment variable to use another stable path. The default is `$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev`.
+
+Debug commands explicitly select the Mac's native architecture, including when the calling terminal runs under Rosetta. Debug builds contain only that architecture for faster iteration; Release builds use Xcode's standard architectures with `ONLY_ACTIVE_ARCH = NO`. Use a Release artifact when transferring the app between Apple silicon and Intel Macs.
+
+Check a release bundle and all its embedded frameworks and updater helpers before distribution:
+
+```bash
+scripts/verify-universal-app.sh "dist/Dictate Anywhere.app"
+```
+
+This fails if any Mach-O binary is missing `arm64` or `x86_64`. See [Apple's universal binary guidance](https://developer.apple.com/documentation/apple-silicon/building-a-universal-macos-binary) and the [release workflow](RELEASE.md).
 
 If Accessibility permission is stale, remove `Dictate Anywhere Dev.app` from **System Settings → Privacy & Security → Accessibility**, launch it again, and add that exact app.
 

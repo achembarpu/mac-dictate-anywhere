@@ -30,11 +30,19 @@ else
   /usr/bin/uname "$@"
 fi
 EOF
+cat > "$MOCK_BIN/sysctl" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == "-n hw.optional.arm64" ]]; then
+  printf '%s\n' "${MOCK_APPLE_SILICON:-1}"
+else
+  exit 1
+fi
+EOF
 cat > "$MOCK_BIN/open" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod +x "$MOCK_BIN/pgrep" "$MOCK_BIN/rm" "$MOCK_BIN/xcodebuild" "$MOCK_BIN/uname" "$MOCK_BIN/open"
+chmod +x "$MOCK_BIN/pgrep" "$MOCK_BIN/rm" "$MOCK_BIN/xcodebuild" "$MOCK_BIN/uname" "$MOCK_BIN/sysctl" "$MOCK_BIN/open"
 
 PATH="$MOCK_BIN:$PATH"
 export HOME="$TEST_HOME" PATH RM_LOG XCODEBUILD_ARGS_LOG="$TEST_ROOT/xcodebuild-args.log"
@@ -92,12 +100,17 @@ mkdir -p "$(dirname "$executable")"
 touch "$executable"
 chmod +x "$executable"
 
-for host_arch in arm64 x86_64; do
+for scenario in native-arm64 native-intel rosetta; do
+  case "$scenario" in
+    native-arm64) shell_arch=arm64; apple_silicon=1; native_arch=arm64 ;;
+    native-intel) shell_arch=x86_64; apple_silicon=0; native_arch=x86_64 ;;
+    rosetta) shell_arch=x86_64; apple_silicon=1; native_arch=arm64 ;;
+  esac
   for command in build launch test benchmark check; do
-    MOCK_HOST_ARCH="$host_arch" "$SCRIPT" "$command" >/dev/null
-    if ! /usr/bin/grep -Fxq 'platform=macOS' "$XCODEBUILD_ARGS_LOG" || \
-       /usr/bin/grep -Eq 'arch=|^ARCHS=' "$XCODEBUILD_ARGS_LOG"; then
-      printf 'FAIL: %s did not select a native macOS destination on %s\n' "$command" "$host_arch" >&2
+    MOCK_HOST_ARCH="$shell_arch" MOCK_APPLE_SILICON="$apple_silicon" "$SCRIPT" "$command" >/dev/null
+    if ! /usr/bin/grep -Fxq "platform=macOS,arch=$native_arch" "$XCODEBUILD_ARGS_LOG" || \
+       /usr/bin/grep -Eq '^ARCHS=' "$XCODEBUILD_ARGS_LOG"; then
+      printf 'FAIL: %s did not select a native macOS destination for %s\n' "$command" "$scenario" >&2
       exit 1
     fi
   done
