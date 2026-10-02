@@ -32,6 +32,21 @@ nonisolated struct TranscriptCleanupChunk: Equatable, Sendable {
 }
 
 nonisolated enum TranscriptCleanupPlan {
+    /// Separate source paragraphs without assigning their separators to the
+    /// model. Used for long transformations where repeated records must not
+    /// be deduplicated or summarized together.
+    static func paragraphs(_ text: String) -> [TranscriptCleanupChunk] {
+        guard !text.isEmpty else { return [] }
+        var result: [TranscriptCleanupChunk] = []
+        var start = text.startIndex
+        while let separator = text.range(of: "\n\n", range: start..<text.endIndex) {
+            result.append(TranscriptCleanupChunk(String(text[start..<separator.upperBound])))
+            start = separator.upperBound
+        }
+        if start < text.endIndex { result.append(TranscriptCleanupChunk(String(text[start...]))) }
+        return result
+    }
+
     /// The backend supplies its tokenizer/context test. Every selected boundary
     /// is rechecked because tokenization need not be monotonic at a suffix.
     static func chunks(

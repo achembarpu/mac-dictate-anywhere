@@ -10,11 +10,12 @@ models, not every possible recording or device/model combination.
 | Path | Default / preparation |
 | --- | --- |
 | FluidAudio speech | Model-specific decoder/cadence and Core ML policy from `model-aware-transcription.md` and `model-hardware-defaults.md`; actual inference prewarm. |
+| AssemblyAI Dictation | Provider-managed Universal-3.5 Pro, 16 kHz mono PCM, bounded vocabulary/context prompts, one dictation request with raw and optional polished text, raw fallback on cleanup error. Connection warmup must not gate Stop. |
 | Apple Speech | SpeechAnalyzer / SpeechTranscriber progressive transcription, compatible audio format, installed locale and contextual vocabulary, `prepareToAnalyze`, authoritative finalization through the last sample. Framework controls compute placement and retention. |
 | S1-mini | Author prompt, greedy cleanup, Q4_K_M weights, Q8 caches, tokenizer-aware long-input chunks, Metal on Apple silicon / CPU on Intel. Actual inference prewarm. |
 | Apple Intelligence | Greedy guided action/text output with proven production prompts, fresh sessions and single-use prepared prefix. Input AND output fit the system context; no arbitrary output-token cap. |
-| Ollama | Inspect `/api/show` capabilities and packaged sampling presets, bounded 8,192-token working context (or smaller model limit), natural EOS, strict output schema. Empty generation preloads the same model/context for ten minutes. |
-| OpenRouter | Cached public catalog supplies supported parameters, context and completion limits. Preserve declared sampling/reasoning defaults. Require schema-capable routing when using structured output. Prepare catalog/connection without a billable completion. |
+| Ollama | Inspect `/api/show` capabilities, preserve model/server sampling, bounded 8,192-token working context (or smaller model limit), strict output schema. Identified non-thinking models receive an input-derived output ceiling; reasoning/unknown models retain natural EOS. Empty generation preloads the same model/context for ten minutes. |
+| OpenRouter | Cached public catalog supplies supported parameters, context and completion limits. Preserve declared sampling/reasoning defaults. Require schema-capable routing when using structured output; JSON mode alone does not establish schema support. Prepare catalog/connection without a billable completion. |
 | OpenAI-compatible | Preserve server sampling defaults because model names alone do not establish capabilities. Use strict schema, adapting only explicit unsupported-parameter errors. Discover models/prepare connection; the portable API has no weight-load operation. |
 
 All cleanup providers have separate implementation files. Shared response
@@ -25,9 +26,9 @@ models keep their default and show an explanatory hint rather than a nonworking
 Off selector. In particular, the current `qwen3:4b` tag is Thinking-2507;
 `qwen3:4b-instruct` is a different model. Its package supplies temperature0.7,
 top_p0.8 and top_k20; Thinking supplies0.6/0.95/20. Neither preset is silently
-replaced with greedy. Generic non-thinking packages without a sampling preset
-use temperature0 for reliable structured cleanup. If metadata discovery fails,
-sampling remains server-managed.
+replaced with greedy. Sampling stays server-managed even for packages without
+an explicit preset: forcing greedy decoding caused a real Llama long-input
+loop. Completion limits reject truncated output instead of pasting a fragment.
 
 ## Completeness and preparation
 
@@ -35,7 +36,7 @@ All compatible chat paths reject reported truncation, filtering, refusal and
 tool-only responses. Ollama rejects unfinished/length-limited generation.
 Missing optional completion metadata remains supported, so such servers cannot
 provide the same truncation assurance. Broken JSON envelopes are never pasted.
-Strict schemas reject unknown properties. Completion/transport errors preserve
+Strict output requests disallow unknown properties; server enforcement varies. Completion/transport errors preserve
 the whole original through AppState; malformed individual responses retain that
 chunk's original text. Literal dictated apologies are accepted, newly introduced
 refusal phrases are rejected.
@@ -56,6 +57,17 @@ carries into another request. Preparation is invalidated by changed prompt,
 vocabulary or context. Cancellation invalidates in-flight preparation before a
 new session can reuse it.
 
+For input over 1,024 UTF-8 bytes, source paragraphs receive independent sessions.
+The context planner still splits an oversized individual paragraph. Combining
+adjacent paragraphs caused omissions in the golden probes. If a long passage
+loses a numeric literal or its occurrence count, preserve that entire passage
+and emit a content-free fallback trace. Common comma thousands formatting is
+accepted. This conservative check can retain an otherwise valid digit-to-word
+rewrite or a numeric self-correction; it is not a semantic guarantee about all
+names, negations or facts. The paired short-input policy remains unchanged.
+Long Apple cleanup trades extra session overhead for better preservation; see
+the measured results rather than assuming a latency improvement.
+
 
 Startup/settings preparation and preparation during recording respect the
 existing prewarm toggle. Recording starts capture first, then overlaps cleanup
@@ -66,9 +78,10 @@ time. The product adds no one-second delay at Stop.
 
 ## Verification and limits
 
-The follow-up passed 622 Team-signed Debug tests (558 passed, 64 opt-in skips),
-with application Swift warnings treated as errors. Real-provider benchmark
-results are recorded separately in `model-stack-benchmark-results.md`.
+The signed Debug suite and real-provider results are recorded separately in
+`model-stack-benchmark-results.md`. Application Swift warnings are treated as
+errors. Candidate model and external prompt findings are in
+`model-candidate-evaluation.md`.
 
 New authored cleanup fixtures test questions, self-correction, vocabulary,
 names, amounts, dates, negation, literal apologies, instructions-as-content,
@@ -87,6 +100,7 @@ performance for LM Studio or every other server.
 
 ## Primary sources
 
+- [AssemblyAI Dictation contract](https://www.assemblyai.com/docs/dictation)
 - [Apple SpeechTranscriber overview](https://developer.apple.com/videos/play/wwdc2025/277/)
 - [Progressive transcription preset](https://developer.apple.com/documentation/speech/speechtranscriber/preset/progressivetranscription)
 - [Apple prewarm contract](https://developer.apple.com/documentation/foundationmodels/languagemodelsession/prewarm(promptprefix:))
@@ -95,6 +109,7 @@ performance for LM Studio or every other server.
 - [Apple adapter compatibility](https://developer.apple.com/apple-intelligence/foundation-models-adapter/)
 - [Ollama model details / capabilities](https://docs.ollama.com/api-reference/show-model-details)
 - [Ollama generation contract](https://docs.ollama.com/api/generate)
+- [Ollama thinking controls](https://docs.ollama.com/capabilities/thinking)
 - [Ollama preload and retention](https://docs.ollama.com/faq)
 - [Ollama structured output](https://docs.ollama.com/capabilities/structured-outputs)
 - [Qwen3-4B-Instruct-2507 model card](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)

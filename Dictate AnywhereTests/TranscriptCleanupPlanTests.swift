@@ -2,6 +2,14 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class TranscriptCleanupPlanTests: XCTestCase {
+    func testSourceParagraphsKeepEverySeparatorAndRepeatedRecord() {
+        for text in ["", "  ", "\n\nFirst.\n\n\n\nFirst.\n\n", "甲。\n\n乙。  "] {
+            let paragraphs = TranscriptCleanupPlan.paragraphs(text)
+            XCTAssertEqual(paragraphs.map(\.original).joined(), text)
+            XCTAssertEqual(paragraphs.map { $0.replacingText(with: $0.text) }.joined(), text)
+        }
+        XCTAssertEqual(TranscriptCleanupPlan.paragraphs("First.\n\nFirst.").map(\.text), ["First.", "First."])
+    }
     func testPartitionsPreserveEveryCharacterAndPreferSentenceBoundaries() async throws {
         let text = "  First sentence.\n\nSecond sentence with 42 euros.\nLast words.  "
         let chunks = try await TranscriptCleanupPlan.chunks(text) { $0.utf8.count <= 35 }

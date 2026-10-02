@@ -64,7 +64,8 @@ actor AppleIntelligenceCleanupEngine {
         else { instructionTokens = try await instructionTokenCount(instructions) }
         // Leave room for the guided schema and framing as well as output.
         let fixedTokens = instructionTokens + 256
-        let chunks = try await TranscriptCleanupPlan.chunks(text) { candidate in
+        let model = self.model
+        let fits: (String) async throws -> Bool = { candidate in
             let request = prefix + candidate + "</transcript>"
             // Small dictations fit even using the conservative UTF-8 bound.
             // Avoid tokenizer round trips on this common, already safe path.
@@ -78,6 +79,18 @@ actor AppleIntelligenceCleanupEngine {
             // repeated dictation as material to summarize or deduplicate.
             return inputTokens <= Self.maximumPassageTokens && fixedTokens + requestTokens + TranscriptCleanupPlan.outputReserve(inputTokens: inputTokens)
                 <= model.contextSize
+        }
+        let isLongInput = text.utf8.count > Self.maximumPassageTokens
+        let passages: [TranscriptCleanupChunk]
+        if isLongInput {
+            // Give long source paragraphs independent sessions. Even pairs
+            // of related paragraphs were summarized together in the golden
+            // test. Context planning splits oversized single paragraphs.
+            passages = TranscriptCleanupPlan.paragraphs(text)
+        } else { passages = [TranscriptCleanupChunk(text)] }
+        var chunks: [TranscriptCleanupChunk] = []
+        for passage in passages {
+            chunks += try await TranscriptCleanupPlan.chunks(passage.original, fits: fits)
         }
         PerfTrace.event("cleanup.appleIntelligencePlan", counts: ["chunks": chunks.count])
         var outputs: [String] = []
@@ -106,6 +119,16 @@ actor AppleIntelligenceCleanupEngine {
             guard !output.isEmpty, !looksLikeGeneratedContent(input: chunk.text, output: output),
                   !looksLikeNewRefusalMessage(input: chunk.text, output: output) else {
                 throw CleanupResponseError.incompleteResponse
+            }
+            // The system model sometimes removes numbered record headings
+            // even in an independent passage. Keep that source passage rather
+            // than deliver a rewrite with missing numeric facts. This also
+            // conservatively retains digit-to-word rewrites on long inputs.
+            if isLongInput,
+               !TranscriptCleanupIntegrity.preservesNumericLiterals(from: chunk.text, in: output) {
+                PerfTrace.event("cleanup.appleIntelligenceNumericFallback")
+                outputs.append(chunk.original)
+                continue
             }
             outputs.append(chunk.replacingText(with: output))
         }
