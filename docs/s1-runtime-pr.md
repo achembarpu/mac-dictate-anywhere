@@ -111,8 +111,13 @@ acceptance is needed before asserting performance across those devices.
 
 ## Stack and publication
 
-This branch started on `feature/model-aware-transcription` at `d398ea7` and
-carries later shared follow-ups by cherry-pick. Use that parent as the PR base,
-and restack onto its latest tip before opening a three-dot PR to avoid repeated
-shared changes. Rebase onto the merged default branch when the parent lands.
-Both branches remain local; no push, PR, merge or history rewrite was performed.
+Restacked on `feature/model-aware-transcription` at `e3a2f8c` on 2026-10-03.
+That parent contains `feature/ui-ux-normalization` at `88fc47c`. Shared STT
+research, fixtures and collectors are inherited; the child PR shows only its
+MLX/runtime-specific changes. The original fork point was `d398ea7`; historical
+benchmark commit IDs remain measurement provenance.
+
+Local pre-restack backup refs preserve both original tips. Product code,
+fixtures, model/dependency locks and benchmark evidence are unchanged by the
+restack. No branch was pushed, merged or published. Once the parent lands,
+rebase this branch onto the merged default branch before changing its PR base.

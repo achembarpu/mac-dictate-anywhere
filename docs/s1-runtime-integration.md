@@ -1,7 +1,9 @@
 # S1 runtime integration
 
 `feature/s1-mlx-integration` is stacked on `feature/model-aware-transcription`
-at `d398ea7`. Native Swift MLX now runs S1 cleanup on Apple Silicon. Intel keeps
+at `e3a2f8c` after the authorized local restack on 2026-10-03. Its original fork
+point was `d398ea7`; benchmark hashes/commits below retain their original
+measurement provenance. Native Swift MLX now runs S1 cleanup on Apple Silicon. Intel keeps
 llama.cpp CPU inference. Installation, preparation, complete-response handling
 and the existing lossless chunker are shared. No processor or decoder tuning
 controls are added to the product.
