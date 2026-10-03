@@ -144,3 +144,25 @@ normal Team Debug at `5d24ebc`: **656 total, 574 passed, 82 skipped, zero failur
 The parent at `f6e75b0` passes 639 total/564 passed/75 skipped/zero failures.
 Focused Release screens, script forwarding and exact source-sample checks pass. The prior MLX speed/quality and
 Intel-selection evidence remains applicable to unchanged runtime code.
+
+## Moonshine CPU streaming gate and runtime audit
+
+Retain one Small Streaming tier's 36 outputs, collector, download catalog and
+two final-error rejection tests in [the screen](moonshine-evaluation.md). Default
+and single-thread runs each return an empty quiet utterance once; the other
+meeting outputs retain meaning errors. VAD-off whole utterances still lose
+the quiet male clip's final question. No Moonshine app dependency or picker.
+
+The 29.4-second reading takes 3.884 s streaming compute versus 11.111 s with
+one thread. Lower CPU time does not establish energy savings. Models are cached
+persistently for future native reuse; arm64-only research wheels and the missing
+local Swift XCFramework do not establish Intel packaging. Other tiers/providers
+are pruned pending isolation/completion gates. All failed outputs remain scored.
+
+The runtime audit confirms llama.cpp b10549 already enables Flash Attention AUTO
+and supported GPU offload; no absent enable flag was found. Existing MLX defaults,
+Intel selection and preparation stay intact. Fresh normal Team-signed Debug at
+`8e097d0`: **656 total, 574 passed, 82 skipped, zero failures**; parent `ea0472d`
+passes 639 / 564 / 75 / zero. Ruff, two Python failure cases and tampered-catalog
+rejection pass. Shared scorers' two expected candidate nonempty failures are
+retained separately. The remaining candidate gate is Qwen3-ASR 0.6B 4-bit.
