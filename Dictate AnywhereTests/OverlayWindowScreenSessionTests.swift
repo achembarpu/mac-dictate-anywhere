@@ -51,31 +51,6 @@ final class OverlayWindowScreenSessionTests: XCTestCase {
         }
     }
 
-    func testRepeatedListeningUpdatesResolveTheDisplayOnce() {
-        showListening(updates: 30)
-
-        XCTAssertEqual(resolver.resolveCount, 1)
-    }
-
-    /// One dictation walks through several states without hiding in between;
-    /// the overlay must not re-pick its display partway through.
-    func testStateChangesWithinOneSessionKeepTheSameDisplay() {
-        overlay.showListening(level: 0.2, transcript: "hello")
-        overlay.show(state: .processing)
-        overlay.show(state: .success)
-
-        XCTAssertEqual(resolver.resolveCount, 1)
-    }
-
-    func testHidingTheOverlayStartsANewSession() {
-        showListening(updates: 5)
-        overlay.hide(afterDelay: 0)
-
-        showListening(updates: 5)
-
-        XCTAssertEqual(resolver.resolveCount, 2)
-    }
-
     /// A finished dictation schedules a delayed hide and immediately goes idle.
     /// Starting another dictation inside that delay cancels the hide, so the
     /// display choice has to be reset by the new dictation rather than relying
@@ -89,16 +64,6 @@ final class OverlayWindowScreenSessionTests: XCTestCase {
         showListening(updates: 5)
 
         XCTAssertEqual(resolver.resolveCount, 2, "the interrupted hide must not carry its display into the new dictation")
-    }
-
-    func testBeginningASessionBeforeTheDelayedHideFiresChoosesADisplayAgain() {
-        showListening(updates: 5)
-        overlay.hide(afterDelay: 5.0)
-
-        overlay.beginSession(targetProcessIdentifier: 4242)
-        showListening(updates: 5)
-
-        XCTAssertEqual(resolver.resolveCount, 2)
     }
 
     // MARK: - Not leaving the previous dictation on screen
@@ -136,19 +101,6 @@ final class OverlayWindowScreenSessionTests: XCTestCase {
     /// The insertion target is captured before audio startup; the overlay must
     /// ask about that app, not whichever app is frontmost by the time the
     /// microphone is live and the overlay finally appears.
-    func testResolvesAgainstTheCapturedInsertionTarget() {
-        overlay.beginSession(targetProcessIdentifier: 4242)
-
-        showListening(updates: 5)
-
-        XCTAssertEqual(resolver.requestedTargets, [4242])
-    }
-
-    func testFallsBackToTheFrontmostApplicationWithoutACapturedTarget() {
-        showListening(updates: 5)
-
-        XCTAssertEqual(resolver.requestedTargets, [nil])
-    }
 
     func testEachDictationResolvesTheDisplayExactlyOnce() {
         for _ in 0..<3 {

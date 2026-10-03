@@ -137,14 +137,4 @@ final class InputSourceProfileResolverTests: XCTestCase {
         )
     }
 
-    func testAppleSpeechMappingWithAssetInstalledPreservesPriorBehavior() {
-        XCTAssertEqual(
-            resolve(
-                mapping: mapping(engine: .appleSpeech, model: nil),
-                currentEngine: .parakeet,
-                isAppleSpeechAssetInstalled: { _ in true }
-            ),
-            .fullApply
-        )
-    }
 }

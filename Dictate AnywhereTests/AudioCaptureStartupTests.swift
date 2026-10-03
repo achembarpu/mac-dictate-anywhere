@@ -180,6 +180,8 @@ final class AudioCaptureStartupTests: XCTestCase {
     }
 
     func testStalledAudioCaptureStartupTimesOutAndStopsLateController() async {
+        let releaseFactory = DispatchSemaphore(value: 0)
+        defer { releaseFactory.signal() }
         let controllerStopped = expectation(description: "late audio controller stopped")
         let controller = TestAudioCaptureController {
             controllerStopped.fulfill()
@@ -192,7 +194,7 @@ final class AudioCaptureStartupTests: XCTestCase {
                 queue: DispatchQueue(label: "AudioCaptureStartupTests.timeout"),
                 cancellation: AudioCaptureStartupCancellation()
             ) {
-                Thread.sleep(forTimeInterval: 1)
+                _ = releaseFactory.wait(timeout: .now() + 2)
                 return controller
             }
             XCTFail("Expected audio capture startup to time out")
@@ -206,11 +208,16 @@ final class AudioCaptureStartupTests: XCTestCase {
         }
 
         XCTAssertLessThan(startedAt.duration(to: .now), .milliseconds(500))
+        XCTAssertFalse(controller.wasStopped, "The controller has not left the stalled factory yet")
+        releaseFactory.signal()
         await fulfillment(of: [controllerStopped], timeout: 2)
         XCTAssertTrue(controller.wasStopped)
     }
 
     func testCancelledAudioCaptureStartupReturnsImmediatelyAndStopsLateController() async {
+        let factoryStarted = expectation(description: "capture factory started")
+        let releaseFactory = DispatchSemaphore(value: 0)
+        defer { releaseFactory.signal() }
         let controllerStopped = expectation(description: "cancelled late audio controller stopped")
         let controller = TestAudioCaptureController {
             controllerStopped.fulfill()
@@ -224,12 +231,13 @@ final class AudioCaptureStartupTests: XCTestCase {
                 queue: DispatchQueue(label: "AudioCaptureStartupTests.cancelled"),
                 cancellation: cancellation
             ) {
-                Thread.sleep(forTimeInterval: 1)
+                factoryStarted.fulfill()
+                _ = releaseFactory.wait(timeout: .now() + 2)
                 return controller
             }
         }
 
-        try? await Task.sleep(for: .milliseconds(50))
+        await fulfillment(of: [factoryStarted], timeout: 1)
         cancellation.cancel()
 
         do {
@@ -242,6 +250,8 @@ final class AudioCaptureStartupTests: XCTestCase {
         }
 
         XCTAssertLessThan(startedAt.duration(to: .now), .milliseconds(500))
+        XCTAssertFalse(controller.wasStopped, "Cancellation returns before the stalled factory is released")
+        releaseFactory.signal()
         await fulfillment(of: [controllerStopped], timeout: 2)
         XCTAssertTrue(controller.wasStopped)
     }

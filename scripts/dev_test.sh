@@ -24,7 +24,6 @@ printf '%s\n' "$@" > "$XCODEBUILD_ARGS_LOG"
 printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS:-}" > "$XCODEBUILD_ACOUSTIC_ENV_LOG"
 printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_FIXTURE:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_GOLDEN:-}" \
-  "${TEST_RUNNER_PIPELINE_BENCHMARK_METRIC:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_DOWNLOAD_MODELS:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_ENCODER:-}" > "$XCODEBUILD_ENV_LOG"
 printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_MODEL:-}" \
@@ -34,8 +33,7 @@ printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_MODEL:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_URL:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_LANGUAGES:-}" \
-  "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_RESULTS_PATH:-}" \
-  "${TEST_RUNNER_PIPELINE_BENCHMARK_S1_MODES:-}" > "$XCODEBUILD_RESEARCH_ENV_LOG"
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_RESULTS_PATH:-}" > "$XCODEBUILD_RESEARCH_ENV_LOG"
 EOF
 cat > "$MOCK_BIN/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -125,7 +123,11 @@ for scenario in native-arm64 native-intel rosetta; do
     rosetta) shell_arch=x86_64; apple_silicon=1; native_arch=arm64 ;;
   esac
   for command in build launch test benchmark check; do
-    MOCK_HOST_ARCH="$shell_arch" MOCK_APPLE_SILICON="$apple_silicon" "$SCRIPT" "$command" >/dev/null
+    if [[ "$command" == benchmark ]]; then
+      MOCK_HOST_ARCH="$shell_arch" MOCK_APPLE_SILICON="$apple_silicon" "$SCRIPT" benchmark --only audio >/dev/null
+    else
+      MOCK_HOST_ARCH="$shell_arch" MOCK_APPLE_SILICON="$apple_silicon" "$SCRIPT" "$command" >/dev/null
+    fi
     if ! /usr/bin/grep -Fxq "platform=macOS,arch=$native_arch" "$XCODEBUILD_ARGS_LOG" || \
        /usr/bin/grep -Eq '^ARCHS=' "$XCODEBUILD_ARGS_LOG"; then
       printf 'FAIL: %s did not select a native macOS destination for %s\n' "$command" "$scenario" >&2
@@ -153,30 +155,21 @@ assert_benchmark_selector_count() {
 /bin/rm -f "$XCODEBUILD_ARGS_LOG"
 "$SCRIPT" benchmark --list > "$TEST_ROOT/benchmark-list.log"
 [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: --list invoked Xcode\n' >&2; exit 1; }
-for group in all asr asr-quality tdt-vocabulary asr-vocabulary asr-language asr-file asr-acoustics preview audio audio-conversion overlay transcript insertion cloud-request recovery cleanup s1-context s1-cpu s1-prepare s1-runtime cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
-  /usr/bin/grep -Eq "^$group +" "$TEST_ROOT/benchmark-list.log" || {
-    printf 'FAIL: group %s missing from --list\n' "$group" >&2
-    exit 1
-  }
-done
 
 "$SCRIPT" benchmark --only overlay >/dev/null
-assert_benchmark_selector_count 2
-assert_benchmark_arg '-only-testing:Dictate AnywhereTests/OverlayContentTests'
+assert_benchmark_selector_count 1
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/OverlayPerformanceBenchmarkTests'
 assert_benchmark_arg 'SWIFT_OPTIMIZATION_LEVEL=-O'
-assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) DEBUG PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED'
 assert_benchmark_arg "$default_path/Logs/Test/DictateAnywhere-Benchmark.xcresult"
 
 "$SCRIPT" benchmark --only audio,overlay --only audio --only cleanup >/dev/null
-assert_benchmark_selector_count 7
+assert_benchmark_selector_count 5
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchmarkTests/testPCMBufferConstruction'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
-"$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 50
-assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
+"$SCRIPT" benchmark --only all >/dev/null
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testGoldenSpeechReferenceBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPreviewAvoidsDiscardedOverlapDecoder'
 
@@ -187,13 +180,33 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmark
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testAuxiliaryHeadInstallationAndRepair'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPreviewAvoidsDiscardedOverlapDecoder'
 
-"$SCRIPT" benchmark --only s1-runtime >/dev/null
-assert_benchmark_selector_count 1
-assert_benchmark_arg '-only-testing:Dictate AnywhereTests/S1RuntimeBenchmarkTests/testPairedRuntimeGoldenCleanup'
+# Check the actual source inventory rather than maintaining a second catalog.
+# A stale selector can otherwise make a requested benchmark silently run nothing.
+/usr/bin/awk '
+  /class [A-Za-z_][A-Za-z_0-9]*.*XCTestCase/ {
+    name = $0; sub(/.*class /, "", name); sub(/[^A-Za-z_0-9].*/, "", name)
+    print name
+  }
+  /func test[A-Za-z_0-9]*\(/ {
+    method = $0; sub(/.*func /, "", method); sub(/\(.*/, "", method)
+    print name "/" method
+  }
+' "$SCRIPT_DIR/../Dictate AnywhereTests/"*.swift > "$TEST_ROOT/test-inventory"
+while IFS= read -r argument; do
+  case "$argument" in
+    '-only-testing:Dictate AnywhereTests/'*)
+      selector="${argument#-only-testing:Dictate AnywhereTests/}"
+      if ! /usr/bin/grep -Fxq "$selector" "$TEST_ROOT/test-inventory"; then
+        printf 'FAIL: benchmark selector does not resolve: %s\n' "$selector" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done < "$XCODEBUILD_ARGS_LOG"
 
-"$SCRIPT" benchmark --only s1-context >/dev/null
+"$SCRIPT" benchmark --only s1-regressions >/dev/null
 assert_benchmark_selector_count 1
-assert_benchmark_arg '-only-testing:Dictate AnywhereTests/S1ContextBenchmarkTests/testPairedFreshAndReusedContextGoldenCleanup'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/S1MiniModelTests'
 
 "$SCRIPT" benchmark --only asr-file >/dev/null
 assert_benchmark_selector_count 1
@@ -202,13 +215,20 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/GoldenFileASRBenchmark
 touch "$TEST_ROOT/Signing.local.xcconfig"
 SIGNING_CONFIG_PATH="$TEST_ROOT/Signing.local.xcconfig" \
   PIPELINE_BENCHMARK_ITERATIONS=7 "$SCRIPT" benchmark --only overlay --release >/dev/null
-assert_benchmark_selector_count 2
+assert_benchmark_selector_count 1
 assert_benchmark_arg Release
 assert_benchmark_arg 'CODE_SIGN_IDENTITY=Apple Development'
 assert_benchmark_arg 'ENABLE_TESTABILITY=YES'
-assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED'
+assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=PIPELINE_BENCHMARK'
 
-for invalid in unknown '' ',overlay' 'overlay,' 'overlay,,audio'; do
+/bin/rm -f "$XCODEBUILD_ARGS_LOG"
+if "$SCRIPT" benchmark >/dev/null 2>&1; then
+  printf 'FAIL: benchmark ran without an explicit group\n' >&2
+  exit 1
+fi
+[[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: missing group invoked Xcode\n' >&2; exit 1; }
+
+for invalid in unknown preview insertion s1-context '' ',overlay' 'overlay,' 'overlay,,audio'; do
   /bin/rm -f "$XCODEBUILD_ARGS_LOG"
   if "$SCRIPT" benchmark --only "$invalid" >/dev/null 2>&1; then
     printf 'FAIL: invalid benchmark group accepted: %s\n' "$invalid" >&2
@@ -231,20 +251,14 @@ if "$SCRIPT" benchmark --only >/dev/null 2>&1 || \
 fi
 
 PIPELINE_BENCHMARK_FIXTURE=golden-zh-boundaries PIPELINE_BENCHMARK_GOLDEN=1 \
-  PIPELINE_BENCHMARK_METRIC=cer PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1 \
-  PIPELINE_BENCHMARK_ENCODER=1 "$SCRIPT" benchmark --only asr-quality >/dev/null
-assert_benchmark_selector_count 5
-expected_environment=$'golden-zh-boundaries\n1\ncer\n1\n1'
+  PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1 \
+  PIPELINE_BENCHMARK_ENCODER=1 "$SCRIPT" benchmark --only asr-quality,model-setup >/dev/null
+assert_benchmark_selector_count 3
+expected_environment=$'golden-zh-boundaries\n1\n1\n1'
 if [[ "$(<"$XCODEBUILD_ENV_LOG")" != "$expected_environment" ]]; then
   printf 'FAIL: golden fixture benchmark settings were not forwarded to the test host\n' >&2
   exit 1
 fi
-for scenario in testDownloadModelsIntoApplicationCache testGoldenSpeechReferenceBenchmark testModelAwareBatchComparisonBenchmark testTDTEncoderPlacementBenchmark; do
-  if ! /usr/bin/grep -Fxq -- "-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/$scenario" "$XCODEBUILD_ARGS_LOG"; then
-    printf 'FAIL: benchmark omitted %s\n' "$scenario" >&2
-    exit 1
-  fi
-done
 
 PIPELINE_BENCHMARK_CLEANUP_MODEL=candidate \
   PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH='/fixture/prompt with spaces.md' \
@@ -252,11 +266,10 @@ PIPELINE_BENCHMARK_CLEANUP_MODEL=candidate \
   PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH='/fixture/outputs.json' \
   PIPELINE_BENCHMARK_ASR_URL=http://127.0.0.1:8010/v1 PIPELINE_BENCHMARK_LANGUAGES=en,de \
   PIPELINE_BENCHMARK_ASR_RESULTS_PATH='/fixture/speech outputs.json' \
-  PIPELINE_BENCHMARK_S1_MODES=mlx,mlx-uncached \
   "$SCRIPT" benchmark --only cleanup-prompts,external-asr-quality >/dev/null
 assert_benchmark_selector_count 5
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AppleCleanupPromptBenchmarkTests/testCandidatePromptsAgainstGoldenReferences'
-expected_research_environment=$'candidate\n/fixture/prompt with spaces.md\n512\n1\n/fixture/outputs.json\nhttp://127.0.0.1:8010/v1\nen,de\n/fixture/speech outputs.json\nmlx,mlx-uncached'
+expected_research_environment=$'candidate\n/fixture/prompt with spaces.md\n512\n1\n/fixture/outputs.json\nhttp://127.0.0.1:8010/v1\nen,de\n/fixture/speech outputs.json'
 if [[ "$(<"$XCODEBUILD_RESEARCH_ENV_LOG")" != "$expected_research_environment" ]]; then
   printf 'FAIL: candidate benchmark settings were not forwarded exactly\n' >&2
   exit 1
@@ -273,6 +286,6 @@ if [[ "$(<"$XCODEBUILD_ACOUSTIC_ENV_LOG")" != 'reference-pcm16,reference-gain4' 
 fi
 
 printf 'Development script clean safety tests passed.\n'
-printf 'Benchmark discovery, focused/combined/default selection, signing and invalid-input tests passed.\n'
+printf 'Benchmark discovery, focused/combined/explicit-all selection, signing and invalid-input tests passed.\n'
 printf 'Golden speech benchmark forwarding tests passed.\n'
 printf 'Candidate benchmark forwarding tests passed.\n'

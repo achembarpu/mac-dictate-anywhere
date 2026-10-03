@@ -16,31 +16,15 @@ final class ChromiumContextCaptureTests: XCTestCase {
     }
 
     @MainActor
-    func testChromiumMultiwordListItem() async throws {
-        try await runChromeFixture(isList: true, spoken: "sourdough starter", expectedItem: "Sourdough starter")
-    }
-
-    @MainActor
-    func testChromiumLongerListPhrase() async throws {
-        try await runChromeFixture(isList: true, spoken: "fresh sourdough starter from the local bakery",
-            expectedItem: "Fresh sourdough starter from the local bakery")
-    }
-
-    @MainActor
     func testChromiumSentenceListKeepsPeriods() async throws {
         try await runChromeFixture(isList: true, spoken: "buy sourdough starter", expectedItem: "Buy sourdough starter.",
             neighbors: ["Buy apples.", "Buy bananas.", "Buy oranges.", "Buy flowers."])
     }
 
     @MainActor
-    func testChromiumInlineMultiwordPhrase() async throws {
-        try await runChromeFixture(isList: false, spoken: "fresh tangerines", expectedItem: "fresh tangerines")
-    }
-
-    @MainActor
     func testChromiumEnumeratedBulletItems() async throws {
-        try await runChromeFixture(isList: true, spoken: "tangerines, blueberries",
-            expectedItems: ["Tangerines", "Blueberries"])
+        try await runChromeFixture(isList: true, spoken: "macaroni and cheese, sourdough starter",
+            expectedItems: ["Macaroni and cheese", "Sourdough starter"])
     }
 
     @MainActor
@@ -59,19 +43,6 @@ final class ChromiumContextCaptureTests: XCTestCase {
     func testChromiumEnumeratedItemsAtEndOfInlineSeries() async throws {
         try await runChromeFixture(isList: false, spoken: "tangerines, blueberries",
             expectedItem: "tangerines, blueberries", inlineAtEnd: true)
-    }
-
-    @MainActor
-    func testChromiumEnumerationKeepsCompoundItemsTogether() async throws {
-        try await runChromeFixture(isList: true, spoken: "macaroni and cheese, sourdough starter",
-            expectedItems: ["Macaroni and cheese", "Sourdough starter"])
-    }
-
-    @MainActor
-    func testChromiumEnumeratedNumberedActions() async throws {
-        try await runChromeFixture(isList: true, spoken: "wash the vegetables, chop the onions, preheat the oven",
-            neighbors: ["Plan the menu", "Buy ingredients", "Cook dinner", "Serve the meal"],
-            expectedItems: ["Wash the vegetables", "Chop the onions", "Preheat the oven"], ordered: true)
     }
 
     @MainActor

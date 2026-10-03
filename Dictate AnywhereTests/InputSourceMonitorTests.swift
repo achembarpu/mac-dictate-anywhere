@@ -2,30 +2,14 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class InputSourceMonitorTests: XCTestCase {
-    // MARK: - deriveLanguage (pure)
-
-    func testDeriveLanguageMatchesPrimarySubtag() {
-        XCTAssertEqual(InputSourceMonitor.deriveLanguage(fromBCP47: ["zh-Hans"]), .chinese)
-        XCTAssertEqual(InputSourceMonitor.deriveLanguage(fromBCP47: ["en-US"]), .english)
-        XCTAssertEqual(InputSourceMonitor.deriveLanguage(fromBCP47: ["de"]), .german)
-    }
-
-    func testDeriveLanguageMapsNorwegianBokmal() {
-        XCTAssertEqual(InputSourceMonitor.deriveLanguage(fromBCP47: ["nb"]), .norwegian)
-    }
-
-    func testDeriveLanguageReturnsNilForUnsupportedOrEmpty() {
-        XCTAssertNil(InputSourceMonitor.deriveLanguage(fromBCP47: ["ko"]))
-        XCTAssertNil(InputSourceMonitor.deriveLanguage(fromBCP47: []))
-    }
-
-    // MARK: - TIS queries (run against the real system in the test host)
-
-    @MainActor
-    func testCurrentInputSourceIDIsNonEmpty() {
-        let id = InputSourceMonitor().currentInputSourceID()
-        XCTAssertNotNil(id)
-        XCTAssertFalse(id?.isEmpty ?? true)
+    func testLanguageDerivationUsesPrimarySubtagAndHandlesUnsupportedSources() {
+        let fixtures: [([String], SupportedLanguage?)] = [
+            (["zh-Hans"], .chinese), (["en-US"], .english), (["de"], .german),
+            (["nb"], .norwegian), (["ko"], nil), ([], nil),
+        ]
+        for (tags, expected) in fixtures {
+            XCTAssertEqual(InputSourceMonitor.deriveLanguage(fromBCP47: tags), expected, tags.joined(separator: ","))
+        }
     }
 
     @MainActor

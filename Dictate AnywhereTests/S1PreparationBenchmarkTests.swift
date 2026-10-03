@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import Foundation
 import XCTest
 @testable import Dictate_Anywhere
@@ -48,3 +49,4 @@ final class S1PreparationBenchmarkTests: XCTestCase {
             structure: .prose, contextSetting: .general, context: nil)
     }
 }
+#endif

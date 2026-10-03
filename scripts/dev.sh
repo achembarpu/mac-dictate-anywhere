@@ -12,7 +12,7 @@ SIGNING_CONFIG_PATH="${SIGNING_CONFIG_PATH:-$ROOT_DIR/Config/Signing.local.xccon
 ALLOW_PROVISIONING_UPDATES=0
 RESULT_BUNDLE_PATH="$DERIVED_DATA_PATH/Logs/Test/DictateAnywhere.xcresult"
 DEV_EXECUTABLE_NAME="Dictate Anywhere Dev"
-BENCHMARK_GROUPS=(all)
+BENCHMARK_GROUPS=()
 BENCHMARK_FILTER_SET=0
 BENCHMARK_LIST=0
 
@@ -29,7 +29,7 @@ Commands:
   benchmark [OPTIONS]
           Run repeatable ASR and synthetic pipeline benchmarks
           Accepts --configuration Debug|Release and --release
-          --only GROUP[,GROUP] selects focused groups (repeatable; default all)
+          --only GROUP[,GROUP] is required (repeatable; use all for a broad run)
           --list shows available benchmark groups without building
   check   Validate the Xcode project and Debug scheme
   clean   Stop the app and remove project DerivedData
@@ -65,26 +65,27 @@ require_command() {
 # One registry owns group names, descriptions, and Xcode test selectors.
 benchmark_catalog() {
   cat <<'EOF'
-asr|Installed-model speech accuracy and latency|RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark RecoveryASRSmokeTests/testInstalledMandarinASRBenchmark RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark
-asr-quality|Golden speech, model-policy and encoder comparisons|RecoveryASRSmokeTests/testDownloadModelsIntoApplicationCache RecoveryASRSmokeTests/testModelAwareBatchComparisonBenchmark RecoveryASRSmokeTests/testCancelledBatchReplayKeepsFinalAudioWithoutStartingAPreview RecoveryASRSmokeTests/testGoldenSpeechReferenceBenchmark RecoveryASRSmokeTests/testTDTEncoderPlacementBenchmark
+asr|User-supplied speech accuracy and latency|RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark
+asr-quality|Golden speech and encoder comparisons|RecoveryASRSmokeTests/testGoldenSpeechReferenceBenchmark RecoveryASRSmokeTests/testTDTEncoderPlacementBenchmark
+asr-regressions|Installed-model recovery, cancellation, quiet speech and vocabulary seams|RecoveryASRSmokeTests/testInstalledModelsPrepareOnceAndRecoverWithoutWarmupText RecoveryASRSmokeTests/testV2VocabularyFinalizerPreservesShiftedGoldenSeam RecoveryASRSmokeTests/testBatchCancellationAndShortFinalTailDoNotCarryBetweenRecordings RecoveryASRSmokeTests/testQuietHumanSpeechIsDecodedWithoutAmplificationAndNoiseStaysEmpty RecoveryASRSmokeTests/testAppleSpeechRecoversSavedAudio RecoveryASRSmokeTests/testCancelledBatchReplayKeepsFinalAudioWithoutStartingAPreview
+model-setup|Explicit app-cache model installation|RecoveryASRSmokeTests/testDownloadModelsIntoApplicationCache
 tdt-vocabulary|TDT short-term controls and 110M shared-head evidence|TDTVocabularyBenchmarkTests/testVocabularyPoliciesAndSharedHead TDTVocabularyBenchmarkTests/testPreparedVocabularyProductionSessions TDTVocabularyBenchmarkTests/testAuxiliaryHeadInstallationAndRepair TDTVocabularyBenchmarkTests/testVocabularyPreviewAvoidsDiscardedOverlapDecoder
 asr-vocabulary|Native vocabulary bias and reset on human speech|NativeVocabularyBenchmarkTests/testNativeVocabularyOnFiles NativeVocabularyBenchmarkTests/testNativeVocabularyOnLiveSessions
 asr-language|Paired multilingual script filtering on production file/live paths|ModelVocabularyBenchmarkTests/testLanguageScriptFilteringOnFiles ModelVocabularyBenchmarkTests/testLanguageScriptFilteringOnLiveSessions
 asr-file|Installed models on complete golden files without live previews|GoldenFileASRBenchmarkTests/testInstalledModelsDecodeCompleteGoldenFiles
 asr-acoustics|TDT quiet Float32/PCM16 and gain/nonspeech research screen|AcousticASRBenchmarkTests/testQuietFloatAudioAndPCM16GainScreen
-preview|Non-streaming pending-audio work|RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark
 audio-conversion|Microphone conversion continuity, work and golden quality|PCMStreamConversionBenchmarkTests/testCaptureConversionWorkAndSampleContinuity PCMStreamConversionBenchmarkTests/testCaptureConversionOnGoldenSpeech PCMStreamConversionBenchmarkTests/testRecoveryPCMFilePullWork
 audio|Meter polling and PCM buffer construction|PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark PipelineWorkloadBenchmarkTests/testPCMBufferConstruction
-overlay|Preview observation and suffix cost|OverlayContentTests OverlayPerformanceBenchmarkTests
+overlay|Current preview suffix cost|OverlayPerformanceBenchmarkTests
 transcript|Long transcript assembly and normalization|PipelineWorkloadBenchmarkTests/testLongTranscriptAssemblyAndNormalization
-insertion|Insertion formatting and paste-script caching|PipelinePerformanceBenchmarkTests/testInsertionPreparationBenchmark PipelinePerformanceBenchmarkTests/testPasteScriptCacheBenchmark PipelinePerformanceBenchmarkTests/testPasteScriptPrecompilesWithoutExecuting
 cloud-request|AssemblyAI request encoding without network|PipelineWorkloadBenchmarkTests/testAssemblyAIRequestEncoding
 recovery|Recovery audio write and read|PipelineWorkloadBenchmarkTests/testRecoveryWriteAndRead
-cleanup|S1-mini prewarm/cleanup and Apple Intelligence|PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark PipelineWorkloadBenchmarkTests/testS1MiniCleanupWithInstalledModel PipelineWorkloadBenchmarkTests/testAppleIntelligenceCleanupWhenAvailable
+cleanup|S1-mini preparation and short/long cleanup|PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark PipelineWorkloadBenchmarkTests/testS1MiniCleanupWithInstalledModel
 s1-prepare|S1 engine loading, preparation and first-use latency|S1PreparationBenchmarkTests/testColdEngineVersusPreparedFirstRequest
 s1-cpu|S1 CPU cache precision and golden cleanup (Intel or Apple Silicon)|S1CPUBenchmarkTests/testCPUCachePrecisionComparison
-s1-runtime|Paired native MLX/llama and prefix accuracy and latency|S1RuntimeBenchmarkTests/testPairedRuntimeGoldenCleanup
-s1-context|Paired S1-mini context allocation and golden cleanup|S1ContextBenchmarkTests/testPairedFreshAndReusedContextGoldenCleanup
+s1-runtime|Current native MLX/llama runtime and prefix accuracy/latency|S1RuntimeBenchmarkTests
+s1-mlx-regressions|Explicit installed MLX isolation, cancellation and long-input checks|S1MiniMLXModelTests
+s1-regressions|Explicit installed S1-mini lifecycle, isolation and long-input checks|S1MiniModelTests
 cleanup-quality|Authored cleanup references and Apple session isolation|AppleCleanupBenchmarkTests/testGoldenCleanupAndPreparedSessionIsolation AppleCleanupBenchmarkTests/testLongInputAcrossContextWindows DictationStartupContextTests/testAppleDefaultCleanupWithoutPromptOrContext ProviderCleanupBenchmarkTests/testGoldenCleanupWithSelectedProvider
 apple-speech-quality|Installed Apple locales, golden accuracy and preparation|AppleSpeechBenchmarkTests/testInstalledLocalesGoldenSpeechAndFreshSessionPreparation
 cleanup-prompts|Explicit local external-prompt and saved-model evaluation|CleanupPromptBenchmarkTests/testExternalPromptAgainstProductionCleanup CleanupPromptBenchmarkTests/testSavedCandidateOutputsUseGoldenScorer AppleCleanupPromptBenchmarkTests/testCandidatePromptsAgainstGoldenReferences
@@ -95,7 +96,7 @@ EOF
 
 list_benchmarks() {
   local group description selectors
-  printf '%-16s %s\n' all 'All registered groups (default)'
+  printf '%-16s %s\n' all 'All registered groups (explicit opt-in)'
   while IFS='|' read -r group description selectors; do
     printf '%-16s %s\n' "$group" "$description"
   done < <(benchmark_catalog)
@@ -260,7 +261,6 @@ run_tests() {
   set +e
   env TEST_RUNNER_RUN_AUDIO_CAPTURE_SMOKE="${RUN_AUDIO_CAPTURE_SMOKE:-0}" \
     xcodebuild "${xcodebuild_args[@]}" \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) DEBUG PIPELINE_BENCHMARK_OPTIMIZED' \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
   local test_status=$?
   set -e
@@ -276,7 +276,7 @@ run_tests() {
 }
 
 run_benchmark() {
-  local benchmark_conditions="PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED"
+  local benchmark_conditions="PIPELINE_BENCHMARK"
   local -a benchmark_xcodebuild_args=("${xcodebuild_args[@]}")
   # Keep nonempty for macOS's Bash 3.2 with `set -u` array expansion.
   local -a benchmark_test_environment=("TEST_RUNNER_PIPELINE_BENCHMARK=1")
@@ -296,14 +296,14 @@ run_benchmark() {
   for name in DICTATE_ANYWHERE_PERF_TRACE PIPELINE_BENCHMARK_ITERATIONS \
     PIPELINE_BENCHMARK_MODEL PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS PIPELINE_BENCHMARK_AUDIO_PATH \
     PIPELINE_BENCHMARK_REFERENCE_PATH PIPELINE_BENCHMARK_MAX_WER \
-    PIPELINE_BENCHMARK_FIXTURE PIPELINE_BENCHMARK_GOLDEN PIPELINE_BENCHMARK_METRIC \
+    PIPELINE_BENCHMARK_FIXTURE PIPELINE_BENCHMARK_GOLDEN \
     PIPELINE_BENCHMARK_DOWNLOAD_MODELS PIPELINE_BENCHMARK_ENCODER PIPELINE_BENCHMARK_NATIVE_VOCAB_WEIGHT \
     PIPELINE_BENCHMARK_CLEANUP_PROVIDER PIPELINE_BENCHMARK_CLEANUP_MODEL \
     PIPELINE_BENCHMARK_CLEANUP_URL PIPELINE_BENCHMARK_CLEANUP_API_KEY \
     PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES \
     PIPELINE_BENCHMARK_CLEANUP_GREEDY PIPELINE_BENCHMARK_ASR_URL PIPELINE_BENCHMARK_LANGUAGES \
     PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH PIPELINE_BENCHMARK_ASR_RESULTS_PATH \
-    PIPELINE_BENCHMARK_S1_MODES S1_MINI_MODEL_PATH S1_MLX_MODEL_PATH RUN_MODEL_SWITCH_BENCHMARK; do
+    S1_MINI_MODEL_PATH S1_MLX_MODEL_PATH PIPELINE_BENCHMARK_S1_MODES RUN_MODEL_SWITCH_BENCHMARK; do
     if [[ -n "${!name:-}" ]]; then
       benchmark_test_environment+=("TEST_RUNNER_${name}=${!name}")
     fi
@@ -325,7 +325,7 @@ run_benchmark() {
   rm -rf "$benchmark_result_bundle_path"
   env "${benchmark_test_environment[@]}" xcodebuild "${benchmark_xcodebuild_args[@]}" \
     SWIFT_OPTIMIZATION_LEVEL=-O \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) $benchmark_conditions" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
     -enableCodeCoverage NO \
     -resultBundlePath "$benchmark_result_bundle_path" test
 }
@@ -516,6 +516,7 @@ case "$command" in
   benchmark)
     parse_benchmark_options "${@:2}"
     if [[ "$BENCHMARK_LIST" == 1 ]]; then list_benchmarks; exit 0; fi
+    [[ "$BENCHMARK_FILTER_SET" == 1 ]] || fail "benchmark requires --only GROUP; use --list to choose or --only all for a broad run"
     ;;
   launch|check|clean|stop)
     [[ "$#" -eq 1 ]] || fail "Usage: $(basename "$0") $command"

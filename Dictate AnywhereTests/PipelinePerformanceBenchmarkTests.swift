@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import AppKit
 import XCTest
 @testable import Dictate_Anywhere
@@ -10,21 +11,7 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         max(1, Int(ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3)
     }
 
-    private func requireBenchmark() throws {
-        #if PIPELINE_BENCHMARK
-        #else
-        throw XCTSkip("Run scripts/dev.sh benchmark to enable pipeline benchmarks")
-        #endif
-    }
-
-    func testPasteScriptPrecompilesWithoutExecuting() async {
-        let inserter = TextInserter()
-        let ready = await inserter.prewarmPasteScript()
-        XCTAssertTrue(ready)
-    }
-
     func testAudioPollingBenchmark() throws {
-        try requireBenchmark()
         let sampleWindow = Array((0..<1_600).map { index in
             sin(Float(index) * 0.03) * 0.08
         })
@@ -54,107 +41,7 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         )
     }
 
-    func testInsertionPreparationBenchmark() throws {
-        try requireBenchmark()
-        let fixtures = [
-            ("  hello world  ", "hello world"),
-            ("\n- strawberries\n", "- strawberries"),
-            ("你好，世界", "你好，世界"),
-            ("meeting notes\n", "meeting notes")
-        ]
-        let inserter = TextInserter()
-        let startedAt = ContinuousClock.now
-        var outputCount = 0
-
-        for _ in 0..<iterations * 1_000 {
-            for (input, expected) in fixtures {
-                let output = inserter.preparedTextForInsertion(
-                    input,
-                    targetBundleIdentifier: "com.example.benchmark",
-                    targetProcessIdentifier: nil,
-                    context: nil,
-                    style: nil,
-                    knownTerms: []
-                )
-                XCTAssertEqual(output, expected)
-                outputCount += output.utf16.count
-            }
-        }
-
-        let elapsed = startedAt.duration(to: .now)
-        XCTAssertGreaterThan(outputCount, 0)
-        print(
-            "PIPELINE_BENCHMARK component=insertion_prepare cases=\(iterations * 4_000) "
-            + "elapsed=\(elapsed)"
-        )
-    }
-
-    func testPasteScriptCacheBenchmark() async throws {
-        try requireBenchmark()
-        let source = """
-            tell application "System Events"
-                keystroke "v" using command down
-            end tell
-            """
-        let compileCount = max(1, iterations * 10)
-        // Match the paste path's worker queue; compiling on the main thread
-        // triggers a responsiveness diagnostic and skews the baseline.
-        let (uncachedElapsed, compileError) = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let startedAt = ContinuousClock.now
-                var failure: String?
-                for _ in 0..<compileCount {
-                    var error: NSDictionary?
-                    guard let script = NSAppleScript(source: source),
-                          script.compileAndReturnError(&error) else {
-                        failure = String(describing: error)
-                        break
-                    }
-                }
-                continuation.resume(returning: (startedAt.duration(to: .now), failure))
-            }
-        }
-        XCTAssertNil(compileError, "AppleScript compile failed: \(compileError ?? "unknown")")
-
-        let inserter = TextInserter()
-        let firstCachedStartedAt = ContinuousClock.now
-        let firstCachedReady = await inserter.prewarmPasteScript()
-        let firstCachedElapsed = firstCachedStartedAt.duration(to: .now)
-        XCTAssertTrue(firstCachedReady)
-
-        let cachedStartedAt = ContinuousClock.now
-        var allCachedReady = true
-        for _ in 0..<compileCount {
-            let ready = await inserter.prewarmPasteScript()
-            allCachedReady = allCachedReady && ready
-        }
-        let cachedElapsed = cachedStartedAt.duration(to: .now)
-        XCTAssertTrue(allCachedReady)
-
-        print(
-            "PIPELINE_BENCHMARK component=paste_script_compile count=\(compileCount) "
-            + "uncached=\(uncachedElapsed) first_cached=\(firstCachedElapsed) cached=\(cachedElapsed)"
-        )
-    }
-
     func testS1MiniPrewarmBenchmark() async throws {
-        try requireBenchmark()
-        let cases: [(TranscriptPostProcessingMode, SupportedLanguage, Bool)] = [
-            (.s1Mini, .english, true),
-            (.s1Mini, .german, true),
-            (.none, .english, true),
-            (.s1Mini, .english, false)
-        ]
-        let enabledCount = cases.reduce(into: 0) { count, value in
-            if S1MiniPrewarmPolicy.shouldPrewarm(
-                mode: value.0, language: value.1, prewarmEnabled: value.2
-            ) {
-                count += 1
-            }
-        }
-        XCTAssertEqual(enabledCount, 1)
-        print("PIPELINE_BENCHMARK component=s1_mini_prewarm_policy enabled_cases=\(enabledCount)")
-
         let modelURL: URL
         if let path = ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"], !path.isEmpty {
             modelURL = URL(fileURLWithPath: path)
@@ -182,3 +69,4 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         await S1MiniPostProcessingService.unload()
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import Speech
 import XCTest
 @testable import Dictate_Anywhere
@@ -5,9 +6,6 @@ import XCTest
 @MainActor
 final class AppleSpeechBenchmarkTests: XCTestCase {
     func testInstalledLocalesGoldenSpeechAndFreshSessionPreparation() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --only apple-speech-quality")
-        #else
         guard #available(macOS 26, *), AppleSpeechEngine.isSupported else { throw XCTSkip("Apple Speech unavailable") }
         let installed = Set(await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) })
         let filter = ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_FIXTURE"]
@@ -55,6 +53,6 @@ final class AppleSpeechBenchmarkTests: XCTestCase {
             }
         }
         try XCTSkipIf(ran == 0, "No installed locale matches the selected golden fixture")
-        #endif
     }
 }
+#endif

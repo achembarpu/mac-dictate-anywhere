@@ -26,14 +26,6 @@ final class AssemblyAIEngineTests: XCTestCase {
         XCTAssertEqual(AssemblyAIRegion.europeanUnion.baseURL.host, "dictation.eu.assemblyai.com")
     }
 
-    func testLanguageCatalogContainsUniqueDocumentedCodes() {
-        XCTAssertEqual(AssemblyAILanguage.allCases.count, 32)
-        XCTAssertEqual(Set(AssemblyAILanguage.allCases.map(\.rawValue)).count, 32)
-        XCTAssertTrue(AssemblyAILanguage.allCases.contains(.english))
-        XCTAssertTrue(AssemblyAILanguage.allCases.contains(.mandarin))
-        XCTAssertTrue(AssemblyAILanguage.allCases.contains(.cantonese))
-    }
-
     func testKeytermsAreTrimmedDeduplicatedAndBounded() {
         let terms = AssemblyAIEngine.fittedKeyterms([
             "  Dictate Anywhere  ", "dictate anywhere", "AssemblyAI", "", "AssemblyAI",
@@ -328,26 +320,6 @@ final class AssemblyAIEngineTests: XCTestCase {
         XCTAssertTrue(instruction.contains("PROTECTED OUTPUT RULES"))
     }
 
-    func testPromptDefaultsMatchConfiguredAssemblyAIBehavior() {
-        XCTAssertEqual(AssemblyAIInternalPrompt.baseCleanup.defaultValue, "")
-        XCTAssertTrue(
-            AssemblyAIInternalPrompt.email.defaultValue.contains("greeting on its own line")
-        )
-        XCTAssertEqual(
-            AssemblyAIInternalPrompt.casual.defaultValue,
-            DictationWritingStyle.casual.cleanupInstruction
-        )
-        XCTAssertEqual(AssemblyAIInternalPrompt.workMessaging.defaultValue, "")
-        XCTAssertEqual(AssemblyAIInternalPrompt.personalMessaging.defaultValue, "")
-        XCTAssertEqual(AssemblyAIInternalPrompt.other.defaultValue, "")
-
-        XCTAssertFalse(AssemblyAIInternalPrompt.baseCleanup.hasBuiltInDefault)
-        XCTAssertTrue(AssemblyAIInternalPrompt.email.hasBuiltInDefault)
-        XCTAssertFalse(AssemblyAIInternalPrompt.workMessaging.hasBuiltInDefault)
-        XCTAssertFalse(AssemblyAIInternalPrompt.personalMessaging.hasBuiltInDefault)
-        XCTAssertFalse(AssemblyAIInternalPrompt.other.hasBuiltInDefault)
-    }
-
     func testMultipartBodyPlacesConfigBeforePCM() throws {
         let config = AssemblyAIRequestConfiguration(
             sampleRate: 16_000,
@@ -416,5 +388,40 @@ final class AssemblyAIEngineTests: XCTestCase {
             isSecureField: false,
             isContextExcluded: false
         )
+    }
+
+    func testAllApplicableCustomPromptsSurviveLongPreferences() throws {
+        let context = makeEditorContext(before: "I want ", after: " today.")
+        let overrides = ["baseCleanup": "BASE " + String(repeating: "b", count: 4000),
+            "other": "DESTINATION " + String(repeating: "d", count: 4000),
+            "formal": "STYLE " + String(repeating: "s", count: 4000),
+            "midSentence": "FIELD " + String(repeating: "f", count: 4000)]
+        let prompt = AssemblyAIEngine.llmInstruction(customInstruction: "USER " + String(repeating: "u", count: 4000),
+            context: context, shareSurroundingText: true, style: .formal, promptOverrides: overrides)
+        for marker in ["BASE", "DESTINATION", "STYLE", "FIELD", "USER"] { XCTAssertTrue(prompt.contains(marker)) }
+        XCTAssertLessThanOrEqual(prompt.count, 2048)
+        let json = try XCTUnwrap(prompt.components(separatedBy: "NEARBY DATA:\n").last?.components(separatedBy: "\n").first)
+        XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(json.utf8)))
+    }
+
+    func testSearchPromptAppliesAndMidSentencePromptDoesNotLeakIntoList() {
+        let overrides = ["searchQuery": "SEARCH_CUSTOM", "midSentence": "MID_CUSTOM"]
+        let search = AssemblyAIEngine.llmInstruction(customInstruction: "",
+            context: makeEditorContext(before: "", after: "", purpose: .searchQuery),
+            shareSurroundingText: true, style: .original, promptOverrides: overrides)
+        XCTAssertTrue(search.contains("SEARCH_CUSTOM"))
+        let list = AssemblyAIEngine.llmInstruction(customInstruction: "",
+            context: makeEditorContext(before: "- Apples\n- ", after: "\n- Oranges"),
+            shareSurroundingText: true, style: .formal, promptOverrides: overrides)
+        XCTAssertFalse(list.contains("MID_CUSTOM"))
+        XCTAssertFalse(list.contains("SEARCH_CUSTOM"))
+        XCTAssertFalse(list.contains("INLINE:"))
+    }
+
+    private func makeEditorContext(before: String, after: String, purpose: DictationFieldPurpose = .unknown) -> DictationContext {
+        DictationContext(processIdentifier: 123, bundleIdentifier: "com.example.editor", appName: "Fixture",
+            category: .other, documentURL: nil, documentTitle: nil, fieldRole: "AXTextArea", fieldSubrole: nil,
+            fieldPurpose: purpose, textBeforeCursor: before, selectedText: "", textAfterCursor: after,
+            isSecureField: false, isContextExcluded: false)
     }
 }

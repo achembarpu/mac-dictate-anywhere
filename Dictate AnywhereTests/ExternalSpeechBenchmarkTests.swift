@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import Foundation
 import CryptoKit
 import XCTest
@@ -8,9 +9,6 @@ import XCTest
 @MainActor
 final class ExternalSpeechBenchmarkTests: XCTestCase {
     func testSavedFileOutputsUseGoldenScorer() throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --only external-asr-quality")
-        #else
         guard let path = ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_ASR_RESULTS_PATH"] else {
             throw XCTSkip("Select saved external speech results")
         }
@@ -30,13 +28,9 @@ final class ExternalSpeechBenchmarkTests: XCTestCase {
             let data = try JSONSerialization.data(withJSONObject: scored, options: [.sortedKeys])
             print("ASR_SAVED_RESULT " + String(decoding: data, as: UTF8.self))
         }
-        #endif
     }
 
     func testLocalRuntimeGoldenSpeech() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --only external-asr-quality")
-        #else
         let env = ProcessInfo.processInfo.environment
         guard let rawURL = env["PIPELINE_BENCHMARK_ASR_URL"] else { throw XCTSkip("Select a local ASR endpoint") }
         let url = try XCTUnwrap(URL(string: rawURL)?.appendingPathComponent("audio/transcriptions"))
@@ -78,7 +72,6 @@ final class ExternalSpeechBenchmarkTests: XCTestCase {
             }
         }
         XCTAssertGreaterThan(ran, 0)
-        #endif
     }
 
     private struct Transcript: Decodable { let text: String; let truncated: Bool? }
@@ -95,3 +88,4 @@ final class ExternalSpeechBenchmarkTests: XCTestCase {
         }
     }
 }
+#endif

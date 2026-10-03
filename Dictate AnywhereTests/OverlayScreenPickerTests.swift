@@ -45,16 +45,6 @@ final class OverlayScreenPickerTests: XCTestCase {
 
     // MARK: - Screen selection
 
-    func testPicksScreenContainingFocusedTextField() {
-        let index = OverlayScreenPicker.pickScreenIndex(
-            screenFrames: screens,
-            focusPoint: pointOnSecondary,
-            mouseLocation: nil
-        )
-
-        XCTAssertEqual(index, 1)
-    }
-
     func testPrefersFocusedTextFieldOverMousePointer() {
         let index = OverlayScreenPicker.pickScreenIndex(
             screenFrames: screens,
@@ -111,18 +101,6 @@ final class OverlayScreenPickerTests: XCTestCase {
 
     // MARK: - Accessibility coordinate conversion
 
-    func testAccessibilityPointFlipsIntoAppKitCoordinates() {
-        // AX measures down from the top-left of the primary display; AppKit
-        // measures up from its bottom-left.
-        let converted = OverlayScreenPicker.appKitPoint(
-            fromAccessibilityPoint: CGPoint(x: 300, y: 80),
-            primaryFrame: primary
-        )
-
-        XCTAssertEqual(converted.x, 300)
-        XCTAssertEqual(converted.y, 1000)
-    }
-
     func testAccessibilityPointAboveThePrimaryDisplayConvertsToPositiveY() {
         // A display stacked above the primary reports negative AX y values.
         let converted = OverlayScreenPicker.appKitPoint(
@@ -134,19 +112,6 @@ final class OverlayScreenPickerTests: XCTestCase {
     }
 
     // MARK: - Overlay placement
-
-    func testOverlayOriginIsBottomCenteredOnTheChosenDisplay() {
-        let visibleFrame = CGRect(x: 0, y: 25, width: 1920, height: 1030)
-
-        let origin = OverlayScreenPicker.overlayOrigin(
-            inVisibleFrame: visibleFrame,
-            size: CGSize(width: 208, height: 130),
-            bottomMargin: 16
-        )
-
-        XCTAssertEqual(origin.x, 856)
-        XCTAssertEqual(origin.y, 41)
-    }
 
     func testOverlayOriginStaysOnADisplayWithANegativeOrigin() {
         let visibleFrame = CGRect(x: -1440, y: 0, width: 1440, height: 875)

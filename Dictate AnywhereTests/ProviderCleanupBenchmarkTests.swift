@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import XCTest
 @testable import Dictate_Anywhere
 
@@ -6,9 +7,6 @@ import XCTest
 @MainActor
 final class ProviderCleanupBenchmarkTests: XCTestCase {
     func testGoldenCleanupWithSelectedProvider() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --only cleanup-quality")
-        #else
         let environment = ProcessInfo.processInfo.environment
         guard let provider = environment["PIPELINE_BENCHMARK_CLEANUP_PROVIDER"] else { throw XCTSkip("Select a cleanup provider") }
         let model = environment["PIPELINE_BENCHMARK_CLEANUP_MODEL"] ?? ""
@@ -70,6 +68,6 @@ final class ProviderCleanupBenchmarkTests: XCTestCase {
         }
         XCTAssertGreaterThan(ran, 0)
         if provider == "s1" { await S1MiniPostProcessingService.unload() }
-        #endif
     }
 }
+#endif

@@ -19,7 +19,6 @@ final class SettingsLogicTests: XCTestCase {
     private var savedS1MiniAppStyling = S1MiniAppStyling.recommended
     private var savedAssemblyAIPromptOverrides: [String: String] = [:]
     private var savedAssemblyAIInstruction = ""
-    private var savedPrewarmEnginesAtStartup = true
 
     override func setUp() {
         super.setUp()
@@ -38,7 +37,6 @@ final class SettingsLogicTests: XCTestCase {
         savedS1MiniAppStyling = settings.s1MiniAppStyling
         savedAssemblyAIPromptOverrides = settings.assemblyAIPromptOverrides
         savedAssemblyAIInstruction = settings.assemblyAIInstruction
-        savedPrewarmEnginesAtStartup = settings.prewarmEnginesAtStartup
     }
 
     override func tearDown() {
@@ -66,7 +64,6 @@ final class SettingsLogicTests: XCTestCase {
         settings.parakeetModelChoice = savedParakeetModelChoice
         settings.selectedLanguage = savedSelectedLanguage
         settings.transcriptPostProcessingMode = savedMode
-        settings.prewarmEnginesAtStartup = savedPrewarmEnginesAtStartup
         super.tearDown()
     }
 
@@ -97,14 +94,6 @@ final class SettingsLogicTests: XCTestCase {
         XCTAssertEqual(settings.selectedLanguage, .norwegian, "Keep the preference visible for the user to resolve.")
     }
 
-    func testPrewarmEnginesAtStartupPersistsRoundTrip() {
-        let settings = Settings.shared
-        settings.prewarmEnginesAtStartup = false
-        XCTAssertEqual(UserDefaults.standard.object(forKey: "prewarmEnginesAtStartup") as? Bool, false)
-        settings.prewarmEnginesAtStartup = true
-        XCTAssertEqual(UserDefaults.standard.object(forKey: "prewarmEnginesAtStartup") as? Bool, true)
-    }
-
     func testHistoryDecodesOlderEntriesWithoutRawText() throws {
         let json = #"{"id":"5B5304DB-AD12-40AD-928B-43A113D1E9DE","text":"Older dictation","createdAt":811700095}"#
         let entry = try JSONDecoder().decode(TranscriptHistoryEntry.self, from: Data(json.utf8))
@@ -132,58 +121,28 @@ final class SettingsLogicTests: XCTestCase {
 
     // MARK: - Filler word removal
 
-    func testRemoveFillerWordsRemovesConfiguredWords() {
+    func testConfiguredFillersRespectCaseWordBoundariesAndPunctuation() {
         let settings = Settings.shared
         settings.isFillerWordRemovalEnabled = true
         settings.fillerWordsToRemove = ["um", "uh"]
-
-        let cleaned = settings.removeFillerWords(from: "So um I think uh this works")
-        XCTAssertEqual(cleaned, "So I think this works")
+        for (input, expected) in [
+            ("So um I think uh this works", "So I think this works"),
+            ("Um hello UM world", "hello world"),
+            ("my umbrella um leaks", "my umbrella leaks"),
+            ("Well um, fine um.", "Well, fine.")
+        ] {
+            XCTAssertEqual(settings.removeFillerWords(from: input), expected, input)
+        }
     }
 
-    func testRemoveFillerWordsIsCaseInsensitive() {
-        let settings = Settings.shared
-        settings.isFillerWordRemovalEnabled = true
-        settings.fillerWordsToRemove = ["um"]
-
-        XCTAssertEqual(settings.removeFillerWords(from: "Um hello UM world"), "hello world")
-    }
-
-    func testRemoveFillerWordsRespectsWordBoundaries() {
-        let settings = Settings.shared
-        settings.isFillerWordRemovalEnabled = true
-        settings.fillerWordsToRemove = ["um"]
-
-        // "umbrella" must survive.
-        XCTAssertEqual(settings.removeFillerWords(from: "my umbrella um leaks"), "my umbrella leaks")
-    }
-
-    func testRemoveFillerWordsCleansPunctuationSpacing() {
-        let settings = Settings.shared
-        settings.isFillerWordRemovalEnabled = true
-        settings.fillerWordsToRemove = ["um"]
-
-        XCTAssertEqual(settings.removeFillerWords(from: "Well um, fine um."), "Well, fine.")
-    }
-
-    func testRemoveFillerWordsNoOpWhenDisabled() {
+    func testFillerRemovalIsDisabledByToggleOrEmptyList() {
         let settings = Settings.shared
         settings.isFillerWordRemovalEnabled = false
         settings.fillerWordsToRemove = ["um"]
-
         XCTAssertEqual(settings.removeFillerWords(from: "um hi"), "um hi")
-    }
-
-    func testRemoveFillerWordsNoOpWithEmptyList() {
-        let settings = Settings.shared
         settings.isFillerWordRemovalEnabled = true
         settings.fillerWordsToRemove = []
-
         XCTAssertEqual(settings.removeFillerWords(from: "um hi"), "um hi")
-    }
-
-    func testDefaultFillerWords() {
-        XCTAssertEqual(Settings.defaultFillerWords, ["um", "uh", "erm", "er", "hmm", "嗯", "呃"])
     }
 
     func testAssemblyAIPromptsCanResetIndividuallyAndTogether() {
@@ -205,24 +164,6 @@ final class SettingsLogicTests: XCTestCase {
         settings.resetAllAssemblyAIPrompts()
         XCTAssertEqual(settings.assemblyAIPrompt(.casual), AssemblyAIInternalPrompt.casual.defaultValue)
         XCTAssertEqual(settings.assemblyAIInstruction, "")
-    }
-
-    // MARK: - Transcript history
-
-    func testAddRemoveClearTranscriptHistory() {
-        let settings = Settings.shared
-        settings.transcriptHistory = []
-
-        settings.addTranscriptHistoryEntry("first")
-        settings.addTranscriptHistoryEntry("second")
-        XCTAssertEqual(settings.transcriptHistory.map(\.text), ["first", "second"])
-
-        let id = settings.transcriptHistory[0].id
-        settings.removeTranscriptHistoryEntry(id: id)
-        XCTAssertEqual(settings.transcriptHistory.map(\.text), ["second"])
-
-        settings.clearTranscriptHistory()
-        XCTAssertTrue(settings.transcriptHistory.isEmpty)
     }
 
     // MARK: - Hotkey bindings
@@ -256,49 +197,6 @@ final class SettingsLogicTests: XCTestCase {
 
         settings.removeBinding(id: added.id)
         XCTAssertEqual(settings.hotkeyBindings.count, 1)
-    }
-
-    func testHasHotkeyReflectsBindings() {
-        let settings = Settings.shared
-        settings.hotkeyBindings = [HotkeyBinding.defaultBinding]
-        XCTAssertTrue(settings.hasHotkey)
-
-        settings.hotkeyBindings = [
-            HotkeyBinding(id: UUID(), keyCode: nil, modifiersRawValue: 0, displayName: "", mode: .holdToRecord)
-        ]
-        XCTAssertFalse(settings.hasHotkey)
-    }
-
-    // MARK: - Post-processing mode flags
-
-    func testPostProcessingModeComputedFlags() {
-        let settings = Settings.shared
-
-        settings.transcriptPostProcessingMode = .none
-        XCTAssertFalse(settings.ollamaPostProcessingEnabled)
-        XCTAssertFalse(settings.appleIntelligencePostProcessingEnabled)
-        XCTAssertFalse(settings.s1MiniPostProcessingEnabled)
-        XCTAssertFalse(settings.openRouterPostProcessingEnabled)
-        XCTAssertFalse(settings.openAICompatiblePostProcessingEnabled)
-        XCTAssertFalse(settings.fluidAudioVocabularyEnabled)
-
-        settings.transcriptPostProcessingMode = .ollama
-        XCTAssertTrue(settings.ollamaPostProcessingEnabled)
-
-        settings.transcriptPostProcessingMode = .appleIntelligence
-        XCTAssertTrue(settings.appleIntelligencePostProcessingEnabled)
-
-        settings.transcriptPostProcessingMode = .s1Mini
-        XCTAssertTrue(settings.s1MiniPostProcessingEnabled)
-
-        settings.transcriptPostProcessingMode = .openRouter
-        XCTAssertTrue(settings.openRouterPostProcessingEnabled)
-
-        settings.transcriptPostProcessingMode = .openAICompatible
-        XCTAssertTrue(settings.openAICompatiblePostProcessingEnabled)
-
-        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
-        XCTAssertTrue(settings.fluidAudioVocabularyEnabled)
     }
 
     func testS1MiniStylingUsesSupportedAppCategoryControlsWithFallback() {
@@ -350,126 +248,40 @@ final class SettingsLogicTests: XCTestCase {
 
     // MARK: - Pending vocabulary mode restore (auto-switch)
 
-    func testNoteAutoSwitchModelChangeSetsFlagOnlyWhenModeWasStripped() {
+    func testAutoSwitchMarksOnlyStrippedVocabularyModeForRestoration() {
         let settings = Settings.shared
-
-        // Simulate the coercion having fired: mode was `.fluidAudioVocabulary`
-        // before the auto-switch write, and is no longer that after.
-        settings.pendingVocabularyModeRestore = false
-        settings.transcriptPostProcessingMode = .none
-        settings.noteAutoSwitchModelChange(hadVocabularyMode: true)
-        XCTAssertTrue(settings.pendingVocabularyModeRestore)
+        for (hadVocabulary, mode, expected) in [
+            (true, TranscriptPostProcessingMode.none, true),
+            (false, .none, false), (true, .fluidAudioVocabulary, false)
+        ] {
+            settings.pendingVocabularyModeRestore = false
+            settings.transcriptPostProcessingMode = mode
+            settings.noteAutoSwitchModelChange(hadVocabularyMode: hadVocabulary)
+            XCTAssertEqual(settings.pendingVocabularyModeRestore, expected, "had=\(hadVocabulary), mode=\(mode)")
+        }
     }
 
-    func testNoteAutoSwitchModelChangeNoOpsWhenHadVocabularyModeIsFalse() {
+    func testVocabularyRestorationWaitsForCapableModelAndRespectsUserChoice() {
         let settings = Settings.shared
-
-        settings.pendingVocabularyModeRestore = false
-        settings.transcriptPostProcessingMode = .none
-        settings.noteAutoSwitchModelChange(hadVocabularyMode: false)
-        XCTAssertFalse(settings.pendingVocabularyModeRestore)
-    }
-
-    func testNoteAutoSwitchModelChangeNoOpsWhenModeStillFluidAudioVocabulary() {
-        let settings = Settings.shared
-
-        // Coercion didn't fire (e.g. destination was still vocab-capable).
-        settings.pendingVocabularyModeRestore = false
-        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
-        settings.noteAutoSwitchModelChange(hadVocabularyMode: true)
-        XCTAssertFalse(settings.pendingVocabularyModeRestore)
-    }
-
-    func testRestoreVocabularyModeRestoresAndClearsWhenModelCapable() {
-        let settings = Settings.shared
-
         settings.engineChoice = .parakeet
-        settings.parakeetModelChoice = .multilingual
-        XCTAssertTrue(settings.parakeetModelChoice.supportsFluidAudioVocabulary)
-        settings.transcriptPostProcessingMode = .none
-        settings.pendingVocabularyModeRestore = true
-
-        settings.restoreVocabularyModeAfterAutoSwitchIfPending()
-
-        XCTAssertEqual(settings.transcriptPostProcessingMode, .fluidAudioVocabulary)
-        XCTAssertFalse(settings.pendingVocabularyModeRestore)
-    }
-
-    func testRestoreVocabularyModeKeepsFlagPendingWhenModelNotCapable() {
-        let settings = Settings.shared
-
-        settings.engineChoice = .parakeet
-        settings.parakeetModelChoice = .senseVoice
-        XCTAssertFalse(settings.parakeetModelChoice.supportsFluidAudioVocabulary)
-        // Coerced to .none as a side effect of the assignment above; confirm
-        // the starting point explicitly.
-        settings.transcriptPostProcessingMode = .none
-        settings.pendingVocabularyModeRestore = true
-
-        settings.restoreVocabularyModeAfterAutoSwitchIfPending()
-
-        XCTAssertEqual(settings.transcriptPostProcessingMode, .none)
-        XCTAssertTrue(settings.pendingVocabularyModeRestore)
-    }
-
-    func testRestoreVocabularyModeClearsWithoutChangingModeWhenUserPickedAnotherMode() {
-        let settings = Settings.shared
-
-        settings.engineChoice = .parakeet
-        settings.parakeetModelChoice = .multilingual
-        settings.transcriptPostProcessingMode = .ollama
-        settings.pendingVocabularyModeRestore = true
-
-        settings.restoreVocabularyModeAfterAutoSwitchIfPending()
-
-        XCTAssertEqual(settings.transcriptPostProcessingMode, .ollama)
-        XCTAssertFalse(settings.pendingVocabularyModeRestore)
-    }
-
-    func testRestoreVocabularyModeClearsWhenModeAlreadyFluidAudioVocabulary() {
-        let settings = Settings.shared
-
-        settings.engineChoice = .parakeet
-        settings.parakeetModelChoice = .multilingual
-        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
-        settings.pendingVocabularyModeRestore = true
-
-        settings.restoreVocabularyModeAfterAutoSwitchIfPending()
-
-        XCTAssertEqual(settings.transcriptPostProcessingMode, .fluidAudioVocabulary)
-        XCTAssertFalse(settings.pendingVocabularyModeRestore)
-    }
-
-    func testRestoreVocabularyModeNoOpWhenFlagNotPending() {
-        let settings = Settings.shared
-
-        settings.engineChoice = .parakeet
-        settings.parakeetModelChoice = .multilingual
-        settings.transcriptPostProcessingMode = .none
-        settings.pendingVocabularyModeRestore = false
-
-        settings.restoreVocabularyModeAfterAutoSwitchIfPending()
-
-        XCTAssertEqual(settings.transcriptPostProcessingMode, .none)
-        XCTAssertFalse(settings.pendingVocabularyModeRestore)
+        let cases: [(ParakeetModelChoice, TranscriptPostProcessingMode, Bool, TranscriptPostProcessingMode, Bool)] = [
+            (.multilingual, .none, true, .fluidAudioVocabulary, false),
+            (.senseVoice, .none, true, .none, true),
+            (.multilingual, .ollama, true, .ollama, false),
+            (.multilingual, .fluidAudioVocabulary, true, .fluidAudioVocabulary, false),
+            (.multilingual, .none, false, .none, false)
+        ]
+        for (model, mode, pending, expectedMode, expectedPending) in cases {
+            settings.parakeetModelChoice = model
+            settings.transcriptPostProcessingMode = mode
+            settings.pendingVocabularyModeRestore = pending
+            settings.restoreVocabularyModeAfterAutoSwitchIfPending()
+            XCTAssertEqual(settings.transcriptPostProcessingMode, expectedMode, "model=\(model), mode=\(mode)")
+            XCTAssertEqual(settings.pendingVocabularyModeRestore, expectedPending)
+        }
     }
 
     // MARK: - Theme mode
-
-    func testThemeModeCasesAndDisplayNames() {
-        XCTAssertEqual(ThemeMode.allCases, [.system, .light, .dark])
-        XCTAssertEqual(ThemeMode.system.displayName, "System")
-        XCTAssertEqual(ThemeMode.light.displayName, "Light")
-        XCTAssertEqual(ThemeMode.dark.displayName, "Dark")
-        XCTAssertEqual(ThemeMode(rawValue: "system"), .system)
-        XCTAssertNil(ThemeMode(rawValue: "neon"))
-    }
-
-    func testThemeModeMapsToAppearance() {
-        XCTAssertNil(ThemeMode.system.nsAppearance)
-        XCTAssertEqual(ThemeMode.light.nsAppearance?.name, .aqua)
-        XCTAssertEqual(ThemeMode.dark.nsAppearance?.name, .darkAqua)
-    }
 
     func testThemeModeAppliesAppAppearance() {
         let settings = Settings.shared

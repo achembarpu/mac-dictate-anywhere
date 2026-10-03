@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import Foundation
 import CryptoKit
 import XCTest
@@ -8,9 +9,6 @@ import XCTest
 @MainActor
 final class CleanupPromptBenchmarkTests: XCTestCase {
     func testSavedCandidateOutputsUseGoldenScorer() throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --only cleanup-prompts")
-        #else
         guard let path = ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH"] else {
             throw XCTSkip("Select saved candidate outputs")
         }
@@ -40,13 +38,9 @@ final class CleanupPromptBenchmarkTests: XCTestCase {
             XCTAssertTrue(row.completed, "\(row.fixture): saved generation did not finish")
             if !issues.isEmpty || !lost.isEmpty { print("CLEANUP_SAVED_ISSUES fixture=\(row.fixture) issues=\(issues) lost=\(lost) output=\(row.output)") }
         }
-        #endif
     }
 
     func testExternalPromptAgainstProductionCleanup() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --only cleanup-prompts")
-        #else
         let env = ProcessInfo.processInfo.environment
         if env["PIPELINE_BENCHMARK_CLEANUP_PROVIDER"] == "apple" {
             throw XCTSkip("Apple candidates use the production Apple cleanup harness")
@@ -136,7 +130,6 @@ final class CleanupPromptBenchmarkTests: XCTestCase {
             }
         }
         XCTAssertGreaterThan(ran, 0)
-        #endif
     }
 
     private struct CandidateResponse: Decodable {
@@ -162,3 +155,4 @@ final class CleanupPromptBenchmarkTests: XCTestCase {
         }
     }
 }
+#endif

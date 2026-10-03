@@ -133,6 +133,29 @@ final class DictationRecoveryTests: XCTestCase {
         XCTAssertEqual(Settings.shared.transcriptHistory.last?.text, "Finished speech.")
     }
 
+    func testCancellationUsesSessionStartPreference() async throws {
+        let settings = Settings.shared
+        let oldPreserve = settings.preserveCancelledSessions
+        let oldEngine = settings.engineChoice
+        defer { settings.preserveCancelledSessions = oldPreserve; settings.engineChoice = oldEngine }
+        settings.engineChoice = .assemblyAI
+        for enabled in [false, true] {
+            settings.preserveCancelledSessions = enabled
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = DictationRecoveryStore(directory: directory)
+            let app = AppState(permissions: Permissions(statusProvider: { (true, false) }), recoveryStore: store)
+            app.prepareSessionRecovery(for: app.assemblyAIEngine)
+            let capture = try XCTUnwrap(app.assemblyAIEngine.recoveryCapture)
+            capture.append([0.2, 0.3])
+            settings.preserveCancelledSessions = !enabled
+            app.status = .recording
+            await app.cancelDictation()
+            XCTAssertEqual(store.entries.count, enabled ? 1 : 0)
+            XCTAssertEqual(FileManager.default.fileExists(atPath: capture.url.path), enabled)
+        }
+    }
+
     func testCancellationPreservesAudioWhenEnabledAndNoneWhenDisabled() async throws {
         let previous = Settings.shared.preserveCancelledSessions
         defer { Settings.shared.preserveCancelledSessions = previous }

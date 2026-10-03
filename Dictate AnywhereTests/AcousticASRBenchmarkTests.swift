@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import CryptoKit
 import FluidAudio
 import Foundation
@@ -9,9 +10,6 @@ import XCTest
 @MainActor
 final class AcousticASRBenchmarkTests: XCTestCase {
     func testQuietFloatAudioAndPCM16GainScreen() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use the opt-in asr-acoustics benchmark group")
-        #else
         let env = ProcessInfo.processInfo.environment
         let choice = try XCTUnwrap(ParakeetModelChoice(rawValue: env["PIPELINE_BENCHMARK_MODEL"] ?? "multilingual"))
         let version: AsrModelVersion
@@ -99,7 +97,6 @@ final class AcousticASRBenchmarkTests: XCTestCase {
             await manager.cleanup()
             throw error
         }
-        #endif
     }
 
     private func read(_ fixture: GoldenSpeechFixture) throws -> [Float] {
@@ -121,3 +118,4 @@ final class AcousticASRBenchmarkTests: XCTestCase {
         return samples.map { $0 * applied }
     }
 }
+#endif

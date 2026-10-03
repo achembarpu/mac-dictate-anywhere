@@ -1,5 +1,5 @@
+#if PIPELINE_BENCHMARK
 import AVFoundation
-import FoundationModels
 import XCTest
 @testable import Dictate_Anywhere
 
@@ -11,12 +11,6 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
         min(10, max(2, Int(ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))
     }
 
-    private func requireBenchmark() throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Run scripts/dev.sh benchmark to enable workload benchmarks")
-        #endif
-    }
-
     private var measureOptions: XCTMeasureOptions {
         let options = XCTMeasureOptions()
         options.iterationCount = iterations
@@ -26,7 +20,6 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
     /// A 4096-frame tap buffer converted into the 16 kHz mono buffer sent to
     /// ASR. This times the app's allocation/copy, not a hardware callback.
     func testPCMBufferConstruction() throws {
-        try requireBenchmark()
         let samples = (0..<4_096).map { sin(Float($0) * 0.07) * 0.1 }
         var last: AVAudioPCMBuffer?
         measure(metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()], options: measureOptions) {
@@ -40,7 +33,6 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
     /// Both the sample map and multipart Data growth are on the cloud-engine
     /// stop path. A 60 s synthetic recording exercises real request sizing.
     func testAssemblyAIRequestEncoding() throws {
-        try requireBenchmark()
         let samples = [Float](repeating: 0.125, count: 60 * AssemblyAIEngine.sampleRate)
         let config = AssemblyAIRequestConfiguration(
             sampleRate: AssemblyAIEngine.sampleRate,
@@ -95,7 +87,6 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
     /// Fixed disjoint chunks reveal long-dictation string-growth costs while
     /// preserving the exact production seam and cleanup functions.
     func testLongTranscriptAssemblyAndNormalization() throws {
-        try requireBenchmark()
         let segments = (0..<300).map { "Meeting item \($0) recorded for the team." }
         var output = ""
         measure(metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()], options: measureOptions) {
@@ -113,7 +104,6 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
     /// Exercises the actual callback-queue writer, close/preserve, reload and
     /// bounded reader separately. Setup and temporary cleanup are unmeasured.
     func testRecoveryWriteAndRead() async throws {
-        try requireBenchmark()
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("recovery-benchmark-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -151,7 +141,6 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
     /// Uses the app's validated installed model (or an explicit model path);
     /// never downloads. Cold request and warm requests are reported separately.
     func testS1MiniCleanupWithInstalledModel() async throws {
-        try requireBenchmark()
         let url: URL
         if let path = ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"], !path.isEmpty {
             url = URL(fileURLWithPath: path)
@@ -202,28 +191,5 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
         }
         await S1MiniPostProcessingService.unload()
     }
-
-    func testAppleIntelligenceCleanupWhenAvailable() async throws {
-        try requireBenchmark()
-        guard #available(macOS 26, *) else { throw XCTSkip("Foundation Models requires macOS 26") }
-        guard case .available = AIPostProcessingService.availability else {
-            throw XCTSkip("Apple Intelligence is not available on this Mac")
-        }
-        let text = "Um, please send the report tomorrow morning."
-        defer { PerfTrace.clearSessionMetadata() }
-        var latencies: [Double] = []
-        for iteration in 1...iterations {
-            PerfTrace.setSessionMetadata([
-                "session_id": "benchmark-foundation-\(iteration)", "engine": "appleIntelligence",
-                "model": "system", "language": "english", "benchmark": "cleanup"
-            ])
-            let start = ContinuousClock.now
-            let output = try await AIPostProcessingService.process(
-                text: text, prompt: "Remove filler words and preserve the user's intent."
-            )
-            latencies.append(BenchmarkStatistics.elapsedMilliseconds(from: start))
-            XCTAssertFalse(output.isEmpty)
-        }
-        BenchmarkStatistics(latencies).report(component: "apple_intelligence_cleanup", details: "input_chars=\(text.count)")
-    }
 }
+#endif

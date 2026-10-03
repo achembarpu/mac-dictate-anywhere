@@ -55,3 +55,22 @@ func benchmarkWordErrorRate(reference: String, hypothesis: String) -> Double {
     }
     return Double(previous[actual.count]) / Double(expected.count)
 }
+
+/// Character error rate over punctuation-and-whitespace-stripped text.
+func characterErrorRate(reference: String, hypothesis: String) -> Double {
+    func strip(_ s: String) -> [Character] {
+        s.filter { !$0.isPunctuation && !$0.isWhitespace && !$0.isSymbol }.map { $0 }
+    }
+    let ref = strip(reference), hyp = strip(hypothesis)
+    guard !ref.isEmpty else { return hyp.isEmpty ? 0 : 1 }
+    var dist = Array(0...hyp.count)
+    for i in 1...ref.count {
+        var prev = dist[0]; dist[0] = i
+        for j in 1...max(hyp.count, 1) where !hyp.isEmpty {
+            let cost = ref[i-1] == hyp[j-1] ? 0 : 1
+            let next = min(dist[j] + 1, dist[j-1] + 1, prev + cost)
+            prev = dist[j]; dist[j] = next
+        }
+    }
+    return Double(dist[hyp.count]) / Double(ref.count)
+}

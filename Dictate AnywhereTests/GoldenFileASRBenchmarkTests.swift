@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import Foundation
 import XCTest
 @testable import Dictate_Anywhere
@@ -7,9 +8,6 @@ import XCTest
 @MainActor
 final class GoldenFileASRBenchmarkTests: XCTestCase {
     func testInstalledModelsDecodeCompleteGoldenFiles() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --release --only asr-file")
-        #else
         let environment = ProcessInfo.processInfo.environment
         let name = environment["PIPELINE_BENCHMARK_MODEL"] ?? "multilingual"
         let models = name == "all" ? ParakeetModelChoice.allCases : [try XCTUnwrap(ParakeetModelChoice(rawValue: name))]
@@ -70,6 +68,6 @@ final class GoldenFileASRBenchmarkTests: XCTestCase {
             // releases this engine rather than retaining a model ensemble.
         }
         try XCTSkipUnless(ran > 0, "No installed model supports the selected files")
-        #endif
     }
 }
+#endif

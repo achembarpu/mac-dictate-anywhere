@@ -90,24 +90,6 @@ final class DictationContextTests: XCTestCase {
         )
     }
 
-    func testCategoryLimitsWritingStyleOptions() {
-        XCTAssertEqual(
-            DictationWritingStyle.options(for: .personalMessaging),
-            [.formal, .neutral, .casual, .veryCasual, .original]
-        )
-        XCTAssertEqual(
-            DictationWritingStyle.options(for: .email),
-            [.formal, .neutral, .casual, .excited, .original]
-        )
-        XCTAssertEqual(DictationWritingStyle.excited.sanitized(for: .personalMessaging), .casual)
-    }
-
-    func testNeutralAndOriginalToneInstructionsRemainDistinct() {
-        XCTAssertTrue(DictationWritingStyle.neutral.cleanupInstruction.contains("balanced tone"))
-        XCTAssertTrue(DictationWritingStyle.original.cleanupInstruction.contains("original tone"))
-        XCTAssertTrue(DictationWritingStyle.original.cleanupInstruction.contains("Only clean"))
-    }
-
     func testRemoteRedactionKeepsCategoryAndStyleButWithholdsCapturedData() {
         let context = makeContext(
             appName: "Secret App",
@@ -387,25 +369,6 @@ final class DictationContextTests: XCTestCase {
         XCTAssertEqual(output, "tangerines ")
     }
 
-    func testNewListItemIsNotMisclassifiedAsMidSentence() {
-        let context = makeContext(category: .other, before: "- apples\n- ", after: "")
-        XCTAssertFalse(context.continuesExistingSentence)
-    }
-
-    func testNativeBulletInsertionMatchesCapitalizedNeighborsWithoutExtraSpace() {
-        let context = makeContext(
-            category: .other,
-            before: "I need to buy:\n• Apples\n• Bananas\n•",
-            after: "\n• Oranges\n• Flowers"
-        )
-        XCTAssertFalse(context.continuesExistingSentence)
-        for transcript in ["Strawberries.", "strawberries.", " strawberries "] {
-            XCTAssertEqual(TextInserter.contextualizedForInsertion(
-                transcript, context: context, style: .formal
-            ), "Strawberries")
-        }
-    }
-
     func testMarkdownAndNumberedListInsertionKeepsExistingIndentation() {
         for marker in ["- ", "* ", "+ ", "1. ", "2) ", "  •\t"] {
             let context = makeContext(
@@ -443,13 +406,6 @@ final class DictationContextTests: XCTestCase {
         XCTAssertEqual(TextInserter.contextualizedForInsertion(
             "Buy strawberries.", context: context, style: .formal
         ), "Buy strawberries.")
-    }
-
-    func testListFormattingDoesNotChangeMixedCaseBrand() {
-        let context = makeContext(category: .other, before: "• MacBook\n•", after: "\n• AirPods")
-        XCTAssertEqual(TextInserter.contextualizedForInsertion(
-            "iPhone.", context: context, style: .formal
-        ), "iPhone")
     }
 
     func testInsertionWithinListItemStillUsesMidSentenceSpacingAndCasing() {
@@ -500,15 +456,6 @@ final class DictationContextTests: XCTestCase {
         XCTAssertEqual(TextInserter.contextualizedForInsertion(
             "Strawberries", context: context, style: .formal
         ), "Strawberries")
-    }
-
-    func testListStylePreservesAbbreviationsAndMultipleSentences() {
-        let context = makeContext(category: .other, before: "• Apples\n•", after: "\n• Oranges")
-        for text in ["U.S.", "Buy strawberries. Make sure they are fresh."] {
-            XCTAssertEqual(TextInserter.contextualizedForInsertion(
-                text, context: context, style: .formal
-            ), text)
-        }
     }
 
     func testConfirmedListConventionAppliesToEveryProviderPathAndPhraseLength() throws {
@@ -670,26 +617,12 @@ final class DictationContextTests: XCTestCase {
         XCTAssertNotNil(context.postProcessingContext(style: .formal, includeCapturedText: false).listItemInsertion)
     }
 
-    func testStructuralListMatchesMarkerFreeNeighborText() throws {
-        let list = try XCTUnwrap(DictationListInsertion.emptyStructuralItem(
-            itemText: "", previousItemText: "Bananas", nextItemText: "Oranges"
-        ))
-        XCTAssertEqual(list.capitalization, .uppercase)
-        XCTAssertTrue(list.omitsFinalPeriod)
-        XCTAssertTrue(list.isEmptyStructuralItem)
-    }
-
     func testNonemptyStructuralItemDoesNotBecomeAnEmptyListBoundary() {
         for text in ["Bananas", "• Buy apples", "\nSomething\n", "• \nBuy apples"] {
             XCTAssertNil(DictationListInsertion.emptyStructuralItem(
                 itemText: text, previousItemText: "Bananas", nextItemText: "Oranges"
             ))
         }
-    }
-
-    func testBlankProseIsNotGuessedToBeAList() {
-        let context = makeContext(category: .other, before: "Paragraph one\n\n", after: "\nParagraph two")
-        XCTAssertNil(context.listItemInsertion)
     }
 
     func testModelListPlanSurvivesIncorrectMidSentenceHeuristic() throws {

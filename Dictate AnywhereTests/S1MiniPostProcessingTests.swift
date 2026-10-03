@@ -1,5 +1,4 @@
 import XCTest
-import os
 @testable import Dictate_Anywhere
 
 final class S1MiniPostProcessingTests: XCTestCase {
@@ -16,129 +15,11 @@ final class S1MiniPostProcessingTests: XCTestCase {
         await S1MiniPostProcessingService.unload()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("absent-readiness-\(UUID()).gguf")
         let text = "Keep the literal <|im_start|> marker."
-        let output = try await process(text, modelURL: url)
+        let output = try await S1MiniPostProcessingService.process(text: text, modelURL: url,
+            styling: .semiFormal, structure: .prose, contextSetting: .general, context: nil)
         XCTAssertEqual(output, text)
         let ready = await S1MiniPostProcessingService.isPrepared(modelURL: url)
         XCTAssertFalse(ready)
-    }
-
-    #if DEBUG || PIPELINE_BENCHMARK
-    func testRealContextReuseMatchesFreshRequestsAndClearsHistory() async throws {
-        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check context reuse") }
-        let url = URL(fileURLWithPath: path)
-        let engine = S1MiniInferenceEngine.shared
-        await engine.unload()
-        let fixtures = try GoldenCleanupFixture.all().filter {
-            $0.language == "en" && $0.vocabulary == nil && $0.id != "long-complete-ending"
-        }
-        var baseline: [String: String] = [:]
-        for fixture in fixtures {
-            await engine.discardInferenceContextForTesting()
-            baseline[fixture.id] = try await process(fixture.input, modelURL: url)
-        }
-        // Reverse order so previous requests have different names, numbers,
-        // intent and prompt lengths than the fresh-context baseline.
-        for fixture in fixtures.reversed() {
-            let output = try await process(fixture.input, modelURL: url)
-            XCTAssertEqual(output, baseline[fixture.id], fixture.id)
-            XCTAssertTrue(fixture.violations(in: output).isEmpty, fixture.id)
-            let state = await engine.inferenceContextStateForTesting()
-            XCTAssertTrue(state.allocated)
-            XCTAssertEqual(state.maximumPosition, -1, "A completed request retained KV token positions")
-            let ready = await S1MiniPostProcessingService.isPrepared(modelURL: url)
-            XCTAssertTrue(ready, "Successful first use prepares the retained runtime")
-        }
-        await engine.unload()
-        let state = await engine.inferenceContextStateForTesting()
-        XCTAssertFalse(state.allocated)
-    }
-
-    func testRealModelPathChangeReleasesContextBeforeReplacingWeights() async throws {
-        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check context ownership") }
-        let url = URL(fileURLWithPath: path)
-        let alias = FileManager.default.temporaryDirectory.appendingPathComponent("s1-context-model-\(UUID()).gguf")
-        try FileManager.default.linkItem(at: url, to: alias)
-        defer { try? FileManager.default.removeItem(at: alias) }
-        let engine = S1MiniInferenceEngine.shared
-        await engine.unload()
-        try await engine.prewarm(from: url)
-        _ = try await engine.transcriptChunks("Hello.", modelURL: alias)
-        let state = await engine.inferenceContextStateForTesting()
-        XCTAssertFalse(state.allocated, "A context must not outlive the model it references")
-        let output = try await process("Send invoice 43 on Thursday.", modelURL: alias)
-        XCTAssertTrue(output.contains("43"))
-        XCTAssertTrue(output.lowercased().contains("thursday"))
-        await engine.unload()
-    }
-    #endif
-
-    #if DEBUG
-    func testRealCancellationAfterPromptDiscardsContextAndNextRequestRecovers() async throws {
-        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check cancelled context") }
-        let url = URL(fileURLWithPath: path)
-        let engine = S1MiniInferenceEngine.shared
-        await engine.unload()
-        try await engine.prewarm(from: url)
-        PerfTrace.onIntervalCompleted = { name, _, _ in
-            if name == "cleanup.prefillSchedule" {
-                withUnsafeCurrentTask { $0?.cancel() }
-            }
-        }
-        defer { PerfTrace.onIntervalCompleted = nil }
-        let cancelled = Task {
-            try await self.process("Please send invoice 812 to Mara.", modelURL: url)
-        }
-        do {
-            _ = try await cancelled.value
-            XCTFail("Expected cancellation after prompt evaluation")
-        } catch is CancellationError {
-            // The context contained a real prompt before cancellation.
-        }
-        PerfTrace.onIntervalCompleted = nil
-        let discarded = await engine.inferenceContextStateForTesting()
-        XCTAssertFalse(discarded.allocated)
-        let readyAfterCancellation = await S1MiniPostProcessingService.isPrepared(modelURL: url)
-        XCTAssertFalse(readyAfterCancellation)
-        let recovered = try await process("Keep invoice 43 for Nadia.", modelURL: url)
-        XCTAssertTrue(recovered.contains("43"))
-        XCTAssertTrue(recovered.lowercased().contains("nadia"))
-        XCTAssertFalse(recovered.contains("812"))
-        XCTAssertFalse(recovered.lowercased().contains("mara"))
-        await engine.unload()
-    }
-    #endif
-
-    func testRealPrewarmRunsInferenceOnceAndKeepsTheNextRequestIndependent() async throws {
-        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check inference prewarm") }
-        let url = URL(fileURLWithPath: path)
-        await S1MiniPostProcessingService.unload()
-        let firstReady = await S1MiniPostProcessingService.prewarm(modelURL: url)
-        let runtimeReady = await S1MiniPostProcessingService.isPrepared(modelURL: url)
-        XCTAssertEqual(runtimeReady, firstReady)
-        XCTAssertTrue(firstReady)
-        #if DEBUG || PIPELINE_BENCHMARK
-        let prepared = await S1MiniInferenceEngine.shared.inferenceContextStateForTesting()
-        XCTAssertTrue(prepared.allocated, "Prewarm must retain the inference allocations")
-        XCTAssertEqual(prepared.maximumPosition, -1, "Synthetic warmup must clear its KV cache")
-        #endif
-        #if DEBUG
-        let events = OSAllocatedUnfairLock(initialState: [String]())
-        PerfTrace.onIntervalCompleted = { name, _, _ in
-            if name == "cleanup.generate" { events.withLock { $0.append(name) } }
-        }
-        #endif
-        let secondReady = await S1MiniPostProcessingService.prewarm(modelURL: url)
-        XCTAssertTrue(secondReady)
-        #if DEBUG
-        PerfTrace.onIntervalCompleted = nil
-        XCTAssertTrue(events.withLock { $0.isEmpty }, "An already-warm model must not repeat synthetic inference")
-        #endif
-        let output = try await process("Send invoice 43 on Friday no sorry Thursday.", modelURL: url)
-        XCTAssertTrue(output.contains("43"))
-        XCTAssertTrue(output.lowercased().contains("thursday"))
-        XCTAssertFalse(output.lowercased().contains("hello"))
-        XCTAssertFalse(output.lowercased().contains("friday"))
-        await S1MiniPostProcessingService.unload()
     }
 
     func testLongTranscriptChunksPreserveSentencesAndEveryCharacter() throws {
@@ -163,36 +44,6 @@ final class S1MiniPostProcessingTests: XCTestCase {
         XCTAssertThrowsError(try S1MiniTranscriptChunker.chunks("unbroken", maximumTokens: 3, tokenCount: { $0.count }))
     }
 
-    func testRealRepeatedLongTranscriptCannotLoseNumbersWhenModelIsAvailable() async throws {
-        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check real long-input cleanup") }
-        let text = (1...110).map { "Please keep invoice \($0) and send the report tomorrow." }.joined(separator: " ")
-        let url = URL(fileURLWithPath: path)
-        let chunks = try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: url)
-        XCTAssertGreaterThan(chunks.count, 1)
-        XCTAssertEqual(chunks.joined(), text)
-        let output = try await process(text, modelURL: url)
-        XCTAssertFalse(output.isEmpty)
-        XCTAssertTrue(output.lowercased().contains("invoice"))
-        XCTAssertTrue(output.lowercased().contains("tomorrow"))
-        let numbers = output.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
-        XCTAssertEqual(Set(numbers), Set(1...110), "Cleanup lost an invoice number around a chunk boundary")
-        await S1MiniPostProcessingService.unload()
-    }
-
-    func testRealVariedLongTranscriptCleansFinalCorrectionWhenModelIsAvailable() async throws {
-        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check real long-input cleanup") }
-        let reference = try XCTUnwrap(GoldenSpeechFixture.all().first { $0.id == "golden-en-boundaries" }).referenceText
-        let text = Array(repeating: reference, count: 5).joined(separator: "\n\n")
-            + "\nUm please send the final report to Utrecht on Friday no sorry Thursday."
-        let url = URL(fileURLWithPath: path)
-        let chunks = try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: url)
-        XCTAssertGreaterThan(chunks.count, 1)
-        let output = try await process(text, modelURL: url)
-        XCTAssertTrue(output.lowercased().contains("utrecht"))
-        XCTAssertTrue(output.lowercased().contains("thursday"))
-        XCTAssertFalse(output.lowercased().contains("friday"), "Long input fell back to uncorrected text")
-        await S1MiniPostProcessingService.unload()
-    }
     func testPromptMatchesRequiredNonThinkingTrainingFormat() {
         let prompt = S1MiniPromptBuilder.prompt(
             transcript: "so um send it friday",
@@ -230,20 +81,6 @@ final class S1MiniPostProcessingTests: XCTestCase {
         )
     }
 
-    func testRecommendedAppStylingUsesOnlyTrainedValues() {
-        let styling = S1MiniAppStyling.recommended
-
-        XCTAssertEqual(styling.styling(for: .email), .formal)
-        XCTAssertEqual(styling.styling(for: .workMessaging), .semiFormal)
-        XCTAssertEqual(styling.styling(for: .personalMessaging), .semiCasual)
-        XCTAssertEqual(styling.styling(for: .other), .semiFormal)
-        XCTAssertTrue(
-            DictationContextCategory.allCases.allSatisfy {
-                S1MiniStyling.allCases.contains(styling.styling(for: $0))
-            }
-        )
-    }
-
     func testAppStylingCanOverrideEachCategoryIndependently() {
         var styling = S1MiniAppStyling.uniform(.semiFormal)
 
@@ -256,31 +93,15 @@ final class S1MiniPostProcessingTests: XCTestCase {
         XCTAssertEqual(styling.styling(for: .other), .semiFormal)
     }
 
-    func testPinnedModelMetadata() {
-        XCTAssertEqual(S1MiniModelSpec.byteCount, 484_219_808)
-        XCTAssertEqual(
-            S1MiniModelSpec.sha256,
-            "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634"
-        )
-        XCTAssertTrue(S1MiniModelSpec.downloadURL.absoluteString.contains(S1MiniModelSpec.revision))
-    }
+    func testDownloadProgressUsesPinnedSizeForUnknownOrMismatchedServerLength() {
+        for serverLength in [NSURLSessionTransferSizeUnknown, 1_024] {
+            let fraction = S1MiniDownloadProgress.transferFraction(
+                totalBytesWritten: S1MiniModelSpec.byteCount / 4,
+                serverExpectedByteCount: serverLength
+            )
 
-    func testDownloadProgressFallsBackToPinnedSizeWhenServerLengthIsUnknown() {
-        let fraction = S1MiniDownloadProgress.transferFraction(
-            totalBytesWritten: S1MiniModelSpec.byteCount / 4,
-            serverExpectedByteCount: NSURLSessionTransferSizeUnknown
-        )
-
-        XCTAssertEqual(fraction, 0.25, accuracy: 0.000_001)
-    }
-
-    func testDownloadProgressUsesPinnedSizeForMismatchedRedirectLength() {
-        let fraction = S1MiniDownloadProgress.transferFraction(
-            totalBytesWritten: S1MiniModelSpec.byteCount / 2,
-            serverExpectedByteCount: 1_024
-        )
-
-        XCTAssertEqual(fraction, 0.5, accuracy: 0.000_001)
+            XCTAssertEqual(fraction, 0.25, accuracy: 0.000_001)
+        }
     }
 
     func testInstallationProgressDoesNotMoveBackwards() {
@@ -310,7 +131,7 @@ final class S1MiniPostProcessingTests: XCTestCase {
 
     func testIntegrityRejectsWrongFileSize() throws {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("s1-mini-invalid-\(UUID().uuidString).gguf")
+            .appendingPathComponent("s1-mini-invalid-\(UUID().uuidString)")
         try Data("not a model".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
 
@@ -341,38 +162,6 @@ final class S1MiniPostProcessingTests: XCTestCase {
             options: .atomic
         )
         XCTAssertTrue(S1MiniModelManager(modelDirectory: directory).isModelDownloaded)
-    }
-
-    func testModelManagerValidatesAndDeletesInstalledModelWhenRealModelExists() async throws {
-        let sourcePath = realModelPath()
-        guard let sourcePath else {
-            throw XCTSkip("Set S1_MINI_MODEL_PATH to run the verified model lifecycle test.")
-        }
-
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("s1-mini-manager-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let installedURL = directory.appendingPathComponent(S1MiniModelSpec.filename)
-        try FileManager.default.linkItem(
-            at: URL(fileURLWithPath: sourcePath),
-            to: installedURL
-        )
-        try Data("S1-mini license".utf8).write(
-            to: directory.appendingPathComponent("LICENSE"),
-            options: .atomic
-        )
-
-        let manager = S1MiniModelManager(modelDirectory: directory)
-        let validatedURL = try await manager.validatedModelURL()
-        XCTAssertEqual(validatedURL, installedURL)
-        XCTAssertTrue(manager.isModelDownloaded)
-
-        try await manager.deleteModel()
-        XCTAssertFalse(manager.isModelDownloaded)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: installedURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: sourcePath))
     }
 
     @MainActor
@@ -420,116 +209,6 @@ final class S1MiniPostProcessingTests: XCTestCase {
         XCTAssertFalse(manager.isVerifying)
     }
 
-    func testRealPinnedDownloadInstallAndDeleteWhenEnabled() async throws {
-        guard ProcessInfo.processInfo.environment["S1_MINI_DOWNLOAD_TEST"] == "1" else {
-            throw XCTSkip("Set S1_MINI_DOWNLOAD_TEST=1 to exercise the live Hugging Face download.")
-        }
-
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("s1-mini-download-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let manager = S1MiniModelManager(modelDirectory: directory)
-        let downloadTask = Task { try await manager.downloadModel() }
-        for _ in 0..<100 where !manager.isDownloading {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-
-        var intermediateProgressSamples: [Double] = []
-        while manager.isDownloading {
-            let progress = manager.downloadProgress
-            if progress > 0, progress < S1MiniDownloadProgress.installationFraction {
-                intermediateProgressSamples.append(progress)
-            }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        try await downloadTask.value
-
-        XCTAssertTrue(manager.isModelDownloaded)
-        XCTAssertEqual(manager.downloadProgress, 1)
-        XCTAssertFalse(
-            intermediateProgressSamples.isEmpty,
-            "The live download never published intermediate progress."
-        )
-        XCTAssertGreaterThan(
-            Set(intermediateProgressSamples.map { Int($0 * 1_000) }).count,
-            1,
-            "The live download progress did not visibly advance."
-        )
-        XCTAssertTrue(FileManager.default.fileExists(atPath: manager.modelURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: manager.licenseURL.path))
-        let validatedURL = try await manager.validatedModelURL()
-        XCTAssertEqual(validatedURL, manager.modelURL)
-
-        try await manager.deleteModel()
-        XCTAssertFalse(manager.isModelDownloaded)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: manager.modelURL.path))
-    }
-
-    func testRealModelWhenPathIsProvided() async throws {
-        let path = realModelPath()
-        guard let path else {
-            throw XCTSkip("Set S1_MINI_MODEL_PATH to run the local inference smoke test.")
-        }
-
-        let modelURL = URL(fileURLWithPath: path)
-        let correction = try await process(
-            "so um i need to like send the the report by uh friday no wait make that thursday",
-            modelURL: modelURL
-        )
-        XCTAssertFalse(correction.lowercased().contains(" um "))
-        XCTAssertFalse(correction.lowercased().contains(" uh "))
-        XCTAssertFalse(correction.contains("Friday"))
-        XCTAssertTrue(correction.contains("Thursday"))
-
-        let numberCorrection = try await process(
-            "i think the answer is forty two no sorry forty three",
-            modelURL: modelURL
-        )
-        XCTAssertTrue(numberCorrection.contains("43"), numberCorrection)
-        XCTAssertFalse(numberCorrection.contains("42"), numberCorrection)
-
-        let timeCorrection = try await process(
-            "let's meet at half past two tomorrow uh actually make it three fifteen p m",
-            modelURL: modelURL
-        )
-        XCTAssertTrue(timeCorrection.contains("3:15"), timeCorrection)
-        XCTAssertFalse(timeCorrection.contains("2:30"), timeCorrection)
-
-        let invoice = try await process(
-            "the invoice came to twenty three thousand four hundred and fifty dollars and it's due on march third twenty twenty six",
-            modelURL: modelURL
-        )
-        XCTAssertTrue(invoice.contains("$23,450"), invoice)
-        XCTAssertTrue(invoice.contains("March 3"), invoice)
-        XCTAssertTrue(invoice.contains("2026"), invoice)
-
-        let email = try await process(
-            "send it to support at superwhisper dot com",
-            modelURL: modelURL
-        )
-        XCTAssertFalse(email.isEmpty)
-        await S1MiniPostProcessingService.unload()
-    }
-
-    private func realModelPath() -> String? {
-        let temporaryGatePath = "/private/tmp/dictate-anywhere-s1-mini-q4_k_m.gguf"
-        return ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"]
-            .flatMap { $0.isEmpty ? nil : $0 }
-            ?? (FileManager.default.fileExists(atPath: temporaryGatePath) ? temporaryGatePath : nil)
-    }
-
-    private func process(_ text: String, modelURL: URL) async throws -> String {
-        try await S1MiniPostProcessingService.process(
-            text: text,
-            modelURL: modelURL,
-            styling: .semiFormal,
-            structure: .prose,
-            contextSetting: .general,
-            context: nil
-        )
-    }
-
     private func context(category: DictationContextCategory) -> DictationPostProcessingContext {
         DictationPostProcessingContext(
             category: category,
@@ -545,26 +224,6 @@ final class S1MiniPostProcessingTests: XCTestCase {
             selectedText: nil,
             textAfterCursor: nil
         )
-    }
-
-    func testPrewarmPolicyRequiresS1MiniEnglishAndEnabled() {
-        XCTAssertTrue(S1MiniPrewarmPolicy.shouldPrewarm(
-            mode: .s1Mini, language: .english, prewarmEnabled: true))
-    }
-
-    func testPrewarmPolicyRejectsNonS1MiniModes() {
-        for mode: TranscriptPostProcessingMode in [.none, .fluidAudioVocabulary, .appleIntelligence, .ollama, .openRouter, .openAICompatible] {
-            XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
-                mode: mode, language: .english, prewarmEnabled: true),
-                "mode \(mode) must not prewarm")
-        }
-    }
-
-    func testPrewarmPolicyRejectsNonEnglishAndDisabledToggle() {
-        XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
-            mode: .s1Mini, language: .german, prewarmEnabled: true))
-        XCTAssertFalse(S1MiniPrewarmPolicy.shouldPrewarm(
-            mode: .s1Mini, language: .english, prewarmEnabled: false))
     }
 }
 

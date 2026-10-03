@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import XCTest
 @testable import Dictate_Anywhere
 
@@ -59,3 +60,4 @@ final class ModelSwitchBenchmarkTests: XCTestCase {
         }
     }
 }
+#endif

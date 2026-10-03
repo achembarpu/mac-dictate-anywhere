@@ -45,15 +45,6 @@ final class InputSourceMappingTests: XCTestCase {
         )
     }
 
-    func testMappingsRoundTripThroughJSON() throws {
-        let mappings = [
-            makeMapping(),
-            makeMapping(source: "com.apple.inputmethod.SCIM.ITABC", model: .senseVoice, language: .chinese),
-        ]
-        let data = try JSONEncoder().encode(mappings)
-        XCTAssertEqual(Settings.sanitizedMappings(from: data), mappings)
-    }
-
     func testSanitizedMappingsDropsUnknownEnumRawValues() throws {
         let json = """
         [

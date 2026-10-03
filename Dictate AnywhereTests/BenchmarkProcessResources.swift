@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import Darwin
 import Foundation
 
@@ -19,3 +20,4 @@ struct BenchmarkProcessResources {
             peakResidentBytes: Int64(usage.ru_maxrss))
     }
 }
+#endif

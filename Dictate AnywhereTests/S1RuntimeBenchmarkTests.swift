@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import Foundation
 import XCTest
 @testable import Dictate_Anywhere
@@ -112,3 +113,4 @@ final class S1RuntimeBenchmarkTests: XCTestCase {
         #endif
     }
 }
+#endif

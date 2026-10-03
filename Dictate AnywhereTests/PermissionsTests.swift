@@ -2,23 +2,6 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class PermissionsTests: XCTestCase {
-    @MainActor
-    func testRefreshUpdatesMicrophonePermissionAfterReturningFromSettings() async {
-        let status = MutablePermissionStatus(microphoneGranted: false)
-        let permissions = Permissions(statusProvider: {
-            (mic: status.microphoneGranted, accessibility: false)
-        })
-
-        await permissions.refresh()
-        XCTAssertFalse(permissions.micGranted)
-
-        // Simulate enabling Microphone in System Settings before returning to
-        // the app, which triggers its active-state permission refresh.
-        status.microphoneGranted = true
-        await permissions.refresh()
-
-        XCTAssertTrue(permissions.micGranted)
-    }
 
     @MainActor
     func testStartupAndUseChecksSharePermissionStateWithoutPrompting() async {

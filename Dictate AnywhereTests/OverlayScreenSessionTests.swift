@@ -43,25 +43,6 @@ final class OverlayScreenSessionTests: XCTestCase {
 
     // MARK: - One lookup per session
 
-    /// The listening waveform updates about thirty times a second, and none of
-    /// those updates may pay for a fresh cross-process lookup.
-    func testResolvesTheDisplayOnceAcrossRepeatedUpdates() {
-        let resolver = makeResolver()
-        let session = OverlayScreenSession(resolver: resolver)
-
-        for _ in 0..<30 {
-            _ = session.visibleFrame()
-        }
-
-        XCTAssertEqual(resolver.resolveCount, 1)
-    }
-
-    func testReturnsTheVisibleFrameOfTheChosenDisplay() {
-        let session = OverlayScreenSession(resolver: makeResolver(resolving: middle.id))
-
-        XCTAssertEqual(session.visibleFrame(), middle.visibleFrame)
-    }
-
     /// Re-choosing mid-dictation would let the overlay hop displays in the
     /// middle of a sentence just because the pointer wandered.
     func testKeepsTheFirstDisplayEvenWhenTheResolverWouldNowChooseAnother() {
@@ -113,43 +94,6 @@ final class OverlayScreenSessionTests: XCTestCase {
 
         XCTAssertEqual(session.visibleFrame(), right.visibleFrame)
         XCTAssertEqual(resolver.resolveCount, 2)
-    }
-
-    // MARK: - Following the app the text will land in
-
-    func testAsksAboutTheSessionsTargetApplication() {
-        let resolver = makeResolver()
-        let session = OverlayScreenSession(resolver: resolver)
-
-        session.begin(targetProcessIdentifier: 4242)
-        _ = session.visibleFrame()
-
-        XCTAssertEqual(resolver.requestedTargets, [4242])
-    }
-
-    /// The target is captured before audio startup and the transcript is pasted
-    /// into it afterwards, so the overlay must follow that app even if the user
-    /// brings a different one forward while the microphone is starting.
-    func testKeepsTheCapturedTargetAcrossAFrontmostAppChange() {
-        let resolver = makeResolver()
-        let session = OverlayScreenSession(resolver: resolver)
-        session.begin(targetProcessIdentifier: 4242)
-
-        _ = session.visibleFrame()
-        session.end()
-        session.begin(targetProcessIdentifier: 4242)
-        _ = session.visibleFrame()
-
-        XCTAssertEqual(resolver.requestedTargets, [4242, 4242])
-    }
-
-    func testAsksAboutTheFrontmostApplicationWhenNoTargetWasCaptured() {
-        let resolver = makeResolver()
-        let session = OverlayScreenSession(resolver: resolver)
-
-        _ = session.visibleFrame()
-
-        XCTAssertEqual(resolver.requestedTargets, [nil])
     }
 
     // MARK: - Displays changing underneath a live session

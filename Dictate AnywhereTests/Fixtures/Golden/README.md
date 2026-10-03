@@ -87,7 +87,7 @@ speaker of each gender and references without Latin parenthetical translations.
 From the repo root, after local Team ID signing and installing the chosen models:
 
 ```sh
-# Paired parent/current production policy and one golden quality benchmark.
+# Current production replay on one independent golden reference.
 PIPELINE_BENCHMARK_MODEL=multilingual \
 PIPELINE_BENCHMARK_FIXTURE=golden-en-boundaries \
 PIPELINE_BENCHMARK_ITERATIONS=3 scripts/dev.sh benchmark --release --only asr-quality
@@ -103,7 +103,7 @@ PIPELINE_BENCHMARK_ITERATIONS=3 scripts/dev.sh benchmark --release --only asr-qu
 # Explicitly install missing models into the app cache before that inventory.
 PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1 PIPELINE_BENCHMARK_GOLDEN=1 \
 PIPELINE_BENCHMARK_MODEL=all PIPELINE_BENCHMARK_ITERATIONS=3 \
-scripts/dev.sh benchmark --release --only asr-quality
+scripts/dev.sh benchmark --release --only model-setup,asr-quality
 ```
 
 WER ignores case and punctuation while retaining letters and numbers. Mandarin
@@ -111,10 +111,9 @@ and the bilingual composite use CER, ignoring case, width, whitespace,
 punctuation and symbols. Number-format differences still count as errors.
 References must not be edited to match a model's output. Add new IDs and provenance
 for new evidence; keep evaluation fixtures separate from training data. Compare
-the same model, fixture, machine, SDK revision and build configuration. The paired
-policy benchmark checks mean final error and total processing time against the
-parent policy; the broader quality inventory reports errors without arbitrary
-universal thresholds. Consult `docs/performance-benchmarking.md` for limitations.
+the same model, fixture, machine, SDK revision and build configuration. Current
+quality inventory reports errors without arbitrary universal thresholds. The
+retired parent-policy comparisons remain historical evidence in Git. Consult `docs/performance-benchmarking.md` for limitations.
 
 ## Cleanup references
 
@@ -167,11 +166,11 @@ are outside its card's stated languages. OpenRouter tests require explicit
 `PIPELINE_BENCHMARK_CLEANUP_API_KEY`; they make billable requests. Never commit
 keys or benchmark transcripts from private dictation.
 
-`LegacyAppleCleanupBenchmark.swift` freezes the production Apple implementation
-at `54a27e9` for future comparisons. It is test-only. The normal app never invokes
-that baseline, old tools, old output cap or an experimental decoder. Each Apple
-fixture gives the new prepared session at least one second of lead time, per
-Apple's docs; that wait is outside request latency. Product recording does not
+Apple cleanup checks the current production implementation against independent
+required facts and verifies request isolation. The retired frozen baseline and
+its source revision remain in Git for historical comparisons. Each Apple fixture
+gives the prepared session at least one second of lead time; that wait is outside
+request latency. Product recording does not
 insert such a delay. Apple Speech compares two fresh sessions using the same
 production preset; the first is not a forced OS/model-cache-cold measurement.
 

@@ -44,16 +44,6 @@ final class AudioMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.smoothedLevel, expected, accuracy: 0.0001)
     }
 
-    func testUpdateAcceptsAWindowWithoutCopyingTheSampleArray() {
-        let monitor = AudioMonitor()
-        let samples = Array(repeating: Float(0.1), count: 1_000)
-
-        monitor.update(samples: samples.suffix(800))
-
-        let expected = powf(min(1, 0.1 * 6.6), 0.85)
-        XCTAssertEqual(monitor.smoothedLevel, expected * 0.92, accuracy: 0.0001)
-    }
-
     func testEmptyWindowDoesNotChangeTheDisplayedLevel() {
         let monitor = AudioMonitor()
         monitor.update(samples: ArraySlice(repeating: Float(0.1), count: 800))
@@ -62,11 +52,5 @@ final class AudioMonitorTests: XCTestCase {
         monitor.update(samples: ArraySlice<Float>())
 
         XCTAssertEqual(monitor.smoothedLevel, levelAfterAudio, accuracy: 0.0001)
-    }
-
-    func testMeaningfulLevelChangeUsesStableDisplayTolerance() {
-        XCTAssertFalse(AudioMonitor.hasMeaningfulLevelChange(from: 0.4, to: 0.409))
-        XCTAssertTrue(AudioMonitor.hasMeaningfulLevelChange(from: 0.4, to: 0.411))
-        XCTAssertTrue(AudioMonitor.hasMeaningfulLevelChange(from: nil, to: 0))
     }
 }

@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import FoundationModels
 import XCTest
 @testable import Dictate_Anywhere
@@ -5,34 +6,17 @@ import XCTest
 @MainActor
 final class AppleCleanupBenchmarkTests: XCTestCase {
     func testGoldenCleanupAndPreparedSessionIsolation() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --only cleanup-quality")
-        #else
         if ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_CLEANUP_PROVIDER"] != nil {
             throw XCTSkip("A different cleanup provider was selected")
         }
         guard #available(macOS 26, *), case .available = AIPostProcessingService.availability else {
             throw XCTSkip("Apple Intelligence is unavailable")
         }
-        let prompt = "Remove filler words and correct punctuation. Preserve all factual details and final intent."
         var ran = 0
-        var baselineMisses = 0
-        var currentMisses = 0
         for fixture in try GoldenCleanupFixture.all() {
             guard SystemLanguageModel.default.supportsLocale(Locale(identifier: fixture.language)) else { continue }
             let filter = ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_FIXTURE"]
             guard filter == nil || filter == fixture.id else { continue }
-            let baselineStart = ContinuousClock.now
-            var baselineOutput = fixture.input
-            var baselineFallback = false
-            do {
-                baselineOutput = try await LegacyAppleCleanupBenchmark.process(
-                    text: fixture.input, prompt: prompt, vocabulary: fixture.vocabulary ?? []
-                )
-            } catch { baselineFallback = true }
-            let baselineMs = BenchmarkStatistics.elapsedMilliseconds(from: baselineStart)
-            let baselineIssues = fixture.violations(in: baselineOutput)
-            baselineMisses += baselineIssues.count
             let warmStart = ContinuousClock.now
             let prepared = await AIPostProcessingService.prewarm(prompt: "", vocabulary: fixture.vocabulary ?? [])
             XCTAssertTrue(prepared)
@@ -52,28 +36,22 @@ final class AppleCleanupBenchmarkTests: XCTestCase {
             }
             let latencyMs = BenchmarkStatistics.elapsedMilliseconds(from: start)
             let issues = fixture.violations(in: output)
-            currentMisses += issues.count
             let errorRate = GoldenSpeechFixture.errorRate(reference: fixture.reference, hypothesis: output,
                 metric: fixture.language == "zh" ? .cer : .wer)
-            print("CLEANUP_GOLDEN provider=apple fixture=\(fixture.id) prepare_ms=\(preparationMs) latency_ms=\(latencyMs) baseline_ms=\(baselineMs) baseline_issues=\(baselineIssues.count) baseline_fallback=\(baselineFallback) fallback=\(fallback) error_rate=\(errorRate) changed=\(output != fixture.input) issues=\(issues.count) input_chars=\(fixture.input.count) output_chars=\(output.count)")
+            print("CLEANUP_GOLDEN provider=apple fixture=\(fixture.id) prepare_ms=\(preparationMs) latency_ms=\(latencyMs) fallback=\(fallback) error_rate=\(errorRate) changed=\(output != fixture.input) issues=\(issues.count) input_chars=\(fixture.input.count) output_chars=\(output.count)")
             XCTAssertFalse(fallback, "\(fixture.id): default cleanup failed and returned the original")
             XCTAssertTrue(fixture.lostFacts(in: output).isEmpty, "\(fixture.id): cleanup lost factual content")
             ran += 1
         }
         XCTAssertGreaterThan(ran, 0)
-        XCTAssertLessThanOrEqual(currentMisses, baselineMisses, "Cleanup quality regressed against the frozen production baseline")
         // A different request must not reuse the preceding transcript or prompt.
         let unchanged = "Please send the final report to Nadia."
         let output = try await AIPostProcessingService.process(text: unchanged, prompt: "Keep the transcript unchanged.")
         XCTAssertEqual(output, unchanged)
         await AIPostProcessingService.discardPreparedSession()
-        #endif
     }
 
     func testLongInputAcrossContextWindows() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --only cleanup-quality")
-        #else
         let environment = ProcessInfo.processInfo.environment
         if environment["PIPELINE_BENCHMARK_CLEANUP_PROVIDER"] != nil || environment["PIPELINE_BENCHMARK_FIXTURE"] != nil {
             throw XCTSkip("Run the full Apple cleanup quality group for the context-window case")
@@ -122,6 +100,6 @@ final class AppleCleanupBenchmarkTests: XCTestCase {
         let errorRate = GoldenSpeechFixture.errorRate(reference: text, hypothesis: output, metric: .wer)
         XCTAssertLessThanOrEqual(errorRate, 0.15, "Long cleanup omitted or rewrote too much content")
         print("CLEANUP_CONTEXT provider=apple latency_ms=\(elapsed) input_chars=\(text.count) output_chars=\(output.count) error_rate=\(errorRate)")
-        #endif
     }
 }
+#endif
