@@ -16,8 +16,15 @@ final class GoldenFileASRBenchmarkTests: XCTestCase {
         let iterations = max(1, min(10, Int(environment["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))
         let languages = environment["PIPELINE_BENCHMARK_LANGUAGES"].map { Set($0.split(separator: ",").map(String.init)) }
         var fixtures = try GoldenSpeechFixture.all()
-        if let id = environment["PIPELINE_BENCHMARK_FIXTURE"] {
-            fixtures = [try XCTUnwrap(fixtures.first { $0.id == id })]
+        if let selection = environment["PIPELINE_BENCHMARK_FIXTURE"] {
+            let ids = selection.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            guard Set(ids).count == ids.count else {
+                XCTFail("Select each golden fixture once")
+                return
+            }
+            fixtures = try ids.map { id in
+                try XCTUnwrap(fixtures.first { $0.id == id }, "Select exact golden IDs")
+            }
         }
         if let languages { fixtures = fixtures.filter { languages.contains($0.language) } }
         let settings = Settings.shared

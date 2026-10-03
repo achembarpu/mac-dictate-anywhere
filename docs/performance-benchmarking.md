@@ -57,8 +57,10 @@ compile both app and tests with `-O` for consistent helper comparisons.
 
 `--only s1-context` compares fresh and reused S1 allocations on identical cleanup
 goldens. `--only asr-file` runs complete golden files through installed native
-speech models without live previews; select models, fixture, language and repeats
-with the existing `PIPELINE_BENCHMARK_*` settings. Saved external speech outputs
+speech models without live previews; select models, language and repeats
+with the existing `PIPELINE_BENCHMARK_*` settings. `PIPELINE_BENCHMARK_FIXTURE`
+accepts one exact ID or a comma-separated list; unknown or duplicate IDs fail.
+Saved external speech outputs
 can be checked with `PIPELINE_BENCHMARK_ASR_RESULTS_PATH` and
 `--only external-asr-quality`; the manifest hash must match the bundled inventory.
 See [S1 context reuse](s1-context-reuse.md) and
@@ -82,6 +84,12 @@ v3/Ultra using English goldens and the same shared scorer. Explicit downloads
 use the normal app cache; cached-only runs stay local. This group accepts a
 comma-separated `PIPELINE_BENCHMARK_FIXTURE` list to bound new-clip comparisons.
 See [the native Phonon screen](phonon-coreml-screen.md) for results and reuse.
+
+`scripts/evaluate_qwen_asr.py` collects pinned local Qwen3-ASR 0.6B 4-bit/8-bit
+outputs for `external-asr-quality`, with asset/reference hashes, completion
+budget flags and CPU/MLX/RSS counters. It requires an isolated research runtime
+and performs no downloads. See [the precision screen](qwen-asr-evaluation.md)
+for the rejected integration, exact versions and bounded reproduction commands.
 
 The pending-audio workload shares the production preview predicate and 15-second
 preview bound. Its 60-second speech simulation requests 60 previews, including

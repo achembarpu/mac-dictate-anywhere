@@ -1,0 +1,2071 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-03",
+  "source_base_commit": "4d4cb57",
+  "decision": "Do not integrate Qwen3-ASR into the app from this screen. 8-bit repairs mixed-language translation but still loses quiet-speech negation. Preserve both checkpoints and benchmark evidence; prune expansion to other tiers/quants/aligners.",
+  "method": "One first-shape warmup per fixture outside each timer; 4-bit five fixtures with one initial plus two repeat trials. Only the two semantic failures advance to a single 8-bit precision contrast. Quiet serial inference, no concurrent compilation. Swift scorer scores every external output; focused native SenseVoice three cases, three trials.",
+  "limitations": [
+    "One Apple M3 Max with 36 GiB unified memory, macOS26.7.1; no native Intel/base-M/8GiB/minOS/energy claim.",
+    "Python MLX versus signed optimized native Swift complete-file APIs; not a causal same-runtime comparison or native Swift Qwen speed prediction.",
+    "8-bit one-trial diagnostic, not a repeated full accuracy or latency panel. Chinese-English constructed switch uses different-speaker utterances and 200ms seams. AMI is quiet headset meeting audio, not our live microphone.",
+    "Raw WER/CER penalizes names/numeral spelling and does not prove meaning preservation. All tested ASR models lose a negative clause on this quiet case.",
+    "Process RSS is lifetime high water including integrity reads/Python/native/Metal; MLX allocator is not whole-system RAM or model-only RAM; cache bytes are storage, not RAM.",
+    "EOS is inferred from reviewed single-chunk generator stop paths; SDK does not expose a finish reason. All17 outputs are below256 tokens, none are silently omitted.",
+    "Historical native v3 NL/DE audio/reference hashes and production source hashes match. AMI v3 comes from NativeCandidateASRBenchmarkTests; use that row for quality context, not an identical app recording-path latency claim.",
+    "Production S1 retains MLX0.31.4/LM3.31.3; isolated research MLX0.32.3/mlx-audio0.5.7 is not a dependency upgrade. App cannot select Qwen today; no weights or personal settings committed."
+  ],
+  "fixtures": [
+    {
+      "id": "golden-zh-1",
+      "language": "zh",
+      "metric": "cer",
+      "audio": "golden-zh-1.wav",
+      "reference": "golden-zh-1.txt",
+      "sampleCount": 166080,
+      "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/cmn_hans_cn",
+      "sourceId": "1906:10026684690566417990.wav",
+      "tags": [
+        "human",
+        "read-speech",
+        "short",
+        "male"
+      ],
+      "audioSHA256": "5214e16584b6498ddbd22f321738c0f62b19117ab1880b21e405fba983986b6a",
+      "referenceSHA256": "19487866dd1876c1c74dad86f3d2aa1db8cbc75bdd9d86b8d1a6a98f755c5f7d"
+    },
+    {
+      "id": "golden-nl-1",
+      "language": "nl",
+      "metric": "wer",
+      "audio": "golden-nl-1.wav",
+      "reference": "golden-nl-1.txt",
+      "sampleCount": 103680,
+      "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/nl_nl",
+      "sourceId": "1927:10042455874761876908.wav",
+      "tags": [
+        "human",
+        "read-speech",
+        "short",
+        "male"
+      ],
+      "audioSHA256": "ec8db57b89a679fc211e0daf300f6f5d8fa5dec38109071b24de5c26dba9aaa7",
+      "referenceSHA256": "5d3b30b5542cf6f854e9d7378576c9617a7f9506755a21f1e34b72ac5b2ffb5b"
+    },
+    {
+      "id": "golden-de-1",
+      "language": "de",
+      "metric": "wer",
+      "audio": "golden-de-1.wav",
+      "reference": "golden-de-1.txt",
+      "sampleCount": 287040,
+      "source": "https://huggingface.co/datasets/google/fleurs/tree/4683b04/data/de_de",
+      "sourceId": "2003:10004059102127011984.wav",
+      "tags": [
+        "human",
+        "read-speech",
+        "short",
+        "male"
+      ],
+      "audioSHA256": "7131c007c5c5c7b72c2fae333c9bccf5e2c02a4abb32b740f314e58b1488f149",
+      "referenceSHA256": "99203fc574ecb019d814c1a7ed72e63d8e5c73e8bad49a0e77a1e87e34bf78ab"
+    },
+    {
+      "id": "golden-zh-en-switch",
+      "language": "zh-en",
+      "metric": "cer",
+      "audio": "golden-zh-en-switch.wav",
+      "reference": "golden-zh-en-switch.txt",
+      "sampleCount": 375600,
+      "source": "derived from golden-zh-1, golden-en-1, golden-zh-2",
+      "sourceId": "derived",
+      "tags": [
+        "human",
+        "derived",
+        "code-switch",
+        "different-speakers",
+        "200ms-between-clips"
+      ],
+      "audioSHA256": "b06a11bc6075fadcd564f35b287b1fc9fa7c147df39c9ed90ca7fe1fe38046c1",
+      "referenceSHA256": "30bf5d3b0ad32125bbfe2779274f75661a52b0974393a5a5fdf24397fcafa05a"
+    },
+    {
+      "id": "golden-en-ami-2",
+      "language": "en",
+      "metric": "wer",
+      "audio": "golden-en-ami-2.wav",
+      "reference": "golden-en-ami-2.txt",
+      "sampleCount": 154816,
+      "source": "https://groups.inf.ed.ac.uk/ami/",
+      "sourceId": "ES2002a/A/ES2002a.sync.6",
+      "tags": [
+        "human",
+        "spontaneous-speech",
+        "scenario-meeting",
+        "headset",
+        "short",
+        "male",
+        "question",
+        "negation",
+        "fillers",
+        "crosstalk"
+      ],
+      "audioSHA256": "ece20ee5c1d5b2259e041db0683456a4fc274e341229c83f89f2cbe19736be90",
+      "referenceSHA256": "6a2e5afa6c4bfc068aa04af5899c7216d154dd0e7a99c4fce7f16d0405e9b06e"
+    }
+  ],
+  "runs": {
+    "qwen-asr-first-gate.json": {
+      "manifest_sha256": "f220948c352c172fb5a14518e0f9fc5d70f16f8777ab6eea3812a78081943b56",
+      "script_sha256": "cd2311a62b7daf0de35291cf99e7982c277bea3165e8450067c3caaa1fb57c0c",
+      "model_metadata": {
+        "_id": "697b82168c7f3bc6bbef3cc2",
+        "id": "mlx-community/Qwen3-ASR-0.6B-4bit",
+        "private": false,
+        "library_name": "mlx-audio",
+        "tags": [
+          "mlx-audio",
+          "safetensors",
+          "qwen3_asr",
+          "mlx",
+          "speech-to-text",
+          "speech",
+          "transcription",
+          "asr",
+          "stt",
+          "license:apache-2.0",
+          "4-bit",
+          "region:us"
+        ],
+        "downloads": 3232,
+        "likes": 16,
+        "modelId": "mlx-community/Qwen3-ASR-0.6B-4bit",
+        "author": "mlx-community",
+        "sha": "313d850181767edf09f00a9c289becca70e58cd0",
+        "lastModified": "2026-01-29T15:53:59.000Z",
+        "gated": false,
+        "disabled": false,
+        "model-index": null,
+        "config": {
+          "architectures": [
+            "Qwen3ASRForConditionalGeneration"
+          ],
+          "model_type": "qwen3_asr",
+          "quantization_config": {
+            "bits": 4
+          },
+          "processor_config": {
+            "chat_template": "{%- set ns = namespace(system_text=\"\") -%}\n{%- for m in messages -%}\n  {%- if m.role == 'system' -%}\n    {%- if m.content is string -%}\n      {%- set ns.system_text = ns.system_text + m.content -%}\n    {%- else -%}\n      {%- for c in m.content -%}\n        {%- if c.type == 'text' and (c.text is defined) -%}\n          {%- set ns.system_text = ns.system_text + c.text -%}\n        {%- endif -%}\n      {%- endfor -%}\n    {%- endif -%}\n  {%- endif -%}\n{%- endfor -%}\n\n{%- set ns2 = namespace(audio_tokens=\"\") -%}\n{%- for m in messages -%}\n  {%- if m.content is not string -%}\n    {%- for c in m.content -%}\n      {%- if c.type == 'audio' or ('audio' in c) or ('audio_url' in c) -%}\n        {%- set ns2.audio_tokens = ns2.audio_tokens + \"<|audio_start|><|audio_pad|><|audio_end|>\" -%}\n      {%- endif -%}\n    {%- endfor -%}\n  {%- endif -%}\n{%- endfor -%}\n\n{{- '<|im_start|>system\\n' + (ns.system_text if ns.system_text is string else '') + '<|im_end|>\\n' -}}\n{{- '<|im_start|>user\\n' + ns2.audio_tokens + '<|im_end|>\\n' -}}\n{%- if add_generation_prompt -%}\n{{- '<|im_start|>assistant\\n' -}}\n{%- endif -%}"
+          },
+          "tokenizer_config": {
+            "bos_token": null,
+            "eos_token": "<|im_end|>",
+            "pad_token": "<|endoftext|>",
+            "unk_token": null
+          }
+        },
+        "cardData": {
+          "license": "apache-2.0",
+          "tags": [
+            "mlx",
+            "speech-to-text",
+            "speech",
+            "transcription",
+            "asr",
+            "stt",
+            "mlx-audio"
+          ],
+          "library_name": "mlx-audio"
+        },
+        "siblings": [
+          {
+            "rfilename": ".gitattributes",
+            "blobId": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+            "size": 1519
+          },
+          {
+            "rfilename": "README.md",
+            "blobId": "ab0d6d2e72d8587f2f599536e8b7463bba412a61",
+            "size": 1008
+          },
+          {
+            "rfilename": "chat_template.json",
+            "blobId": "c44736493efd71ec96218cc626904698cdb13235",
+            "size": 1161
+          },
+          {
+            "rfilename": "config.json",
+            "blobId": "049989ad1e19719b99c2f374eb7067040aa4c830",
+            "size": 7187
+          },
+          {
+            "rfilename": "generation_config.json",
+            "blobId": "7382a4d347c0a865b76bb1b8277f66a5ac312854",
+            "size": 142
+          },
+          {
+            "rfilename": "merges.txt",
+            "blobId": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+            "size": 1671853
+          },
+          {
+            "rfilename": "model.safetensors",
+            "blobId": "7421526c273013a7eb16dec9bb77abd1c2c2c611",
+            "size": 708236945,
+            "lfs": {
+              "sha256": "70c7e67e588062adce4f10796e47ad42ead51c6671eda61a0987eae38ca95ddf",
+              "size": 708236945,
+              "pointerSize": 134
+            }
+          },
+          {
+            "rfilename": "model.safetensors.index.json",
+            "blobId": "b507ef4ee5b57e6147c4bda5d9db05992477030d",
+            "size": 71814
+          },
+          {
+            "rfilename": "preprocessor_config.json",
+            "blobId": "8f7f07346466d5d494ec0d4969d1c3d0190eed72",
+            "size": 330
+          },
+          {
+            "rfilename": "tokenizer_config.json",
+            "blobId": "b93109843922a40c6654c5449d3bf95372267c66",
+            "size": 12487
+          },
+          {
+            "rfilename": "vocab.json",
+            "blobId": "4783fe10ac3adce15ac8f358ef5462739852c569",
+            "size": 2776833
+          }
+        ],
+        "spaces": [],
+        "createdAt": "2026-01-29T15:51:50.000Z",
+        "safetensors": {
+          "parameters": {
+            "BF16": 186441728,
+            "U32": 595984384
+          },
+          "total": 782426112
+        },
+        "usedStorage": 708236945
+      },
+      "model_assets": [
+        {
+          "name": "README.md",
+          "bytes": 1008,
+          "sha256": "4d54132d09a2d3d12410ef13c94d7afcfc936bdca8239a3e6cd0797d6a28dd1c"
+        },
+        {
+          "name": "chat_template.json",
+          "bytes": 1161,
+          "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
+        },
+        {
+          "name": "config.json",
+          "bytes": 7187,
+          "sha256": "923618cf5ca452fda0253a6be5c1a17f94a2e4851d3b98beb45848565587bd72"
+        },
+        {
+          "name": "generation_config.json",
+          "bytes": 142,
+          "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"
+        },
+        {
+          "name": "merges.txt",
+          "bytes": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "name": "model.safetensors",
+          "bytes": 708236945,
+          "sha256": "70c7e67e588062adce4f10796e47ad42ead51c6671eda61a0987eae38ca95ddf"
+        },
+        {
+          "name": "model.safetensors.index.json",
+          "bytes": 71814,
+          "sha256": "e3bb80ef0fd42a5be07b04e90c97d60460bbde8af3531e0bfe9100a61404d81a"
+        },
+        {
+          "name": "preprocessor_config.json",
+          "bytes": 330,
+          "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
+        },
+        {
+          "name": "tokenizer_config.json",
+          "bytes": 12487,
+          "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"
+        },
+        {
+          "name": "vocab.json",
+          "bytes": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ],
+      "runtime_source_sha256": {
+        "stt/models/qwen3_asr/qwen3_asr.py": "661e6e930842dcd0cd509a75964f4b0fcf4d935a52011062d2978f050bc6b38d",
+        "stt/models/qwen3_asr/config.py": "3140f69885ecc9ee2682c8aa3c815d479299ee42bfcce241955d678c1ca9015c",
+        "stt/utils.py": "ee1e5c954b0dd2b1618b638179a758a002e5207bdd55fd411b91cf5f97d5d21d",
+        "lm/generate.py": "3d7a9c9c68bc910ae28b07558339e30d2c04914acd26f73829865a812ed63a01",
+        "utils.py": "a9a6e2c29962949ce0e278d4b923394d81529586feec4599616af292ce64de42"
+      },
+      "runtime_versions": {
+        "mlx": "0.32.3",
+        "mlx-metal": "0.32.3",
+        "mlx-audio": "0.5.7",
+        "numpy": "2.5.3",
+        "soundfile": "0.14.0",
+        "transformers": "5.18.0",
+        "huggingface-hub": "1.33.0"
+      },
+      "host": {
+        "system": "macOS-26.7.1-arm64-arm-64bit",
+        "architecture": "arm64",
+        "metal": {
+          "device_name": "Apple M3 Max",
+          "max_recommended_working_set_size": 30150672384,
+          "memory_size": 38654705664,
+          "architecture": "applegpu_g15s",
+          "max_buffer_length": 22613000192,
+          "resource_limit": 499000
+        }
+      },
+      "loading_ms": 2869.0956250065938,
+      "configuration": {
+        "options": {
+          "max_tokens": 256,
+          "batch_size": 1,
+          "temperature": 0.0,
+          "language": null,
+          "verbose": false
+        },
+        "quantization": {
+          "group_size": 64,
+          "bits": 4,
+          "mode": "affine"
+        },
+        "prefill_step_size": "SDK default 2048",
+        "chunk_duration_seconds": "SDK default 1200; all selected clips <=30 seconds",
+        "hotwords": [],
+        "system_prompt": null,
+        "offline": true,
+        "strict_load": true,
+        "timing": "warm complete-file call including reading/PCM conversion/public SDK preprocessing and final GPU synchronization; first shape outside timer",
+        "termination": "Audited generator exits only on EOS or token budget for a single chunk; EOS IDs are consumed before public output. Preserve exhausted results as failed candidates.",
+        "memory": "MLX counters describe its array allocator; whole-process lifetime RSS includes other native/Python/Metal allocations, not model-only RAM; no energy measurement"
+      },
+      "rows": [
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-zh-1",
+          "iteration": 0,
+          "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+          "latency_ms": 114.5891250052955,
+          "first_file_ms": 731.0228339920286,
+          "audio_seconds": 10.38,
+          "cpu_ms": 113.97700000000022,
+          "process_peak_rss_bytes": 1150140416,
+          "peak_mlx_bytes": 1598132972,
+          "active_mlx_bytes": 739268426,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+            "segments": [
+              {
+                "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+                "language": "Chinese",
+                "start": 0.0,
+                "end": 10.38
+              }
+            ],
+            "language": [
+              "Chinese"
+            ],
+            "prompt_tokens": 150,
+            "generation_tokens": 17,
+            "total_tokens": 167,
+            "prompt_tps": 1316.8515902169477,
+            "generation_tps": 149.2431802245874,
+            "total_time": 0.11390805244445801
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-nl-1",
+          "iteration": 0,
+          "output": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+          "latency_ms": 140.20095899468288,
+          "first_file_ms": 144.15362499130424,
+          "audio_seconds": 6.48,
+          "cpu_ms": 150.96299999999997,
+          "process_peak_rss_bytes": 1150140416,
+          "peak_mlx_bytes": 1508161020,
+          "active_mlx_bytes": 739270474,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+            "segments": [
+              {
+                "text": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+                "language": "Dutch",
+                "start": 0.0,
+                "end": 6.48
+              }
+            ],
+            "language": [
+              "Dutch"
+            ],
+            "prompt_tokens": 99,
+            "generation_tokens": 34,
+            "total_tokens": 133,
+            "prompt_tps": 708.5045506198876,
+            "generation_tps": 243.32479516238564,
+            "total_time": 0.13973093032836914
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-de-1",
+          "iteration": 0,
+          "output": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+          "latency_ms": 177.45958299201448,
+          "first_file_ms": 181.4421670133015,
+          "audio_seconds": 17.94,
+          "cpu_ms": 170.61000000000038,
+          "process_peak_rss_bytes": 1167179776,
+          "peak_mlx_bytes": 1726361840,
+          "active_mlx_bytes": 752717602,
+          "cached_mlx_bytes": 17037372,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+            "segments": [
+              {
+                "text": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+                "language": "German",
+                "start": 0.0,
+                "end": 17.94
+              }
+            ],
+            "language": [
+              "German"
+            ],
+            "prompt_tokens": 248,
+            "generation_tokens": 32,
+            "total_tokens": 280,
+            "prompt_tps": 1403.1367838884169,
+            "generation_tps": 181.0499075985054,
+            "total_time": 0.17674684524536133
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-zh-en-switch",
+          "iteration": 0,
+          "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+          "latency_ms": 258.30483400204685,
+          "first_file_ms": 256.3799580093473,
+          "audio_seconds": 23.475,
+          "cpu_ms": 239.55900000000074,
+          "process_peak_rss_bytes": 1184874496,
+          "peak_mlx_bytes": 1849682160,
+          "active_mlx_bytes": 763381578,
+          "cached_mlx_bytes": 6379540,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+            "segments": [
+              {
+                "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+                "language": "Chinese",
+                "start": 0.0,
+                "end": 23.475
+              }
+            ],
+            "language": [
+              "Chinese"
+            ],
+            "prompt_tokens": 320,
+            "generation_tokens": 56,
+            "total_tokens": 376,
+            "prompt_tps": 1243.4567608431414,
+            "generation_tps": 217.60493314754973,
+            "total_time": 0.25734710693359375
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-en-ami-2",
+          "iteration": 0,
+          "output": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+          "latency_ms": 160.21016601007432,
+          "first_file_ms": 159.419584000716,
+          "audio_seconds": 9.676,
+          "cpu_ms": 163.335,
+          "process_peak_rss_bytes": 1184874496,
+          "peak_mlx_bytes": 1578373356,
+          "active_mlx_bytes": 739266378,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+            "segments": [
+              {
+                "text": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+                "language": "English",
+                "start": 0.0,
+                "end": 9.676
+              }
+            ],
+            "language": [
+              "English"
+            ],
+            "prompt_tokens": 141,
+            "generation_tokens": 38,
+            "total_tokens": 179,
+            "prompt_tps": 883.2593008563807,
+            "generation_tps": 238.04151370597495,
+            "total_time": 0.1596360206604004
+          }
+        }
+      ]
+    },
+    "qwen-asr-repeat-gate.json": {
+      "manifest_sha256": "f220948c352c172fb5a14518e0f9fc5d70f16f8777ab6eea3812a78081943b56",
+      "script_sha256": "cd2311a62b7daf0de35291cf99e7982c277bea3165e8450067c3caaa1fb57c0c",
+      "model_metadata": {
+        "_id": "697b82168c7f3bc6bbef3cc2",
+        "id": "mlx-community/Qwen3-ASR-0.6B-4bit",
+        "private": false,
+        "library_name": "mlx-audio",
+        "tags": [
+          "mlx-audio",
+          "safetensors",
+          "qwen3_asr",
+          "mlx",
+          "speech-to-text",
+          "speech",
+          "transcription",
+          "asr",
+          "stt",
+          "license:apache-2.0",
+          "4-bit",
+          "region:us"
+        ],
+        "downloads": 3232,
+        "likes": 16,
+        "modelId": "mlx-community/Qwen3-ASR-0.6B-4bit",
+        "author": "mlx-community",
+        "sha": "313d850181767edf09f00a9c289becca70e58cd0",
+        "lastModified": "2026-01-29T15:53:59.000Z",
+        "gated": false,
+        "disabled": false,
+        "model-index": null,
+        "config": {
+          "architectures": [
+            "Qwen3ASRForConditionalGeneration"
+          ],
+          "model_type": "qwen3_asr",
+          "quantization_config": {
+            "bits": 4
+          },
+          "processor_config": {
+            "chat_template": "{%- set ns = namespace(system_text=\"\") -%}\n{%- for m in messages -%}\n  {%- if m.role == 'system' -%}\n    {%- if m.content is string -%}\n      {%- set ns.system_text = ns.system_text + m.content -%}\n    {%- else -%}\n      {%- for c in m.content -%}\n        {%- if c.type == 'text' and (c.text is defined) -%}\n          {%- set ns.system_text = ns.system_text + c.text -%}\n        {%- endif -%}\n      {%- endfor -%}\n    {%- endif -%}\n  {%- endif -%}\n{%- endfor -%}\n\n{%- set ns2 = namespace(audio_tokens=\"\") -%}\n{%- for m in messages -%}\n  {%- if m.content is not string -%}\n    {%- for c in m.content -%}\n      {%- if c.type == 'audio' or ('audio' in c) or ('audio_url' in c) -%}\n        {%- set ns2.audio_tokens = ns2.audio_tokens + \"<|audio_start|><|audio_pad|><|audio_end|>\" -%}\n      {%- endif -%}\n    {%- endfor -%}\n  {%- endif -%}\n{%- endfor -%}\n\n{{- '<|im_start|>system\\n' + (ns.system_text if ns.system_text is string else '') + '<|im_end|>\\n' -}}\n{{- '<|im_start|>user\\n' + ns2.audio_tokens + '<|im_end|>\\n' -}}\n{%- if add_generation_prompt -%}\n{{- '<|im_start|>assistant\\n' -}}\n{%- endif -%}"
+          },
+          "tokenizer_config": {
+            "bos_token": null,
+            "eos_token": "<|im_end|>",
+            "pad_token": "<|endoftext|>",
+            "unk_token": null
+          }
+        },
+        "cardData": {
+          "license": "apache-2.0",
+          "tags": [
+            "mlx",
+            "speech-to-text",
+            "speech",
+            "transcription",
+            "asr",
+            "stt",
+            "mlx-audio"
+          ],
+          "library_name": "mlx-audio"
+        },
+        "siblings": [
+          {
+            "rfilename": ".gitattributes",
+            "blobId": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+            "size": 1519
+          },
+          {
+            "rfilename": "README.md",
+            "blobId": "ab0d6d2e72d8587f2f599536e8b7463bba412a61",
+            "size": 1008
+          },
+          {
+            "rfilename": "chat_template.json",
+            "blobId": "c44736493efd71ec96218cc626904698cdb13235",
+            "size": 1161
+          },
+          {
+            "rfilename": "config.json",
+            "blobId": "049989ad1e19719b99c2f374eb7067040aa4c830",
+            "size": 7187
+          },
+          {
+            "rfilename": "generation_config.json",
+            "blobId": "7382a4d347c0a865b76bb1b8277f66a5ac312854",
+            "size": 142
+          },
+          {
+            "rfilename": "merges.txt",
+            "blobId": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+            "size": 1671853
+          },
+          {
+            "rfilename": "model.safetensors",
+            "blobId": "7421526c273013a7eb16dec9bb77abd1c2c2c611",
+            "size": 708236945,
+            "lfs": {
+              "sha256": "70c7e67e588062adce4f10796e47ad42ead51c6671eda61a0987eae38ca95ddf",
+              "size": 708236945,
+              "pointerSize": 134
+            }
+          },
+          {
+            "rfilename": "model.safetensors.index.json",
+            "blobId": "b507ef4ee5b57e6147c4bda5d9db05992477030d",
+            "size": 71814
+          },
+          {
+            "rfilename": "preprocessor_config.json",
+            "blobId": "8f7f07346466d5d494ec0d4969d1c3d0190eed72",
+            "size": 330
+          },
+          {
+            "rfilename": "tokenizer_config.json",
+            "blobId": "b93109843922a40c6654c5449d3bf95372267c66",
+            "size": 12487
+          },
+          {
+            "rfilename": "vocab.json",
+            "blobId": "4783fe10ac3adce15ac8f358ef5462739852c569",
+            "size": 2776833
+          }
+        ],
+        "spaces": [],
+        "createdAt": "2026-01-29T15:51:50.000Z",
+        "safetensors": {
+          "parameters": {
+            "BF16": 186441728,
+            "U32": 595984384
+          },
+          "total": 782426112
+        },
+        "usedStorage": 708236945
+      },
+      "model_assets": [
+        {
+          "name": "README.md",
+          "bytes": 1008,
+          "sha256": "4d54132d09a2d3d12410ef13c94d7afcfc936bdca8239a3e6cd0797d6a28dd1c"
+        },
+        {
+          "name": "chat_template.json",
+          "bytes": 1161,
+          "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
+        },
+        {
+          "name": "config.json",
+          "bytes": 7187,
+          "sha256": "923618cf5ca452fda0253a6be5c1a17f94a2e4851d3b98beb45848565587bd72"
+        },
+        {
+          "name": "generation_config.json",
+          "bytes": 142,
+          "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"
+        },
+        {
+          "name": "merges.txt",
+          "bytes": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "name": "model.safetensors",
+          "bytes": 708236945,
+          "sha256": "70c7e67e588062adce4f10796e47ad42ead51c6671eda61a0987eae38ca95ddf"
+        },
+        {
+          "name": "model.safetensors.index.json",
+          "bytes": 71814,
+          "sha256": "e3bb80ef0fd42a5be07b04e90c97d60460bbde8af3531e0bfe9100a61404d81a"
+        },
+        {
+          "name": "preprocessor_config.json",
+          "bytes": 330,
+          "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
+        },
+        {
+          "name": "tokenizer_config.json",
+          "bytes": 12487,
+          "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"
+        },
+        {
+          "name": "vocab.json",
+          "bytes": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ],
+      "runtime_source_sha256": {
+        "stt/models/qwen3_asr/qwen3_asr.py": "661e6e930842dcd0cd509a75964f4b0fcf4d935a52011062d2978f050bc6b38d",
+        "stt/models/qwen3_asr/config.py": "3140f69885ecc9ee2682c8aa3c815d479299ee42bfcce241955d678c1ca9015c",
+        "stt/utils.py": "ee1e5c954b0dd2b1618b638179a758a002e5207bdd55fd411b91cf5f97d5d21d",
+        "lm/generate.py": "3d7a9c9c68bc910ae28b07558339e30d2c04914acd26f73829865a812ed63a01",
+        "utils.py": "a9a6e2c29962949ce0e278d4b923394d81529586feec4599616af292ce64de42"
+      },
+      "runtime_versions": {
+        "mlx": "0.32.3",
+        "mlx-metal": "0.32.3",
+        "mlx-audio": "0.5.7",
+        "numpy": "2.5.3",
+        "soundfile": "0.14.0",
+        "transformers": "5.18.0",
+        "huggingface-hub": "1.33.0"
+      },
+      "host": {
+        "system": "macOS-26.7.1-arm64-arm-64bit",
+        "architecture": "arm64",
+        "metal": {
+          "device_name": "Apple M3 Max",
+          "max_recommended_working_set_size": 30150672384,
+          "memory_size": 38654705664,
+          "architecture": "applegpu_g15s",
+          "max_buffer_length": 22613000192,
+          "resource_limit": 499000
+        }
+      },
+      "loading_ms": 1556.954665997182,
+      "configuration": {
+        "options": {
+          "max_tokens": 256,
+          "batch_size": 1,
+          "temperature": 0.0,
+          "language": null,
+          "verbose": false
+        },
+        "quantization": {
+          "group_size": 64,
+          "bits": 4,
+          "mode": "affine"
+        },
+        "prefill_step_size": "SDK default 2048",
+        "chunk_duration_seconds": "SDK default 1200; all selected clips <=30 seconds",
+        "hotwords": [],
+        "system_prompt": null,
+        "offline": true,
+        "strict_load": true,
+        "timing": "warm complete-file call including reading/PCM conversion/public SDK preprocessing and final GPU synchronization; first shape outside timer",
+        "termination": "Audited generator exits only on EOS or token budget for a single chunk; EOS IDs are consumed before public output. Preserve exhausted results as failed candidates.",
+        "memory": "MLX counters describe its array allocator; whole-process lifetime RSS includes other native/Python/Metal allocations, not model-only RAM; no energy measurement"
+      },
+      "rows": [
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-zh-1",
+          "iteration": 0,
+          "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+          "latency_ms": 112.69358299614396,
+          "first_file_ms": 136.9760419911472,
+          "audio_seconds": 10.38,
+          "cpu_ms": 108.33199999999988,
+          "process_peak_rss_bytes": 1142636544,
+          "peak_mlx_bytes": 1598151404,
+          "active_mlx_bytes": 739270474,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+            "segments": [
+              {
+                "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+                "language": "Chinese",
+                "start": 0.0,
+                "end": 10.38
+              }
+            ],
+            "language": [
+              "Chinese"
+            ],
+            "prompt_tokens": 150,
+            "generation_tokens": 17,
+            "total_tokens": 167,
+            "prompt_tps": 1338.2346622537123,
+            "generation_tps": 151.66659505542071,
+            "total_time": 0.11208796501159668
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-zh-1",
+          "iteration": 1,
+          "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+          "latency_ms": 112.25120800372679,
+          "first_file_ms": 136.9760419911472,
+          "audio_seconds": 10.38,
+          "cpu_ms": 107.13000000000017,
+          "process_peak_rss_bytes": 1142636544,
+          "peak_mlx_bytes": 1598151404,
+          "active_mlx_bytes": 739262282,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+            "segments": [
+              {
+                "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+                "language": "Chinese",
+                "start": 0.0,
+                "end": 10.38
+              }
+            ],
+            "language": [
+              "Chinese"
+            ],
+            "prompt_tokens": 150,
+            "generation_tokens": 17,
+            "total_tokens": 167,
+            "prompt_tps": 1342.566803381888,
+            "generation_tps": 152.15757104994728,
+            "total_time": 0.11172628402709961
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-nl-1",
+          "iteration": 0,
+          "output": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+          "latency_ms": 140.11262499843724,
+          "first_file_ms": 139.77254199562594,
+          "audio_seconds": 6.48,
+          "cpu_ms": 150.3199999999998,
+          "process_peak_rss_bytes": 1142636544,
+          "peak_mlx_bytes": 1508153852,
+          "active_mlx_bytes": 739264330,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+            "segments": [
+              {
+                "text": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+                "language": "Dutch",
+                "start": 0.0,
+                "end": 6.48
+              }
+            ],
+            "language": [
+              "Dutch"
+            ],
+            "prompt_tokens": 99,
+            "generation_tokens": 34,
+            "total_tokens": 133,
+            "prompt_tps": 708.6556952908871,
+            "generation_tps": 243.37670343323396,
+            "total_time": 0.13970112800598145
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-nl-1",
+          "iteration": 1,
+          "output": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+          "latency_ms": 140.52762500068638,
+          "first_file_ms": 139.77254199562594,
+          "audio_seconds": 6.48,
+          "cpu_ms": 150.77799999999985,
+          "process_peak_rss_bytes": 1142636544,
+          "peak_mlx_bytes": 1508163068,
+          "active_mlx_bytes": 739266378,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+            "segments": [
+              {
+                "text": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+                "language": "Dutch",
+                "start": 0.0,
+                "end": 6.48
+              }
+            ],
+            "language": [
+              "Dutch"
+            ],
+            "prompt_tokens": 99,
+            "generation_tokens": 34,
+            "total_tokens": 133,
+            "prompt_tps": 706.7391317667964,
+            "generation_tps": 242.71848969768763,
+            "total_time": 0.14007997512817383
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-de-1",
+          "iteration": 0,
+          "output": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+          "latency_ms": 176.86320800567046,
+          "first_file_ms": 177.09845800709445,
+          "audio_seconds": 17.94,
+          "cpu_ms": 166.5700000000001,
+          "process_peak_rss_bytes": 1160839168,
+          "peak_mlx_bytes": 1726361840,
+          "active_mlx_bytes": 752727842,
+          "cached_mlx_bytes": 17037372,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+            "segments": [
+              {
+                "text": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+                "language": "German",
+                "start": 0.0,
+                "end": 17.94
+              }
+            ],
+            "language": [
+              "German"
+            ],
+            "prompt_tokens": 248,
+            "generation_tokens": 32,
+            "total_tokens": 280,
+            "prompt_tps": 1407.9532210602686,
+            "generation_tps": 181.6713833626153,
+            "total_time": 0.17614221572875977
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-de-1",
+          "iteration": 1,
+          "output": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+          "latency_ms": 176.07795899675693,
+          "first_file_ms": 177.09845800709445,
+          "audio_seconds": 17.94,
+          "cpu_ms": 167.96999999999994,
+          "process_peak_rss_bytes": 1160839168,
+          "peak_mlx_bytes": 1726363888,
+          "active_mlx_bytes": 748461842,
+          "cached_mlx_bytes": 21297228,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+            "segments": [
+              {
+                "text": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+                "language": "German",
+                "start": 0.0,
+                "end": 17.94
+              }
+            ],
+            "language": [
+              "German"
+            ],
+            "prompt_tokens": 248,
+            "generation_tokens": 32,
+            "total_tokens": 280,
+            "prompt_tps": 1414.4838703097569,
+            "generation_tps": 182.5140477819041,
+            "total_time": 0.17532896995544434
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-zh-en-switch",
+          "iteration": 0,
+          "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+          "latency_ms": 258.4392499993555,
+          "first_file_ms": 258.2627079973463,
+          "audio_seconds": 23.475,
+          "cpu_ms": 241.65800000000016,
+          "process_peak_rss_bytes": 1179828224,
+          "peak_mlx_bytes": 1849678064,
+          "active_mlx_bytes": 763383626,
+          "cached_mlx_bytes": 6379540,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+            "segments": [
+              {
+                "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+                "language": "Chinese",
+                "start": 0.0,
+                "end": 23.475
+              }
+            ],
+            "language": [
+              "Chinese"
+            ],
+            "prompt_tokens": 320,
+            "generation_tokens": 56,
+            "total_tokens": 376,
+            "prompt_tps": 1242.7912627202606,
+            "generation_tps": 217.48847097604562,
+            "total_time": 0.25748491287231445
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-zh-en-switch",
+          "iteration": 1,
+          "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+          "latency_ms": 255.63850000617094,
+          "first_file_ms": 258.2627079973463,
+          "audio_seconds": 23.475,
+          "cpu_ms": 236.07699999999988,
+          "process_peak_rss_bytes": 1180385280,
+          "peak_mlx_bytes": 1849684208,
+          "active_mlx_bytes": 763381578,
+          "cached_mlx_bytes": 6379540,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+            "segments": [
+              {
+                "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+                "language": "Chinese",
+                "start": 0.0,
+                "end": 23.475
+              }
+            ],
+            "language": [
+              "Chinese"
+            ],
+            "prompt_tokens": 320,
+            "generation_tokens": 56,
+            "total_tokens": 376,
+            "prompt_tps": 1256.3744437392702,
+            "generation_tps": 219.8655276543723,
+            "total_time": 0.2547011375427246
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-en-ami-2",
+          "iteration": 0,
+          "output": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+          "latency_ms": 160.16941699490417,
+          "first_file_ms": 159.42904198891483,
+          "audio_seconds": 9.676,
+          "cpu_ms": 162.80500000000052,
+          "process_peak_rss_bytes": 1180385280,
+          "peak_mlx_bytes": 1578377452,
+          "active_mlx_bytes": 739258186,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+            "segments": [
+              {
+                "text": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+                "language": "English",
+                "start": 0.0,
+                "end": 9.676
+              }
+            ],
+            "language": [
+              "English"
+            ],
+            "prompt_tokens": 141,
+            "generation_tokens": 38,
+            "total_tokens": 179,
+            "prompt_tps": 883.3371381457589,
+            "generation_tps": 238.06249113148112,
+            "total_time": 0.1596219539642334
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-4bit-auto",
+          "fixture": "golden-en-ami-2",
+          "iteration": 1,
+          "output": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+          "latency_ms": 158.83541700895876,
+          "first_file_ms": 159.42904198891483,
+          "audio_seconds": 9.676,
+          "cpu_ms": 161.94099999999966,
+          "process_peak_rss_bytes": 1180385280,
+          "peak_mlx_bytes": 1578367212,
+          "active_mlx_bytes": 739262282,
+          "cached_mlx_bytes": 3233812,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+            "segments": [
+              {
+                "text": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+                "language": "English",
+                "start": 0.0,
+                "end": 9.676
+              }
+            ],
+            "language": [
+              "English"
+            ],
+            "prompt_tokens": 141,
+            "generation_tokens": 38,
+            "total_tokens": 179,
+            "prompt_tps": 890.6418317741245,
+            "generation_tps": 240.03113196749456,
+            "total_time": 0.15831279754638672
+          }
+        }
+      ]
+    },
+    "qwen-asr-8bit-contrast.json": {
+      "manifest_sha256": "f220948c352c172fb5a14518e0f9fc5d70f16f8777ab6eea3812a78081943b56",
+      "script_sha256": "4f45af69f855d2618e469046d3a18703f2d1eed5abefdee2f6411b5ec6d3eb8c",
+      "model_metadata": {
+        "_id": "697b84f4b5b3648fb2dfb19d",
+        "id": "mlx-community/Qwen3-ASR-0.6B-8bit",
+        "private": false,
+        "library_name": "mlx-audio",
+        "tags": [
+          "mlx-audio",
+          "safetensors",
+          "qwen3_asr",
+          "mlx",
+          "speech-to-text",
+          "speech",
+          "transcription",
+          "asr",
+          "stt",
+          "license:apache-2.0",
+          "8-bit",
+          "region:us"
+        ],
+        "downloads": 222386,
+        "likes": 6,
+        "modelId": "mlx-community/Qwen3-ASR-0.6B-8bit",
+        "author": "mlx-community",
+        "sha": "89e96d92ba34aca20b3e29fb10cc284097d1219f",
+        "lastModified": "2026-01-29T16:06:21.000Z",
+        "gated": false,
+        "disabled": false,
+        "model-index": null,
+        "config": {
+          "architectures": [
+            "Qwen3ASRForConditionalGeneration"
+          ],
+          "model_type": "qwen3_asr",
+          "quantization_config": {
+            "bits": 8
+          },
+          "processor_config": {
+            "chat_template": "{%- set ns = namespace(system_text=\"\") -%}\n{%- for m in messages -%}\n  {%- if m.role == 'system' -%}\n    {%- if m.content is string -%}\n      {%- set ns.system_text = ns.system_text + m.content -%}\n    {%- else -%}\n      {%- for c in m.content -%}\n        {%- if c.type == 'text' and (c.text is defined) -%}\n          {%- set ns.system_text = ns.system_text + c.text -%}\n        {%- endif -%}\n      {%- endfor -%}\n    {%- endif -%}\n  {%- endif -%}\n{%- endfor -%}\n\n{%- set ns2 = namespace(audio_tokens=\"\") -%}\n{%- for m in messages -%}\n  {%- if m.content is not string -%}\n    {%- for c in m.content -%}\n      {%- if c.type == 'audio' or ('audio' in c) or ('audio_url' in c) -%}\n        {%- set ns2.audio_tokens = ns2.audio_tokens + \"<|audio_start|><|audio_pad|><|audio_end|>\" -%}\n      {%- endif -%}\n    {%- endfor -%}\n  {%- endif -%}\n{%- endfor -%}\n\n{{- '<|im_start|>system\\n' + (ns.system_text if ns.system_text is string else '') + '<|im_end|>\\n' -}}\n{{- '<|im_start|>user\\n' + ns2.audio_tokens + '<|im_end|>\\n' -}}\n{%- if add_generation_prompt -%}\n{{- '<|im_start|>assistant\\n' -}}\n{%- endif -%}"
+          },
+          "tokenizer_config": {
+            "bos_token": null,
+            "eos_token": "<|im_end|>",
+            "pad_token": "<|endoftext|>",
+            "unk_token": null
+          }
+        },
+        "cardData": {
+          "license": "apache-2.0",
+          "tags": [
+            "mlx",
+            "speech-to-text",
+            "speech",
+            "transcription",
+            "asr",
+            "stt",
+            "mlx-audio"
+          ],
+          "library_name": "mlx-audio"
+        },
+        "siblings": [
+          {
+            "rfilename": ".gitattributes",
+            "blobId": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+            "size": 1519
+          },
+          {
+            "rfilename": "README.md",
+            "blobId": "92490384a935261232f63611e2e948d63518fc6f",
+            "size": 1008
+          },
+          {
+            "rfilename": "chat_template.json",
+            "blobId": "c44736493efd71ec96218cc626904698cdb13235",
+            "size": 1161
+          },
+          {
+            "rfilename": "config.json",
+            "blobId": "845f0d3848c5240a7eee9e1676cbe241c1b92585",
+            "size": 7187
+          },
+          {
+            "rfilename": "generation_config.json",
+            "blobId": "7382a4d347c0a865b76bb1b8277f66a5ac312854",
+            "size": 142
+          },
+          {
+            "rfilename": "merges.txt",
+            "blobId": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+            "size": 1671853
+          },
+          {
+            "rfilename": "model.safetensors",
+            "blobId": "dfb3c5f74da1472c54d8285aa127d1d2cd4948c2",
+            "size": 1006229426,
+            "lfs": {
+              "sha256": "b5bfe4abc1b4c6e58b633096682ec2b6297298add1527119936107d211adf0e8",
+              "size": 1006229426,
+              "pointerSize": 135
+            }
+          },
+          {
+            "rfilename": "model.safetensors.index.json",
+            "blobId": "19ddb6277777ec48662d9942f1191d8795308bfd",
+            "size": 71815
+          },
+          {
+            "rfilename": "preprocessor_config.json",
+            "blobId": "8f7f07346466d5d494ec0d4969d1c3d0190eed72",
+            "size": 330
+          },
+          {
+            "rfilename": "tokenizer_config.json",
+            "blobId": "b93109843922a40c6654c5449d3bf95372267c66",
+            "size": 12487
+          },
+          {
+            "rfilename": "vocab.json",
+            "blobId": "4783fe10ac3adce15ac8f358ef5462739852c569",
+            "size": 2776833
+          }
+        ],
+        "spaces": [],
+        "createdAt": "2026-01-29T16:04:04.000Z",
+        "safetensors": {
+          "parameters": {
+            "BF16": 186441728,
+            "U32": 595984384
+          },
+          "total": 782426112
+        },
+        "usedStorage": 1006229426
+      },
+      "model_assets": [
+        {
+          "name": "README.md",
+          "bytes": 1008,
+          "sha256": "404c9125240861c9c8c23f2452e7140a9664d8393900b42bb0a411dc15abf79c"
+        },
+        {
+          "name": "chat_template.json",
+          "bytes": 1161,
+          "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
+        },
+        {
+          "name": "config.json",
+          "bytes": 7187,
+          "sha256": "5d104a945fed08728ab010f12bf3ce5ab4d0794bba276d81bff5bd83ae9d2be0"
+        },
+        {
+          "name": "generation_config.json",
+          "bytes": 142,
+          "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"
+        },
+        {
+          "name": "merges.txt",
+          "bytes": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "name": "model.safetensors",
+          "bytes": 1006229426,
+          "sha256": "b5bfe4abc1b4c6e58b633096682ec2b6297298add1527119936107d211adf0e8"
+        },
+        {
+          "name": "model.safetensors.index.json",
+          "bytes": 71815,
+          "sha256": "caa32ece76c395ba241533eb4aceb0efbc72488ef3d8d2fd3c677ce068dad57d"
+        },
+        {
+          "name": "preprocessor_config.json",
+          "bytes": 330,
+          "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
+        },
+        {
+          "name": "tokenizer_config.json",
+          "bytes": 12487,
+          "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"
+        },
+        {
+          "name": "vocab.json",
+          "bytes": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ],
+      "runtime_source_sha256": {
+        "stt/models/qwen3_asr/qwen3_asr.py": "661e6e930842dcd0cd509a75964f4b0fcf4d935a52011062d2978f050bc6b38d",
+        "stt/models/qwen3_asr/config.py": "3140f69885ecc9ee2682c8aa3c815d479299ee42bfcce241955d678c1ca9015c",
+        "stt/utils.py": "ee1e5c954b0dd2b1618b638179a758a002e5207bdd55fd411b91cf5f97d5d21d",
+        "lm/generate.py": "3d7a9c9c68bc910ae28b07558339e30d2c04914acd26f73829865a812ed63a01",
+        "utils.py": "a9a6e2c29962949ce0e278d4b923394d81529586feec4599616af292ce64de42"
+      },
+      "runtime_versions": {
+        "mlx": "0.32.3",
+        "mlx-metal": "0.32.3",
+        "mlx-audio": "0.5.7",
+        "numpy": "2.5.3",
+        "soundfile": "0.14.0",
+        "transformers": "5.18.0",
+        "huggingface-hub": "1.33.0"
+      },
+      "host": {
+        "system": "macOS-26.7.1-arm64-arm-64bit",
+        "architecture": "arm64",
+        "metal": {
+          "device_name": "Apple M3 Max",
+          "max_recommended_working_set_size": 30150672384,
+          "memory_size": 38654705664,
+          "architecture": "applegpu_g15s",
+          "max_buffer_length": 22613000192,
+          "resource_limit": 499000
+        }
+      },
+      "loading_ms": 1589.480624999851,
+      "configuration": {
+        "options": {
+          "max_tokens": 256,
+          "batch_size": 1,
+          "temperature": 0.0,
+          "language": null,
+          "verbose": false
+        },
+        "quantization": {
+          "group_size": 64,
+          "bits": 8,
+          "mode": "affine"
+        },
+        "prefill_step_size": "SDK default 2048",
+        "chunk_duration_seconds": "SDK default 1200; all selected clips <=30 seconds",
+        "hotwords": [],
+        "system_prompt": null,
+        "offline": true,
+        "strict_load": true,
+        "timing": "warm complete-file call including reading/PCM conversion/public SDK preprocessing and final GPU synchronization; first shape outside timer",
+        "termination": "Audited generator exits only on EOS or token budget for a single chunk; EOS IDs are consumed before public output. Preserve exhausted results as failed candidates.",
+        "memory": "MLX counters describe its array allocator; whole-process lifetime RSS includes other native/Python/Metal allocations, not model-only RAM; no energy measurement"
+      },
+      "rows": [
+        {
+          "model": "qwen3-asr-0.6b-8bit-auto",
+          "fixture": "golden-zh-en-switch",
+          "iteration": 0,
+          "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel. 这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+          "latency_ms": 327.0865409867838,
+          "first_file_ms": 356.54166599852033,
+          "audio_seconds": 23.475,
+          "cpu_ms": 254.99699999999947,
+          "process_peak_rss_bytes": 1467269120,
+          "peak_mlx_bytes": 2147677424,
+          "active_mlx_bytes": 1065586510,
+          "cached_mlx_bytes": 4276244,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel. 这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+            "segments": [
+              {
+                "text": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel. 这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+                "language": "Chinese",
+                "start": 0.0,
+                "end": 23.475
+              }
+            ],
+            "language": [
+              "Chinese"
+            ],
+            "prompt_tokens": 320,
+            "generation_tokens": 60,
+            "total_tokens": 380,
+            "prompt_tps": 981.5470707395733,
+            "generation_tps": 184.04007576367002,
+            "total_time": 0.3260159492492676
+          }
+        },
+        {
+          "model": "qwen3-asr-0.6b-8bit-auto",
+          "fixture": "golden-en-ami-2",
+          "iteration": 0,
+          "output": "Um, I just got the project announcement. About what the project is, designing a remote control. That's about it. And, get anything else? Did you get anything?",
+          "latency_ms": 202.42645899998024,
+          "first_file_ms": 201.6267920116661,
+          "audio_seconds": 9.676,
+          "cpu_ms": 171.89000000000033,
+          "process_peak_rss_bytes": 1468792832,
+          "peak_mlx_bytes": 1876363500,
+          "active_mlx_bytes": 1038847818,
+          "cached_mlx_bytes": 2170904,
+          "output_budget_exhausted": false,
+          "termination": "EOS inferred from reviewed single-chunk loop; not exposed by SDK",
+          "path": "mlx_audio_generate_complete_file",
+          "native": {
+            "text": "Um, I just got the project announcement. About what the project is, designing a remote control. That's about it. And, get anything else? Did you get anything?",
+            "segments": [
+              {
+                "text": "Um, I just got the project announcement. About what the project is, designing a remote control. That's about it. And, get anything else? Did you get anything?",
+                "language": "English",
+                "start": 0.0,
+                "end": 9.676
+              }
+            ],
+            "language": [
+              "English"
+            ],
+            "prompt_tokens": 141,
+            "generation_tokens": 39,
+            "total_tokens": 180,
+            "prompt_tps": 698.4958330971143,
+            "generation_tps": 193.2009751119678,
+            "total_time": 0.20186233520507812
+          }
+        }
+      ]
+    }
+  },
+  "saved_scored_rows": [
+    {
+      "error_rate": 0,
+      "fixture": "golden-zh-1",
+      "iteration": 0,
+      "latency_ms": 114.5891250052955,
+      "metric": "cer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.2,
+      "fixture": "golden-nl-1",
+      "iteration": 0,
+      "latency_ms": 140.20095899468288,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.1111111111111111,
+      "fixture": "golden-de-1",
+      "iteration": 0,
+      "latency_ms": 177.45958299201448,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.512,
+      "fixture": "golden-zh-en-switch",
+      "iteration": 0,
+      "latency_ms": 258.30483400204685,
+      "metric": "cer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.2903225806451613,
+      "fixture": "golden-en-ami-2",
+      "iteration": 0,
+      "latency_ms": 160.21016601007432,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0,
+      "fixture": "golden-zh-1",
+      "iteration": 1,
+      "latency_ms": 112.69358299614396,
+      "metric": "cer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0,
+      "fixture": "golden-zh-1",
+      "iteration": 2,
+      "latency_ms": 112.25120800372679,
+      "metric": "cer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.2,
+      "fixture": "golden-nl-1",
+      "iteration": 1,
+      "latency_ms": 140.11262499843724,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.2,
+      "fixture": "golden-nl-1",
+      "iteration": 2,
+      "latency_ms": 140.52762500068638,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Volgens Angl, 2006 kunnen organisaties beter presteren met een aanpak op basis van het Continuum model.",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.1111111111111111,
+      "fixture": "golden-de-1",
+      "iteration": 1,
+      "latency_ms": 176.86320800567046,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.1111111111111111,
+      "fixture": "golden-de-1",
+      "iteration": 2,
+      "latency_ms": 176.07795899675693,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Für die besten Aussichten auf Hong Kong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.512,
+      "fixture": "golden-zh-en-switch",
+      "iteration": 1,
+      "latency_ms": 258.4392499993555,
+      "metric": "cer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.512,
+      "fixture": "golden-zh-en-switch",
+      "iteration": 2,
+      "latency_ms": 255.63850000617094,
+      "metric": "cer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter 是《基督新福音》的作者，他是新英格兰的牧师。这里几乎都是沙滩，游泳很安全。大部分地方都有新西兰圣诞树的树荫。",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.2903225806451613,
+      "fixture": "golden-en-ami-2",
+      "iteration": 1,
+      "latency_ms": 160.16941699490417,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.2903225806451613,
+      "fixture": "golden-en-ami-2",
+      "iteration": 2,
+      "latency_ms": 158.83541700895876,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "output": "Um, I just got the project announcement. About what the project is at designing a remote control. That's about it. In guessing, also, did you get something?",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.032,
+      "fixture": "golden-zh-en-switch",
+      "iteration": 0,
+      "latency_ms": 327.0865409867838,
+      "metric": "cer",
+      "model": "qwen3-asr-0.6b-8bit-auto",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel. 这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+      "source": "ASR_SAVED_RESULT"
+    },
+    {
+      "error_rate": 0.16129032258064516,
+      "fixture": "golden-en-ami-2",
+      "iteration": 0,
+      "latency_ms": 202.42645899998024,
+      "metric": "wer",
+      "model": "qwen3-asr-0.6b-8bit-auto",
+      "output": "Um, I just got the project announcement. About what the project is, designing a remote control. That's about it. And, get anything else? Did you get anything?",
+      "source": "ASR_SAVED_RESULT"
+    }
+  ],
+  "native_sensevoice_rows": [
+    {
+      "audio_seconds": 10.38,
+      "cpu_ms": 14.010999999999967,
+      "error_rate": 0,
+      "first_file_ms": 64.887916,
+      "fixture": "golden-zh-1",
+      "iteration": 0,
+      "latency_ms": 38.387458,
+      "model": "senseVoice",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 194150400,
+      "source": "ASR_FILE_RESULT"
+    },
+    {
+      "audio_seconds": 10.38,
+      "cpu_ms": 13.778999999999996,
+      "error_rate": 0,
+      "first_file_ms": 64.887916,
+      "fixture": "golden-zh-1",
+      "iteration": 1,
+      "latency_ms": 37.404417,
+      "model": "senseVoice",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 194150400,
+      "source": "ASR_FILE_RESULT"
+    },
+    {
+      "audio_seconds": 10.38,
+      "cpu_ms": 15.444000000000074,
+      "error_rate": 0,
+      "first_file_ms": 64.887916,
+      "fixture": "golden-zh-1",
+      "iteration": 2,
+      "latency_ms": 39.934959,
+      "model": "senseVoice",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 195411968,
+      "source": "ASR_FILE_RESULT"
+    },
+    {
+      "audio_seconds": 23.475,
+      "cpu_ms": 38.420999999999935,
+      "error_rate": 0.048,
+      "first_file_ms": 114.005166,
+      "fixture": "golden-zh-en-switch",
+      "iteration": 0,
+      "latency_ms": 95.554417,
+      "model": "senseVoice",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。 Mr. Quier is the apostle of the middle classes and we are glad to welcome his gospel. 这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 195919872,
+      "source": "ASR_FILE_RESULT"
+    },
+    {
+      "audio_seconds": 23.475,
+      "cpu_ms": 38.39300000000003,
+      "error_rate": 0.048,
+      "first_file_ms": 114.005166,
+      "fixture": "golden-zh-en-switch",
+      "iteration": 1,
+      "latency_ms": 99.114292,
+      "model": "senseVoice",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。 Mr. Quier is the apostle of the middle classes and we are glad to welcome his gospel. 这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 195919872,
+      "source": "ASR_FILE_RESULT"
+    },
+    {
+      "audio_seconds": 23.475,
+      "cpu_ms": 38.29600000000005,
+      "error_rate": 0.048,
+      "first_file_ms": 114.005166,
+      "fixture": "golden-zh-en-switch",
+      "iteration": 2,
+      "latency_ms": 96.761625,
+      "model": "senseVoice",
+      "output": "这并不是告别，这是一个篇章的结束，也是新篇章的开始。 Mr. Quier is the apostle of the middle classes and we are glad to welcome his gospel. 这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 195919872,
+      "source": "ASR_FILE_RESULT"
+    },
+    {
+      "audio_seconds": 9.676,
+      "cpu_ms": 11.97700000000009,
+      "error_rate": 0.22580645161290322,
+      "first_file_ms": 50.29775,
+      "fixture": "golden-en-ami-2",
+      "iteration": 0,
+      "latency_ms": 32.624042,
+      "model": "senseVoice",
+      "output": "I just got the project announcement. about what the project is about designing a remote control. That's about it engaginging your. Did you get the same thing.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 195919872,
+      "source": "ASR_FILE_RESULT"
+    },
+    {
+      "audio_seconds": 9.676,
+      "cpu_ms": 12.354000000000042,
+      "error_rate": 0.22580645161290322,
+      "first_file_ms": 50.29775,
+      "fixture": "golden-en-ami-2",
+      "iteration": 1,
+      "latency_ms": 31.7965,
+      "model": "senseVoice",
+      "output": "I just got the project announcement. about what the project is about designing a remote control. That's about it engaginging your. Did you get the same thing.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 195919872,
+      "source": "ASR_FILE_RESULT"
+    },
+    {
+      "audio_seconds": 9.676,
+      "cpu_ms": 11.955000000000041,
+      "error_rate": 0.22580645161290322,
+      "first_file_ms": 50.29775,
+      "fixture": "golden-en-ami-2",
+      "iteration": 2,
+      "latency_ms": 34.172,
+      "model": "senseVoice",
+      "output": "I just got the project announcement. about what the project is about designing a remote control. That's about it engaginging your. Did you get the same thing.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 195919872,
+      "source": "ASR_FILE_RESULT"
+    }
+  ],
+  "historical_native_v3_rows": [
+    {
+      "audio_seconds": 6.48,
+      "cpu_ms": 46.4350000000004,
+      "error_rate": 0.06666666666666667,
+      "first_file_ms": 60.774666,
+      "fixture": "golden-nl-1",
+      "iteration": 0,
+      "latency_ms": 53.802459,
+      "model": "multilingual",
+      "output": "Volgens Angel 2006 kunnen organisaties beter presteren met een aanpak op basis van het continuummodel.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 246972416
+    },
+    {
+      "audio_seconds": 6.48,
+      "cpu_ms": 43.697000000000116,
+      "error_rate": 0.06666666666666667,
+      "first_file_ms": 60.774666,
+      "fixture": "golden-nl-1",
+      "iteration": 1,
+      "latency_ms": 51.8,
+      "model": "multilingual",
+      "output": "Volgens Angel 2006 kunnen organisaties beter presteren met een aanpak op basis van het continuummodel.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 246972416
+    },
+    {
+      "audio_seconds": 6.48,
+      "cpu_ms": 49.88500000000022,
+      "error_rate": 0.06666666666666667,
+      "first_file_ms": 60.774666,
+      "fixture": "golden-nl-1",
+      "iteration": 2,
+      "latency_ms": 52.819875,
+      "model": "multilingual",
+      "output": "Volgens Angel 2006 kunnen organisaties beter presteren met een aanpak op basis van het continuummodel.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 246972416
+    },
+    {
+      "audio_seconds": 17.94,
+      "cpu_ms": 140.21699999999964,
+      "error_rate": 0.1111111111111111,
+      "first_file_ms": 107.227708,
+      "fixture": "golden-de-1",
+      "iteration": 0,
+      "latency_ms": 104.828375,
+      "model": "multilingual",
+      "output": "Für die besten Aussichten auf Hongkong sollten sie die Insel verlassen und zum gegenüberliegenden Ufer Kowlon fahren.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 246972416
+    },
+    {
+      "audio_seconds": 17.94,
+      "cpu_ms": 141.91600000000017,
+      "error_rate": 0.1111111111111111,
+      "first_file_ms": 107.227708,
+      "fixture": "golden-de-1",
+      "iteration": 1,
+      "latency_ms": 104.899916,
+      "model": "multilingual",
+      "output": "Für die besten Aussichten auf Hongkong sollten sie die Insel verlassen und zum gegenüberliegenden Ufer Kowlon fahren.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 246972416
+    },
+    {
+      "audio_seconds": 17.94,
+      "cpu_ms": 136.27800000000025,
+      "error_rate": 0.1111111111111111,
+      "first_file_ms": 107.227708,
+      "fixture": "golden-de-1",
+      "iteration": 2,
+      "latency_ms": 105.119292,
+      "model": "multilingual",
+      "output": "Für die besten Aussichten auf Hongkong sollten sie die Insel verlassen und zum gegenüberliegenden Ufer Kowlon fahren.",
+      "path": "production_recording_file",
+      "process_peak_rss_bytes": 246972416
+    },
+    {
+      "audio_seconds": 9.676,
+      "audio_sha256": "ece20ee5c1d5b2259e041db0683456a4fc274e341229c83f89f2cbe19736be90",
+      "cpu_ms": 90.94900000000007,
+      "encoder_compute_units": "cpuAndNeuralEngine",
+      "error_rate": 0.22580645161290322,
+      "first_file_ms": 69.873,
+      "fixture": "golden-en-ami-2",
+      "iteration": 0,
+      "latency_ms": 72.886875,
+      "manifest_sha256": "f220948c352c172fb5a14518e0f9fc5d70f16f8777ab6eea3812a78081943b56",
+      "model": "multilingual",
+      "output": "Um, I just got the project announcement about what the project is uh designing a remote control. That's about it. And get anything else? You get anything.",
+      "path": "sdk_recording_file",
+      "preparation_ms": 121.892083,
+      "process_peak_rss_bytes": 204521472,
+      "reference_sha256": "6a2e5afa6c4bfc068aa04af5899c7216d154dd0e7a99c4fce7f16d0405e9b06e"
+    },
+    {
+      "audio_seconds": 9.676,
+      "audio_sha256": "ece20ee5c1d5b2259e041db0683456a4fc274e341229c83f89f2cbe19736be90",
+      "cpu_ms": 86.96300000000019,
+      "encoder_compute_units": "cpuAndNeuralEngine",
+      "error_rate": 0.22580645161290322,
+      "first_file_ms": 69.873,
+      "fixture": "golden-en-ami-2",
+      "iteration": 1,
+      "latency_ms": 70.019,
+      "manifest_sha256": "f220948c352c172fb5a14518e0f9fc5d70f16f8777ab6eea3812a78081943b56",
+      "model": "multilingual",
+      "output": "Um, I just got the project announcement about what the project is uh designing a remote control. That's about it. And get anything else? You get anything.",
+      "path": "sdk_recording_file",
+      "preparation_ms": 121.892083,
+      "process_peak_rss_bytes": 204521472,
+      "reference_sha256": "6a2e5afa6c4bfc068aa04af5899c7216d154dd0e7a99c4fce7f16d0405e9b06e"
+    },
+    {
+      "audio_seconds": 9.676,
+      "audio_sha256": "ece20ee5c1d5b2259e041db0683456a4fc274e341229c83f89f2cbe19736be90",
+      "cpu_ms": 87.01000000000022,
+      "encoder_compute_units": "cpuAndNeuralEngine",
+      "error_rate": 0.22580645161290322,
+      "first_file_ms": 69.873,
+      "fixture": "golden-en-ami-2",
+      "iteration": 2,
+      "latency_ms": 71.676583,
+      "manifest_sha256": "f220948c352c172fb5a14518e0f9fc5d70f16f8777ab6eea3812a78081943b56",
+      "model": "multilingual",
+      "output": "Um, I just got the project announcement about what the project is uh designing a remote control. That's about it. And get anything else? You get anything.",
+      "path": "sdk_recording_file",
+      "preparation_ms": 121.892083,
+      "process_peak_rss_bytes": 204521472,
+      "reference_sha256": "6a2e5afa6c4bfc068aa04af5899c7216d154dd0e7a99c4fce7f16d0405e9b06e"
+    }
+  ],
+  "historical_comparison_sources": {
+    "nl_de": "whistle-screen-2026-10-03.json; exact prior manifest entries and three unchanged production source files verified",
+    "ami": "phonon-coreml-screen-2026-10-03.json; same23-pair final manifest verified"
+  },
+  "per_fixture_summary": [
+    {
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "fixture": "golden-de-1",
+      "trials": 3,
+      "error_rates": [
+        0.1111111111111111
+      ],
+      "latency_median_ms": 176.86320800567046
+    },
+    {
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "fixture": "golden-en-ami-2",
+      "trials": 3,
+      "error_rates": [
+        0.2903225806451613
+      ],
+      "latency_median_ms": 160.16941699490417
+    },
+    {
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "fixture": "golden-nl-1",
+      "trials": 3,
+      "error_rates": [
+        0.2
+      ],
+      "latency_median_ms": 140.20095899468288
+    },
+    {
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "fixture": "golden-zh-1",
+      "trials": 3,
+      "error_rates": [
+        0
+      ],
+      "latency_median_ms": 112.69358299614396
+    },
+    {
+      "model": "qwen3-asr-0.6b-4bit-auto",
+      "fixture": "golden-zh-en-switch",
+      "trials": 3,
+      "error_rates": [
+        0.512
+      ],
+      "latency_median_ms": 258.30483400204685
+    },
+    {
+      "model": "qwen3-asr-0.6b-8bit-auto",
+      "fixture": "golden-en-ami-2",
+      "trials": 1,
+      "error_rates": [
+        0.16129032258064516
+      ],
+      "latency_median_ms": 202.42645899998024
+    },
+    {
+      "model": "qwen3-asr-0.6b-8bit-auto",
+      "fixture": "golden-zh-en-switch",
+      "trials": 1,
+      "error_rates": [
+        0.032
+      ],
+      "latency_median_ms": 327.0865409867838
+    },
+    {
+      "model": "senseVoice",
+      "fixture": "golden-en-ami-2",
+      "trials": 3,
+      "error_rates": [
+        0.22580645161290322
+      ],
+      "latency_median_ms": 32.624042
+    },
+    {
+      "model": "senseVoice",
+      "fixture": "golden-zh-1",
+      "trials": 3,
+      "error_rates": [
+        0
+      ],
+      "latency_median_ms": 38.387458
+    },
+    {
+      "model": "senseVoice",
+      "fixture": "golden-zh-en-switch",
+      "trials": 3,
+      "error_rates": [
+        0.048
+      ],
+      "latency_median_ms": 96.761625
+    }
+  ],
+  "native_cached_weights": {
+    "sensevoice-small/SenseVoicePreprocessor.mlmodelc/weights/weight.bin": {
+      "bytes": 3037504,
+      "sha256": "69c630a115da5e4db36ec41662f0b776c0ef33ec6776d86f8cdaaba022518396"
+    },
+    "sensevoice-small/SenseVoiceSmall_int8.mlmodelc/weights/weight.bin": {
+      "bytes": 235373118,
+      "sha256": "dab122c65d5043cba5b47561d5c1d3a049dd123c662e802d9dbce8fdd0505a38"
+    },
+    "parakeet-tdt-0.6b-v3/JointDecisionv3.mlmodelc/weights/weight.bin": {
+      "bytes": 12642764,
+      "sha256": "4e0e63d840032f7f07ddb1d64446051166281e5491bf22da8a945c41f6eedb3e"
+    },
+    "parakeet-tdt-0.6b-v3/Preprocessor.mlmodelc/weights/weight.bin": {
+      "bytes": 491072,
+      "sha256": "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea"
+    },
+    "parakeet-tdt-0.6b-v3/Decoder.mlmodelc/weights/weight.bin": {
+      "bytes": 23604992,
+      "sha256": "48adf0f0d47c406c8253d4f7fef967436a39da14f5a65e66d5a4b407be355d41"
+    },
+    "parakeet-tdt-0.6b-v3/Encoder.mlmodelc/weights/weight.bin": {
+      "bytes": 445187200,
+      "sha256": "e2020f323703477a5b21d7c2d282c403e371afb5962e79877e3033e73ba6f421"
+    }
+  },
+  "source_sha256": {
+    "scripts/evaluate_qwen_asr.py": "4f45af69f855d2618e469046d3a18703f2d1eed5abefdee2f6411b5ec6d3eb8c",
+    "scripts/dev.sh": "0103c1143beada04b1e5dad027391a1143b9cfa69c0778c55c9e966805ecb905",
+    "Dictate Anywhere/TranscriptionEngine.swift": "01cbe4f1d85e87873f50bf789f12b90edaecf1f433039e0f2c4e53896a2472ca",
+    "Dictate Anywhere/Hardware.swift": "ee16e54571cfb4d86727032b7e97d5e1081f62f5330b17bd49c0b758ba1b949b",
+    "Dictate Anywhere/Settings.swift": "a2eaf5fc7b68c0867f8b9717156878858e6818571d8d09b02efce50fccdfb224",
+    "Dictate AnywhereTests/GoldenFileASRBenchmarkTests.swift": "4daae5e98a827dad0879ea406c2532235bd266383eac2663c4ca15381b06b261",
+    "Dictate AnywhereTests/ExternalSpeechBenchmarkTests.swift": "141307b1e8042dddbf6eda9b6d63c26acb7b98f7aedb333a1829c58509786956",
+    "Dictate AnywhereTests/GoldenSpeechFixture.swift": "541e19672463689ba5875017cadfd8fc4643efcffa6a211dd7ba83fb62355f8b",
+    "Dictate AnywhereTests/BenchmarkProcessResources.swift": "678bdd8294311c2f2ad8d7b9b138fca673d1c633deee5a1600a0cd5574a54e5e",
+    "Dictate Anywhere.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved": "8f72a9d408f6be83aa17962e0671f0322160407f83eacf990e8b464664cf52e1"
+  },
+  "collection_scripts": {
+    "initial_4bit": {
+      "sha256": "cd2311a62b7daf0de35291cf99e7982c277bea3165e8450067c3caaa1fb57c0c",
+      "source": "#!/usr/bin/env python3\n\"\"\"Collect local Qwen3-ASR 0.6B 4-bit outputs for the shared Swift scorer.\n\nRequires the reviewed mlx-audio 0.5.7 / MLX 0.32.3 research environment.\nNo model download/server/microphone is started. Select exact short goldens and\nan explicit local checkpoint plus the pinned public Hugging Face file metadata.\n\"\"\"\n\nimport argparse\nimport dataclasses\nimport hashlib\nimport importlib.metadata\nimport json\nimport os\nimport platform\nimport resource\nfrom pathlib import Path\nfrom time import perf_counter\n\n\ndef sha256(path: Path) -> str:\n    digest = hashlib.sha256()\n    with path.open(\"rb\") as stream:\n        for chunk in iter(lambda: stream.read(1024 * 1024), b\"\"):\n            digest.update(chunk)\n    return digest.hexdigest()\n\n\ndef main() -> None:\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"--model-path\", type=Path, required=True)\n    parser.add_argument(\"--model-metadata\", type=Path, required=True)\n    parser.add_argument(\"--output\", type=Path, required=True)\n    parser.add_argument(\"--fixture\", action=\"append\", required=True, help=\"Exact IDs; repeat for a bounded screen\")\n    parser.add_argument(\"--iterations\", type=int, default=3)\n    args = parser.parse_args()\n    if not 1 <= args.iterations <= 10:\n        parser.error(\"iterations must be between 1 and 10\")\n    if not args.model_path.is_dir() or not args.model_metadata.is_file():\n        parser.error(\"Select existing local model assets and pinned file metadata\")\n    for name, version in ((\"mlx-audio\", \"0.5.7\"), (\"mlx\", \"0.32.3\")):\n        if importlib.metadata.version(name) != version:\n            parser.error(f\"This collector requires the reviewed {name} {version} API\")\n\n    metadata = json.loads(args.model_metadata.read_bytes())\n    if metadata[\"id\"] != \"mlx-community/Qwen3-ASR-0.6B-4bit\" or metadata[\"sha\"] != \"313d850181767edf09f00a9c289becca70e58cd0\":\n        parser.error(\"Select the screened Qwen3-ASR checkpoint revision\")\n    assets = []\n    for entry in metadata[\"siblings\"]:\n        name = entry[\"rfilename\"]\n        if name == \".gitattributes\":\n            continue\n        if Path(name).name != name:\n            parser.error(\"Unexpected model dependency path\")\n        path = args.model_path / name\n        checksum = sha256(path)\n        if path.stat().st_size != entry[\"size\"]:\n            raise ValueError(f\"Model size differs: {name}\")\n        if \"lfs\" in entry:\n            matches = checksum == entry[\"lfs\"][\"sha256\"]\n        else:\n            data = path.read_bytes()\n            # Public git blob IDs authenticate small config/tokenizer assets;\n            # SHA256 authenticates the streamed LFS weight file separately.\n            matches = hashlib.sha1(f\"blob {len(data)}\\0\".encode() + data).hexdigest() == entry[\"blobId\"]\n        if not matches:\n            raise ValueError(f\"Model checksum differs: {name}\")\n        assets.append({\"name\": name, \"bytes\": path.stat().st_size, \"sha256\": checksum})\n    config = json.loads((args.model_path / \"config.json\").read_bytes())\n    tokenizer_config = json.loads((args.model_path / \"tokenizer_config.json\").read_bytes())\n    if config.get(\"model_type\") != \"qwen3_asr\" or config.get(\"quantization\") != {\"group_size\": 64, \"bits\": 4, \"mode\": \"affine\"}:\n        parser.error(\"Unexpected architecture or quantization\")\n    # The SDK requests trust_remote_code, but this pinned checkpoint uses the\n    # builtin tokenizer, no auto_map and no Python assets. Stay offline too.\n    if config.get(\"auto_map\") or tokenizer_config.get(\"auto_map\") or list(args.model_path.glob(\"*.py\")):\n        parser.error(\"Custom model/tokenizer code is outside this screen\")\n\n    root = Path(__file__).resolve().parents[1]\n    golden = root / \"Dictate AnywhereTests/Fixtures/Golden\"\n    manifest = golden / \"golden-speech-manifest.json\"\n    fixtures = json.loads(manifest.read_bytes())\n    if set(args.fixture) - {fixture[\"id\"] for fixture in fixtures}:\n        parser.error(\"Unknown golden fixture ID\")\n    fixtures = [fixture for fixture in fixtures if fixture[\"id\"] in args.fixture]\n    if any(fixture[\"sampleCount\"] > 480_000 for fixture in fixtures):\n        parser.error(\"This short-utterance gate accepts at most 30 seconds; no unverified segmentation\")\n    for fixture in fixtures:\n        for key, hash_key in ((\"audio\", \"audioSHA256\"), (\"reference\", \"referenceSHA256\")):\n            if sha256(golden / fixture[key]) != fixture[hash_key]:\n                raise ValueError(f\"Fixture checksum differs: {fixture['id']}\")\n\n    os.environ[\"HF_HUB_OFFLINE\"] = \"1\"\n    os.environ[\"HF_HUB_DISABLE_TELEMETRY\"] = \"1\"\n    import mlx.core as mx\n    import soundfile as sf\n    from mlx_audio.stt.utils import load\n\n    if not mx.metal.is_available():\n        parser.error(\"Run this Apple Silicon research screen with a Metal device\")\n    maximum_tokens = 256  # Author's short-input recommendation; SDK defaults to 8192.\n    options = {\"max_tokens\": maximum_tokens, \"batch_size\": 1, \"temperature\": 0.0,\n               \"language\": None, \"verbose\": False}\n    started = perf_counter()\n    model = load(args.model_path.resolve(), strict=True)\n    mx.synchronize()\n    loading_ms = (perf_counter() - started) * 1000\n    rows = []\n    for fixture in fixtures:\n        path = golden / fixture[\"audio\"]\n        audio, rate = sf.read(path, dtype=\"float32\")\n        if rate != 16_000 or audio.ndim != 1 or len(audio) != fixture[\"sampleCount\"]:\n            raise ValueError(f\"Unexpected audio format: {fixture['id']}\")\n        first = perf_counter()\n        model.generate(audio=audio, **options)\n        mx.synchronize()\n        first_file_ms = (perf_counter() - first) * 1000\n        for iteration in range(args.iterations):\n            mx.synchronize()\n            mx.reset_peak_memory()\n            before = resource.getrusage(resource.RUSAGE_SELF)\n            started = perf_counter()\n            samples, _ = sf.read(path, dtype=\"float32\")\n            output = model.generate(audio=samples, **options)\n            mx.synchronize()\n            latency_ms = (perf_counter() - started) * 1000\n            after = resource.getrusage(resource.RUSAGE_SELF)\n            native = dataclasses.asdict(output)\n            if len(output.segments or []) != 1:\n                raise RuntimeError(\"Short input did not produce exactly one covered segment\")\n            exhausted = output.generation_tokens >= maximum_tokens\n            rows.append({\"model\": \"qwen3-asr-0.6b-4bit-auto\", \"fixture\": fixture[\"id\"],\n                \"iteration\": iteration, \"output\": output.text, \"latency_ms\": latency_ms,\n                \"first_file_ms\": first_file_ms, \"audio_seconds\": len(audio) / rate,\n                \"cpu_ms\": ((after.ru_utime + after.ru_stime) - (before.ru_utime + before.ru_stime)) * 1000,\n                \"process_peak_rss_bytes\": after.ru_maxrss if platform.system() == \"Darwin\" else after.ru_maxrss * 1024,\n                \"peak_mlx_bytes\": mx.get_peak_memory(), \"active_mlx_bytes\": mx.get_active_memory(),\n                \"cached_mlx_bytes\": mx.get_cache_memory(), \"output_budget_exhausted\": exhausted,\n                \"termination\": \"output_budget\" if exhausted else \"EOS inferred from reviewed single-chunk loop; not exposed by SDK\",\n                \"path\": \"mlx_audio_generate_complete_file\", \"native\": native})\n            print(f\"qwen3-asr {fixture['id']} {iteration} {latency_ms:.1f} ms; tokens={output.generation_tokens}/{maximum_tokens}\", flush=True)\n\n    import mlx_audio\n\n    package = Path(mlx_audio.__file__).parent\n    sources = [package / name for name in (\"stt/models/qwen3_asr/qwen3_asr.py\", \"stt/models/qwen3_asr/config.py\",\n                                          \"stt/utils.py\", \"lm/generate.py\", \"utils.py\")]\n    args.output.parent.mkdir(parents=True, exist_ok=True)\n    args.output.write_text(json.dumps({\"manifest_sha256\": sha256(manifest),\n        \"script_sha256\": sha256(Path(__file__)), \"model_metadata\": metadata,\n        \"model_assets\": assets, \"runtime_source_sha256\": {str(path.relative_to(package)): sha256(path) for path in sources},\n        \"runtime_versions\": {name: importlib.metadata.version(name) for name in\n                             (\"mlx\", \"mlx-metal\", \"mlx-audio\", \"numpy\", \"soundfile\", \"transformers\", \"huggingface-hub\")},\n        \"host\": {\"system\": platform.platform(), \"architecture\": platform.machine(), \"metal\": mx.metal.device_info()},\n        \"loading_ms\": loading_ms,\n        \"configuration\": {\"options\": options, \"quantization\": config[\"quantization\"],\n            \"prefill_step_size\": \"SDK default 2048\", \"chunk_duration_seconds\": \"SDK default 1200; all selected clips <=30 seconds\",\n            \"hotwords\": [], \"system_prompt\": None, \"offline\": True, \"strict_load\": True,\n            \"timing\": \"warm complete-file call including reading/PCM conversion/public SDK preprocessing and final GPU synchronization; first shape outside timer\",\n            \"termination\": \"Audited generator exits only on EOS or token budget for a single chunk; EOS IDs are consumed before public output. Preserve exhausted results as failed candidates.\",\n            \"memory\": \"MLX counters describe its array allocator; whole-process lifetime RSS includes other native/Python/Metal allocations, not model-only RAM; no energy measurement\"},\n        \"rows\": rows}, ensure_ascii=False, indent=2) + \"\\n\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    },
+    "8bit_and_final": {
+      "sha256": "4f45af69f855d2618e469046d3a18703f2d1eed5abefdee2f6411b5ec6d3eb8c",
+      "source": "#!/usr/bin/env python3\n\"\"\"Collect local Qwen3-ASR 0.6B outputs for the shared Swift scorer.\n\nRequires the reviewed mlx-audio 0.5.7 / MLX 0.32.3 research environment.\nNo model download/server/microphone is started. Select exact short goldens and\nan explicit local checkpoint plus the pinned public Hugging Face file metadata.\n\"\"\"\n\nimport argparse\nimport dataclasses\nimport hashlib\nimport importlib.metadata\nimport json\nimport os\nimport platform\nimport resource\nfrom pathlib import Path\nfrom time import perf_counter\n\n\ndef sha256(path: Path) -> str:\n    digest = hashlib.sha256()\n    with path.open(\"rb\") as stream:\n        for chunk in iter(lambda: stream.read(1024 * 1024), b\"\"):\n            digest.update(chunk)\n    return digest.hexdigest()\n\n\ndef main() -> None:\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"--model-path\", type=Path, required=True)\n    parser.add_argument(\"--model-metadata\", type=Path, required=True)\n    parser.add_argument(\"--output\", type=Path, required=True)\n    parser.add_argument(\"--fixture\", action=\"append\", required=True, help=\"Exact IDs; repeat for a bounded screen\")\n    parser.add_argument(\"--iterations\", type=int, default=3)\n    args = parser.parse_args()\n    if not 1 <= args.iterations <= 10:\n        parser.error(\"iterations must be between 1 and 10\")\n    if not args.model_path.is_dir() or not args.model_metadata.is_file():\n        parser.error(\"Select existing local model assets and pinned file metadata\")\n    for name, version in ((\"mlx-audio\", \"0.5.7\"), (\"mlx\", \"0.32.3\")):\n        if importlib.metadata.version(name) != version:\n            parser.error(f\"This collector requires the reviewed {name} {version} API\")\n\n    metadata = json.loads(args.model_metadata.read_bytes())\n    checkpoints = {\"mlx-community/Qwen3-ASR-0.6B-4bit\": \"313d850181767edf09f00a9c289becca70e58cd0\",\n                   \"mlx-community/Qwen3-ASR-0.6B-8bit\": \"89e96d92ba34aca20b3e29fb10cc284097d1219f\"}\n    if metadata[\"id\"] not in checkpoints or metadata[\"sha\"] != checkpoints[metadata[\"id\"]]:\n        parser.error(\"Select the screened Qwen3-ASR checkpoint revision\")\n    bits = 4 if metadata[\"id\"].endswith(\"-4bit\") else 8\n    assets = []\n    for entry in metadata[\"siblings\"]:\n        name = entry[\"rfilename\"]\n        if name == \".gitattributes\":\n            continue\n        if Path(name).name != name:\n            parser.error(\"Unexpected model dependency path\")\n        path = args.model_path / name\n        checksum = sha256(path)\n        if path.stat().st_size != entry[\"size\"]:\n            raise ValueError(f\"Model size differs: {name}\")\n        if \"lfs\" in entry:\n            matches = checksum == entry[\"lfs\"][\"sha256\"]\n        else:\n            data = path.read_bytes()\n            # Public git blob IDs authenticate small config/tokenizer assets;\n            # SHA256 authenticates the streamed LFS weight file separately.\n            matches = hashlib.sha1(f\"blob {len(data)}\\0\".encode() + data).hexdigest() == entry[\"blobId\"]\n        if not matches:\n            raise ValueError(f\"Model checksum differs: {name}\")\n        assets.append({\"name\": name, \"bytes\": path.stat().st_size, \"sha256\": checksum})\n    config = json.loads((args.model_path / \"config.json\").read_bytes())\n    tokenizer_config = json.loads((args.model_path / \"tokenizer_config.json\").read_bytes())\n    if config.get(\"model_type\") != \"qwen3_asr\" or config.get(\"quantization\") != {\"group_size\": 64, \"bits\": bits, \"mode\": \"affine\"}:\n        parser.error(\"Unexpected architecture or quantization\")\n    # The SDK requests trust_remote_code, but this pinned checkpoint uses the\n    # builtin tokenizer, no auto_map and no Python assets. Stay offline too.\n    if config.get(\"auto_map\") or tokenizer_config.get(\"auto_map\") or list(args.model_path.glob(\"*.py\")):\n        parser.error(\"Custom model/tokenizer code is outside this screen\")\n\n    root = Path(__file__).resolve().parents[1]\n    golden = root / \"Dictate AnywhereTests/Fixtures/Golden\"\n    manifest = golden / \"golden-speech-manifest.json\"\n    fixtures = json.loads(manifest.read_bytes())\n    if set(args.fixture) - {fixture[\"id\"] for fixture in fixtures}:\n        parser.error(\"Unknown golden fixture ID\")\n    fixtures = [fixture for fixture in fixtures if fixture[\"id\"] in args.fixture]\n    if any(fixture[\"sampleCount\"] > 480_000 for fixture in fixtures):\n        parser.error(\"This short-utterance gate accepts at most 30 seconds; no unverified segmentation\")\n    for fixture in fixtures:\n        for key, hash_key in ((\"audio\", \"audioSHA256\"), (\"reference\", \"referenceSHA256\")):\n            if sha256(golden / fixture[key]) != fixture[hash_key]:\n                raise ValueError(f\"Fixture checksum differs: {fixture['id']}\")\n\n    os.environ[\"HF_HUB_OFFLINE\"] = \"1\"\n    os.environ[\"HF_HUB_DISABLE_TELEMETRY\"] = \"1\"\n    import mlx.core as mx\n    import soundfile as sf\n    from mlx_audio.stt.utils import load\n\n    if not mx.metal.is_available():\n        parser.error(\"Run this Apple Silicon research screen with a Metal device\")\n    maximum_tokens = 256  # Author's short-input recommendation; SDK defaults to 8192.\n    options = {\"max_tokens\": maximum_tokens, \"batch_size\": 1, \"temperature\": 0.0,\n               \"language\": None, \"verbose\": False}\n    started = perf_counter()\n    model = load(args.model_path.resolve(), strict=True)\n    mx.synchronize()\n    loading_ms = (perf_counter() - started) * 1000\n    rows = []\n    for fixture in fixtures:\n        path = golden / fixture[\"audio\"]\n        audio, rate = sf.read(path, dtype=\"float32\")\n        if rate != 16_000 or audio.ndim != 1 or len(audio) != fixture[\"sampleCount\"]:\n            raise ValueError(f\"Unexpected audio format: {fixture['id']}\")\n        first = perf_counter()\n        model.generate(audio=audio, **options)\n        mx.synchronize()\n        first_file_ms = (perf_counter() - first) * 1000\n        for iteration in range(args.iterations):\n            mx.synchronize()\n            mx.reset_peak_memory()\n            before = resource.getrusage(resource.RUSAGE_SELF)\n            started = perf_counter()\n            samples, _ = sf.read(path, dtype=\"float32\")\n            output = model.generate(audio=samples, **options)\n            mx.synchronize()\n            latency_ms = (perf_counter() - started) * 1000\n            after = resource.getrusage(resource.RUSAGE_SELF)\n            native = dataclasses.asdict(output)\n            if len(output.segments or []) != 1:\n                raise RuntimeError(\"Short input did not produce exactly one covered segment\")\n            exhausted = output.generation_tokens >= maximum_tokens\n            rows.append({\"model\": f\"qwen3-asr-0.6b-{bits}bit-auto\", \"fixture\": fixture[\"id\"],\n                \"iteration\": iteration, \"output\": output.text, \"latency_ms\": latency_ms,\n                \"first_file_ms\": first_file_ms, \"audio_seconds\": len(audio) / rate,\n                \"cpu_ms\": ((after.ru_utime + after.ru_stime) - (before.ru_utime + before.ru_stime)) * 1000,\n                \"process_peak_rss_bytes\": after.ru_maxrss if platform.system() == \"Darwin\" else after.ru_maxrss * 1024,\n                \"peak_mlx_bytes\": mx.get_peak_memory(), \"active_mlx_bytes\": mx.get_active_memory(),\n                \"cached_mlx_bytes\": mx.get_cache_memory(), \"output_budget_exhausted\": exhausted,\n                \"termination\": \"output_budget\" if exhausted else \"EOS inferred from reviewed single-chunk loop; not exposed by SDK\",\n                \"path\": \"mlx_audio_generate_complete_file\", \"native\": native})\n            print(f\"qwen3-asr {fixture['id']} {iteration} {latency_ms:.1f} ms; tokens={output.generation_tokens}/{maximum_tokens}\", flush=True)\n\n    import mlx_audio\n\n    package = Path(mlx_audio.__file__).parent\n    sources = [package / name for name in (\"stt/models/qwen3_asr/qwen3_asr.py\", \"stt/models/qwen3_asr/config.py\",\n                                          \"stt/utils.py\", \"lm/generate.py\", \"utils.py\")]\n    args.output.parent.mkdir(parents=True, exist_ok=True)\n    args.output.write_text(json.dumps({\"manifest_sha256\": sha256(manifest),\n        \"script_sha256\": sha256(Path(__file__)), \"model_metadata\": metadata,\n        \"model_assets\": assets, \"runtime_source_sha256\": {str(path.relative_to(package)): sha256(path) for path in sources},\n        \"runtime_versions\": {name: importlib.metadata.version(name) for name in\n                             (\"mlx\", \"mlx-metal\", \"mlx-audio\", \"numpy\", \"soundfile\", \"transformers\", \"huggingface-hub\")},\n        \"host\": {\"system\": platform.platform(), \"architecture\": platform.machine(), \"metal\": mx.device_info()},\n        \"loading_ms\": loading_ms,\n        \"configuration\": {\"options\": options, \"quantization\": config[\"quantization\"],\n            \"prefill_step_size\": \"SDK default 2048\", \"chunk_duration_seconds\": \"SDK default 1200; all selected clips <=30 seconds\",\n            \"hotwords\": [], \"system_prompt\": None, \"offline\": True, \"strict_load\": True,\n            \"timing\": \"warm complete-file call including reading/PCM conversion/public SDK preprocessing and final GPU synchronization; first shape outside timer\",\n            \"termination\": \"Audited generator exits only on EOS or token budget for a single chunk; EOS IDs are consumed before public output. Preserve exhausted results as failed candidates.\",\n            \"memory\": \"MLX counters describe its array allocator; whole-process lifetime RSS includes other native/Python/Metal allocations, not model-only RAM; no energy measurement\"},\n        \"rows\": rows}, ensure_ascii=False, indent=2) + \"\\n\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    }
+  },
+  "collector_hash_scope": "Initial4bit-only script retained verbatim. Current script adds the pinned8bit metadata/quant label and replaces deprecated device reporting with mx.device_info; no change to4bit inference/timing logic.",
+  "log_sha256": {
+    "qwen-asr-first-gate.log": "3dbe1392043aeb0fa61e203cc6589298f6a000d41aed7a987ca3d38defbe1106",
+    "qwen-asr-repeat-gate.log": "e8c49cf40c966781f75d224a810ac927f86ee2188ab2f3c8224bbac741f68576",
+    "qwen-asr-8bit-contrast.log": "2b37796d247a28d46f69b6b18f2d17e46a58899c7586d69957e337b9bb778615",
+    "qwen-asr-sensevoice-comparison.log": "f487db330250436b0439ca19307e082a4e28b7c03b5d7129f012aa816cf22816"
+  },
+  "raw_report_sha256": {
+    "qwen-asr-first-gate.json": "ff3ee94458355a70e33d2968099bebd8bde2a39d02662baad93ea601d41ce2f5",
+    "qwen-asr-repeat-gate.json": "d3e9e9d98b9609c581591dbcce6de43caa6679eba99c81f15db25ef1f03004b9",
+    "qwen-asr-8bit-contrast.json": "7daa71b5921e21c6edadcb2ed32e7b85b17e440f5be744efae14e0eb48cd57b4"
+  },
+  "verification": {
+    "focused_signed_release": "3tests,2passed,1local-endpoint test skipped,zero failures;17saved scores and9native outputs",
+    "repeat_text": "4-bit exact across three trials per fixture",
+    "budget": "17/17 below256 tokens",
+    "asset_integrity": "Both checkpoints verify all10 assets by pinned Git blob/LFS SHA256; tampered config rejected before model import/inference/output",
+    "python": "Ruff collector and script tests pass; existing two pytest SDK-error/release cases pass",
+    "review": "Checked hashes, local/offline strict load, tokenizer custom-code guard, timer/synchronization boundaries, all saved output/budget rows, reference independence and precision-specific conclusions"
+  }
+}
