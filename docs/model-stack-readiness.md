@@ -3,8 +3,7 @@
 The implemented model-aware stack and native S1 MLX backend pass their available
 hardware gates. Research does not justify another production STT model, quiet
 gain default or MLX dependency upgrade. Retain the faster measured settings and
-all rejected evidence. No new code-review blocker was found. Publication needs
-branch restacking and a separate user instruction; broader hardware performance
+all rejected evidence. No new code-review blocker was found. Publication needs a separate user instruction; broader hardware performance
 claims need additional Macs.
 
 ## Final requirement audit
@@ -61,11 +60,15 @@ retain the signed test commits and subsequent formatting provenance.
 
 ## Publication and hardware limits
 
-The child began at model-aware commit d398ea7 and shares follow-ups by cherry-pick.
-Restack onto the latest intended parent before opening three-dot PRs; otherwise
-GitHub will repeat shared benchmark changes. No push/PR/merge/history rewrite
-was performed. The parent PR draft is in the workspace docs; the child draft
-is docs/s1-runtime-pr.md on that branch.
+PR bases are `feature/ui-ux-normalization` → `feature/model-aware-transcription`
+→ `feature/s1-mlx-integration`. The model-aware parent already contains the UI
+branch tip `88fc47c`. Shared research belongs to the model-aware PR; the child
+PR adds the MLX implementation, runtime-specific tests and evidence. The user's
+restack authorization permits rewriting local branch history. No push, PR or
+merge is authorized. Historical benchmark commits/hashes remain measurement
+provenance; the workspace restack report records new ancestry and verification.
+The parent PR draft is in the workspace docs; the child draft is
+`docs/s1-runtime-pr.md` on that branch.
 
 Actual Intel/base-M/8 GiB/minimum-macOS runtime performance, live microphone/Stop,
 whole-system RAM and energy remain hardware acceptance limits. Universal/Rosetta

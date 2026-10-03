@@ -98,7 +98,7 @@
   },
   "review": "Current eight child production files match the original reviewed integration artifact; MLX engine matches retained dependency-screen source. Six native weights and five selected fixture audio/reference hashes reverified. Qwen strict/offline asset check and tampered-config rejection pass. No new production default/runtime/dependency selected from rejected candidates.",
   "patch_data": "Retained mlx-upgrade-candidate.patch passes git apply --check. Its context-only blank line necessarily contains one space; exclude that data artifact from whole-stack whitespace check. All other child diff and task changes pass git diff --check.",
-  "publication": "Both branches local. Shared follow-ups are cherry-picked; restack child onto current parent before publishing a three-dot PR. No push, PR, merge or history rewrite authorized/performed.",
+  "publication": "PR bases: feature/ui-ux-normalization -> feature/model-aware-transcription -> feature/s1-mlx-integration. User authorized local restacking on2026-10-03. Historical commits/hashes above remain measurement provenance; workspace restack report records current ancestry/checks. No push, PR or merge authorized.",
   "limitations": [
     "OneM3Max/36GiB; actualIntel/baseM/8GiB/minOS performance and energy need additional hardware. Historical universal build and Rosetta regression evidence apply to unchanged production code.",
     "RawWER/CER and incomplete fact assertions do not prove arbitrary semantic preservation. Quiet negative clause remains a research challenge; no unproven gain default ships.",
