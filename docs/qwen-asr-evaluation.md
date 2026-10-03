@@ -133,7 +133,8 @@ or unknown IDs, allowing bounded comparisons without another full matrix.
 Fresh normal Team-signed Debug builds and suites pass at `af5183f` (parent):
 639 total / 564 passed / 75 skipped / zero failures; `ca30de5` (MLX child):
 656 / 574 / 82 / zero. Both fresh detached checkouts were removed. Later
-research-script import/executable fixes leave generation logic unchanged;
+research-script import/executable fixes and one benchmark EOF blank-line cleanup
+leave generation logic unchanged;
 full-repository Ruff and both pytest cases pass on both branches. Historical
 source hashes retain their original collection provenance. Final verification
 and formatting hashes are in the [readiness artifact](benchmarks/model-stack-readiness-2026-10-03.json).

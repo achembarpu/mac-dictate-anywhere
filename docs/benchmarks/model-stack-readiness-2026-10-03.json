@@ -103,5 +103,12 @@
     "OneM3Max/36GiB; actualIntel/baseM/8GiB/minOS performance and energy need additional hardware. Historical universal build and Rosetta regression evidence apply to unchanged production code.",
     "RawWER/CER and incomplete fact assertions do not prove arbitrary semantic preservation. Quiet negative clause remains a research challenge; no unproven gain default ships.",
     "Research runtime RAM/storage counters are different scopes; no totalRAM/energy or live-microphone/Stop speed claim."
-  ]
+  ],
+  "final_whitespace_cleanup": {
+    "parent_commit": "fc5d3fa",
+    "child_commit": "678d703",
+    "path": "Dictate AnywhereTests/LegacyAppleCleanupBenchmark.swift",
+    "scope": "Removed one trailing empty EOF line only; no product/test logic changed. Full parent diff whitespace now passes; child passes with the documented context-only patch-data exception.",
+    "sha256": "74f3404f6eef6e9c2ff64cf65bc508eb0f722abe1e1d874e8efc0af4c50bc057"
+  }
 }

@@ -37,8 +37,8 @@ natural-noise checks remain prerequisites for any future gain feature.
 
 Both normal builds pass from fresh detached checkouts, which were subsequently
 removed. Signing stays ignored. Later changes only normalize research-script
-imports/executable modes and documentation; generation AST after import removal
-is unchanged. Full-repository Ruff and two pytest SDK-error/release cases pass
+imports/executable modes, one Apple benchmark EOF blank line and documentation;
+generation AST after import removal is unchanged. Full-repository Ruff and two pytest SDK-error/release cases pass
 on both branches. Both script registries/signing/selection/forwarding checks pass.
 
 Latest focused Release gate scores 17 Qwen and nine native outputs: two tests pass,
