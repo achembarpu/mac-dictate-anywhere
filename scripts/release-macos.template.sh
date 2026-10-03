@@ -149,7 +149,7 @@ xcodebuild \
   -archivePath "$ARCHIVE_PATH" \
   'ARCHS=$(ARCHS_STANDARD)' \
   ONLY_ACTIVE_ARCH=NO \
-  SWIFT_ACTIVE_COMPILATION_CONDITIONS="DISTRIBUTION_BUILD" \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) DISTRIBUTION_BUILD" \
   archive
 
 log "Verifying universal archive"
