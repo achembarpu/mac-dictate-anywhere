@@ -8,12 +8,11 @@ Source URLs, checksums, segment IDs, crops and licence are retained for reuse.
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import wave
 import xml.etree.ElementTree as ET
 import zipfile
-
+from pathlib import Path
 
 SELECTIONS = [
     ("golden-en-ami-1", "B", 1, "ES2002a.sync.74", 55.415, 77.390,

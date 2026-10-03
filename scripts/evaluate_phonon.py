@@ -23,8 +23,8 @@ def main() -> None:
         parser.error("iterations must be between 1 and 10")
     if not (args.model_path / "model.fermion").is_file():
         parser.error("Select an existing Phonon-2 model directory")
-    from fermion._speech.engine_phonon2 import load
     import mlx.core as mx
+    from fermion._speech.engine_phonon2 import load
 
     root = Path(__file__).resolve().parents[1]
     golden = root / "Dictate AnywhereTests/Fixtures/Golden"

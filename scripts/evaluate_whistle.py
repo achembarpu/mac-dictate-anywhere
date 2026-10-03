@@ -11,9 +11,9 @@ import hashlib
 import importlib.metadata
 import json
 import os
-from pathlib import Path
 import platform
 import resource
+from pathlib import Path
 from time import perf_counter
 
 
