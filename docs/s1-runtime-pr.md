@@ -83,8 +83,8 @@ No newer dependency or low-level knob is added without a measured benefit.
 
 ## Validation and limits
 
-Latest fresh normal Team-signed Debug at `ca30de5`: **656 total, 574 passed,
-82 skipped, zero failures**; parent `af5183f` passes639/564/75/zero. Both builds
+Latest post-restack fresh normal Team-signed Debug at `ec4f9c9`: **656 total, 574 passed,
+82 skipped, zero failures**; parent `e3a2f8c` passes 639/564/75/zero. Both builds
 pass. [Final audit](model-stack-readiness.md) records checks and hashes.
 Historical installed-model suite:
 652 total / 584 passed / 68 skipped / zero failures. Signed universal Debug
