@@ -91,7 +91,7 @@ Rosetta uses Intel-compatible paths even on an Apple Silicon machine.
 | SenseVoice | Int8 encoder, CPU/Neural Engine | FP32 encoder with Core ML `.all` |
 | Silero VAD | CPU/Neural Engine | CPU |
 | CTC vocabulary | Core ML CPU/Neural Engine defaults | SDK CPU fallback |
-| S1-mini | llama.cpp Q4_K_M with Metal | llama.cpp Q4_K_M on CPU |
+| S1-mini | Native MLX 4-bit/group64; retained GGUF uses Metal | llama.cpp Q4_K_M on CPU |
 
 Core ML settings permit processors; they do not guarantee placement of every
 operation. Apple Speech, Apple Intelligence and remote services manage their own
@@ -146,7 +146,7 @@ processing if the field is cleared while the app is running.
 
 | Provider | Request and preparation policy |
 | --- | --- |
-| S1-mini | English-only trained control prompt, empty thinking prefix and greedy sampling. Q4_K_M weights and a 4,096-token context. Metal uses FP16 KV; Intel uses Q8 KV and up to eight physical cores. Tokenizer-aware chunks stay within 1,000 input tokens; output budget is `ceil(inputTokens * 1.3) + 32`. EOS is required; an incomplete response cannot replace the original. |
+| S1-mini | English-only trained controls, empty thinking prefix and greedy sampling. Architecture-specific MLX/GGUF weights and caches follow the [native runtime](s1-native-runtime.md). Tokenizer-aware chunks stay within 1,000 input tokens; output budget is `ceil(inputTokens * 1.3) + 32`. EOS is required; an incomplete response cannot replace the original. |
 | Apple Intelligence | Greedy guided action/text output, fresh sessions and a single-use prepared prefix. Context planning reserves instruction/schema/output space and limits each input to 1,024 tokens. When the complete transcript exceeds 1,024 UTF-8 bytes, its source paragraphs use independent sessions; lost numeric literals/counts preserve the passage. |
 | Ollama | Inspect `/api/show` capabilities, preserve server sampling/reasoning defaults and use strict structured output. Working context is bounded to 8,192 tokens or the smaller model limit. Explicit non-thinking capabilities permit an input-derived output ceiling; unknown/thinking models retain natural EOS. Empty generation preloads the same model/context for ten minutes. |
 | OpenRouter | Catalog capabilities supply context/output limits and supported parameters. Preserve declared sampling/reasoning defaults; schema requests require schema-capable routing. Preparation refreshes catalog/connection without a billable completion. |
@@ -159,11 +159,10 @@ newly introduced refusal language is rejected. Apple preparation is invalidated
 when its prompt, vocabulary or context changes, including cancellation of an
 in-flight preparation. The app does not add a delay at Stop to wait for prewarm.
 
-S1 preparation exercises tokenization and generation with synthetic input. Its
-actor retains context allocations but clears KV data/token positions after each
-successful request. Cancellation/decode errors discard the context; unloading or
-model replacement frees it before the weights. Requests share no transcript
-history.
+S1 preparation exercises tokenization and generation with synthetic input.
+The selected runtime owns its model/context lifecycle and caches only reusable
+allocations or public prompt data. Requests share no transcript history; see
+[native runtime isolation and installation](s1-native-runtime.md).
 
 ## Development references
 

@@ -60,7 +60,7 @@ goldens. `--only s1-runtime` compares reused GGUF/Q8, tuned Metal/FP16 and
 cached/uncached native MLX through the production service over 21 English cases.
 `--only s1-prepare` checks graph-cold versus prepared first use; `--only s1-cpu`
 compares GGUF CPU cache precision. These use installed app models and never
-download implicitly. See [S1 integration results](s1-runtime-integration.md).
+download implicitly. See the [native runtime contract](s1-native-runtime.md).
 `--only asr-file` runs complete golden files through installed native
 speech models without live previews; select models, language and repeats
 with the existing `PIPELINE_BENCHMARK_*` settings. `PIPELINE_BENCHMARK_FIXTURE`
