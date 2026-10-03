@@ -120,4 +120,9 @@ tradeoff. Do not run inference during compilation for comparative timing.
 Stream errors or a swallowed `None` final result abort collection; segmentation
 `is_complete` does not imply decoder EOS or absence of token-rate truncation.
 Two focused pytest cases verify error rejection and stream release. Ruff passes.
-Fresh normal signed Debug validation is recorded after the collector commit.
+Fresh normal Team-signed Debug builds and tests pass from detached checkouts:
+parent `ea0472d`: 639 total / 564 passed / 75 skipped / zero failures; MLX child
+`8e097d0`: 656 / 574 / 82 / zero. A tampered catalog is rejected before inference
+or output. Signing files stay ignored; temporary validation checkouts removed.
+Build/test log hashes are retained in the artifact. Reproduce the two error
+checks with `uv run --with pytest python -m pytest scripts/tests/test_moonshine_collector.py -q`.

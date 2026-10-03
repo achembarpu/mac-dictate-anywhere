@@ -117,3 +117,20 @@ scripts/dev.sh benchmark --release --only asr-quality
 
 Repeat with `PIPELINE_BENCHMARK_MODEL=multilingualUltra`. Neither command adds
 settings, downloads models implicitly, or runs at normal app startup.
+
+## Follow-up runtime flag audit (2026-10-03)
+
+The pinned llama.swift 2.10549.0 binary is llama.cpp b10549. Its
+[`llama_context_default_params`](https://github.com/ggml-org/llama.cpp/blob/b10549/src/llama-context.cpp)
+already selects Flash Attention AUTO, GPU K/Q/V offload and operation offload.
+The app keeps that backend support check instead of forcing an unsupported
+fused kernel. Quantized V requires Flash Attention; the SDK promotes/checks it
+when constructing the context. No missing enable flag or native MLX backend
+exists in llama.cpp. Preserve the separately measured runtime/cache choices.
+
+The newer native MLX dependency screen rejected 0.32.3 / LM 3.32.3 for S1 latency;
+the child keeps 0.31.4 / 3.31.3. These are measured workload choices, not a rule
+that older dependencies are always faster. Shared CPU streaming research also
+rejects Moonshine's one-thread override (2.7–2.9× slower) and app integration
+after quiet-speech/meaning failures; see [the screen](moonshine-evaluation.md).
+Product placement and selected-model preparation remain unchanged.

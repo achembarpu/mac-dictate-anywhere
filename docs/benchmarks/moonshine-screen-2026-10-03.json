@@ -2222,10 +2222,31 @@
     "expected_candidate_empty_output_failures": 2,
     "pytest": "two SDK final-error rejection/stream-release cases pass",
     "ruff": "collector and focused tests pass",
-    "normal_debug": "pending fresh signed validation"
+    "normal_debug": {
+      "parent": {
+        "commit": "ea0472d",
+        "total": 639,
+        "passed": 564,
+        "skipped": 75,
+        "failed": 0
+      },
+      "mlx_child": {
+        "commit": "8e097d0",
+        "total": 656,
+        "passed": 574,
+        "skipped": 82,
+        "failed": 0
+      },
+      "method": "Fresh detached worktrees, scripts/dev.sh signing K5Z9P4C6P2, normal scripts/dev.sh build and test. Validation checkouts subsequently removed; signing files ignored."
+    },
+    "tampered_catalog": "CRC mismatch rejected before model load/inference/output"
   },
   "log_sha256": {
     "/private/tmp/moonshine-small-shared-scorer.log": "63a85d424710ace9b0fccfdcef22a9429492c192e5ed548b45e76a702f02c623",
-    "/private/tmp/moonshine-followup-shared-scorer.log": "4cd4ca159acc28d80bba8bd5ad6f34f9fee128cc892136f82c8fc40867014dff"
+    "/private/tmp/moonshine-followup-shared-scorer.log": "4cd4ca159acc28d80bba8bd5ad6f34f9fee128cc892136f82c8fc40867014dff",
+    "/private/tmp/moonshine-fresh-debug-build.log": "8148422a3aaeae318aedb6f0c000d2b7985bd793054ef29194ddbb1da9e0b388",
+    "/private/tmp/moonshine-fresh-debug-tests.log": "a7a0e1905478df373ff3a6d9be98d9453f2902790c9673ec1142a2fa54ce222c",
+    "/private/tmp/moonshine-mlx-fresh-debug-build.log": "6177a79a20df06fa888295c99fb0d56dbaa3fcd3b81f7ba3d9e7ca76f96bd8bd",
+    "/private/tmp/moonshine-mlx-fresh-debug-tests.log": "30f89e53e1dac865b85557e8a30a54ad8b3247642acb6677f566e3fbf1ddb000"
   }
 }
