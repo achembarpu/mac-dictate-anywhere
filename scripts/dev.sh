@@ -325,7 +325,7 @@ run_benchmark() {
   rm -rf "$benchmark_result_bundle_path"
   env "${benchmark_test_environment[@]}" xcodebuild "${benchmark_xcodebuild_args[@]}" \
     SWIFT_OPTIMIZATION_LEVEL=-O \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) $benchmark_conditions" \
     -enableCodeCoverage NO \
     -resultBundlePath "$benchmark_result_bundle_path" test
 }

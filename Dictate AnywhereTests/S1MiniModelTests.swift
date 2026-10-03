@@ -31,6 +31,8 @@ final class S1MiniModelTests: XCTestCase {
             let state = await engine.inferenceContextStateForTesting()
             XCTAssertTrue(state.allocated)
             XCTAssertEqual(state.maximumPosition, -1, "A completed request retained KV token positions")
+            let ready = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+            XCTAssertTrue(ready, "Successful first use prepares the retained runtime")
         }
         await engine.unload()
         let state = await engine.inferenceContextStateForTesting()
@@ -63,7 +65,7 @@ final class S1MiniModelTests: XCTestCase {
         await engine.unload()
         try await engine.prewarm(from: url)
         PerfTrace.onIntervalCompleted = { name, _, _ in
-            if name == "cleanup.promptEval" {
+            if name == "cleanup.prefillSchedule" {
                 withUnsafeCurrentTask { $0?.cancel() }
             }
         }
@@ -80,6 +82,8 @@ final class S1MiniModelTests: XCTestCase {
         PerfTrace.onIntervalCompleted = nil
         let discarded = await engine.inferenceContextStateForTesting()
         XCTAssertFalse(discarded.allocated)
+        let readyAfterCancellation = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+        XCTAssertFalse(readyAfterCancellation)
         let recovered = try await process("Keep invoice 43 for Nadia.", modelURL: url)
         XCTAssertTrue(recovered.contains("43"))
         XCTAssertTrue(recovered.lowercased().contains("nadia"))
@@ -94,6 +98,8 @@ final class S1MiniModelTests: XCTestCase {
         let url = URL(fileURLWithPath: path)
         await S1MiniPostProcessingService.unload()
         let firstReady = await S1MiniPostProcessingService.prewarm(modelURL: url)
+        let runtimeReady = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+        XCTAssertEqual(runtimeReady, firstReady)
         XCTAssertTrue(firstReady)
         #if DEBUG || PIPELINE_BENCHMARK
         let prepared = await S1MiniInferenceEngine.shared.inferenceContextStateForTesting()

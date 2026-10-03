@@ -38,10 +38,13 @@ final class AudioMonitorTests: XCTestCase {
 
     func testRMSIgnoresSamplesBeforeTheLatestWindow() {
         let monitor = AudioMonitor()
-        let samples = [Float](repeating: 1, count: 100) + [Float](repeating: 0.1, count: 800)
+        let quietWindow = [Float](repeating: 0.1, count: AudioMonitor.windowSampleCount)
+        let samples = [Float](repeating: 1, count: 100) + quietWindow
         monitor.update(samples: samples[...])
-        let expected = powf(0.1 * 6.6, 0.85) * 0.92
-        XCTAssertEqual(monitor.smoothedLevel, expected, accuracy: 0.0001)
+        let reference = AudioMonitor()
+        reference.update(samples: quietWindow[...])
+        XCTAssertEqual(monitor.smoothedLevel, reference.smoothedLevel, accuracy: 0.0001,
+            "Earlier loud audio must not affect the current meter window")
     }
 
     func testEmptyWindowDoesNotChangeTheDisplayedLevel() {

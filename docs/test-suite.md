@@ -25,7 +25,8 @@ contract. The retained suite covers:
   formatting, CJK seams, proper names and complete transcript preservation.
 - Secure-field and remote-context privacy, provider request encoding, error handling
   and rejection of truncated or malformed model output.
-- Model/language availability, input-source switching and persisted settings that
+- Model/language availability, incomplete MLX packages, interrupted installation,
+  runtime output safety, input-source switching and persisted settings that
   affect these workflows.
 - Overlay observation dependencies, display identity and delayed-dismissal races;
   one constrained shortcut layout, actual color contrast and bundled font loading.
@@ -55,10 +56,24 @@ remain in Git and `docs/benchmarks/`; they are evidence, not recurring workloads
 
 ## Verified reduction
 
-On the same Mac and base revision `e3a2f8c`, signed Debug XCTest results changed
-from **639 tests / 75 skipped / 20.177 seconds** to
-**387 tests / 12 skipped / 10.562 seconds**, with zero failures in both runs.
-This is XCTest execution time, not a cold build or a whole development-cycle
-benchmark. Of the retained source methods, 37 additional model/benchmark methods
-are excluded from ordinary test compilation. The suite size is an outcome of
-removing duplication, not a quota for future regression coverage.
+The approved final base, `feature/s1-mlx-integration` at `4206ac5`, has 656 test
+methods. The retained signed Debug run passes **394 tests / 12 skipped / zero
+failures**, with **9.169 seconds** of XCTest execution. Another 45 model/benchmark
+methods compile only for explicit benchmark runs. The latest base's prior signed
+[verification](s1-runtime-pr.md) reports 656 tests / 82 skips / zero failures.
+
+Before the newer MLX base became available, the same-Mac initial comparison on
+`e3a2f8c` passed 639 tests / 75 skips in 20.177 seconds, then passed its reduced
+387 tests / 12 skips in 10.562 seconds. These are XCTest execution times, not cold
+build or whole-development-cycle timings; no timing comparison against an
+unpruned MLX base was run in this audit.
+
+The focused optimized Debug run also passes all 18 selected workload and installed
+S1 lifecycle tests, with no skips. This includes actual GGUF/MLX request isolation,
+cancellation, long-input preservation and cache equivalence. Suite size is an
+outcome of removing duplication, not a quota for future regression coverage.
+
+An optimized Release run passes the overlay workload, S1 runtime selection and one
+MLX golden fixture (3 tests, no skips or failures). The shell command checks and
+both Python collector tests also pass. Browser, live-provider, microphone and
+other ASR model runs were not enabled during this audit.

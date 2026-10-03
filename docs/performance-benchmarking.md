@@ -35,21 +35,36 @@ Keep a stable DerivedData directory per worktree. Benchmark results use a separa
 | `asr-regressions` | Installed-model prepare/recovery isolation, v2 vocabulary seams, batch cancellation/tails and cancelled previews, quiet speech versus noise and Apple recovery. |
 | `asr-file`, `asr-acoustics` | Whole-file accuracy/resources and bounded acoustic experiments. |
 | `model-setup` | Explicit selected-model installation into the app cache; requires the download flag. |
-| `cleanup`, `s1-regressions` | Installed S1 preparation/timing or lifecycle, cancellation, context isolation and complete long-input checks. |
+| `cleanup`, `s1-prepare` | Installed S1 cleanup or cold/prepared first-use timings. |
+| `s1-regressions`, `s1-mlx-regressions` | Explicit installed llama/MLX lifecycle, cancellation, context isolation and complete long-input checks. |
+| `s1-runtime`, `s1-cpu` | Current runtime/prefix or CPU cache comparisons against independent cleanup references. |
 | `cleanup-quality`, `apple-speech-quality` | Independent cleanup facts/semantics or matching installed Apple speech locales and fresh sessions. |
 | `cleanup-prompts`, `external-asr-quality` | Explicit local candidate runtimes/prompts or saved outputs scored against the shared manifest. |
 | `model-switch` | Installed-model switching; also requires `RUN_MODEL_SWITCH_BENCHMARK=1`. |
 
+`PIPELINE_BENCHMARK_S1_MODES` selects unique comma-separated current runtime
+modes (`llama`, `llama-f16`, `mlx`, `mlx-uncached`). Prefer one runtime, one fixture
+and one iteration for initial screening; an unset selection deliberately compares
+all four in the explicitly selected `s1-runtime` group.
+
 Model regression checks reuse one prepared engine for its preparation and recovery
 assertions. `PIPELINE_BENCHMARK_MODEL` narrows that preparation sweep; the other
 `asr-regressions` cases target the particular model implicated by their regression.
-For S1 lifecycle checks, supply `S1_MINI_MODEL_PATH` explicitly; no temporary-path
-fallback or download is attempted. The `cleanup` timing group can instead use the
+For S1 lifecycle checks, supply `S1_MINI_MODEL_PATH` (llama) or
+`S1_MLX_MODEL_PATH` (MLX) explicitly; no temporary-path fallback or download is
+attempted. The `cleanup` timing group can instead use the
 app's validated installed S1 model.
 
 ```sh
 S1_MINI_MODEL_PATH=/absolute/path/to/model.gguf \
   scripts/dev.sh benchmark --only s1-regressions
+
+S1_MLX_MODEL_PATH=/absolute/path/to/mlx/package \
+  scripts/dev.sh benchmark --only s1-mlx-regressions
+
+PIPELINE_BENCHMARK_S1_MODES=mlx PIPELINE_BENCHMARK_FIXTURE=numbers-negation \
+PIPELINE_BENCHMARK_ITERATIONS=1 \
+  scripts/dev.sh benchmark --release --only s1-runtime
 
 PIPELINE_BENCHMARK_MODEL=multilingual \
 PIPELINE_BENCHMARK_FIXTURE=golden-en-boundaries \

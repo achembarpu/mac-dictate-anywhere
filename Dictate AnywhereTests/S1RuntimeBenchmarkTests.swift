@@ -27,7 +27,7 @@ final class S1RuntimeBenchmarkTests: XCTestCase {
     }
 
     func testPairedRuntimeGoldenCleanup() async throws {
-        #if !PIPELINE_BENCHMARK || !arch(arm64)
+        #if !arch(arm64)
         throw XCTSkip("Use scripts/dev.sh benchmark --release --only s1-runtime on Apple Silicon")
         #else
         let env = ProcessInfo.processInfo.environment

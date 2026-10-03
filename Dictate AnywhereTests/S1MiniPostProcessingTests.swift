@@ -104,17 +104,15 @@ final class S1MiniPostProcessingTests: XCTestCase {
         }
     }
 
-    func testInstallationProgressDoesNotMoveBackwards() {
-        XCTAssertEqual(
-            S1MiniDownloadProgress.installationProgress(current: 0.6, transferFraction: 0.25),
-            0.6,
-            accuracy: 0.000_001
-        )
-        XCTAssertEqual(
-            S1MiniDownloadProgress.installationProgress(current: 0, transferFraction: 0.5),
-            0.49,
-            accuracy: 0.000_001
-        )
+    func testTransferProgressIsMonotonicAndReservesFinalInstallationWork() {
+        var previous = 0.0
+        for fraction in [0.1, 0.5, 0.25, 1.0] {
+            let next = S1MiniDownloadProgress.installationProgress(current: previous, transferFraction: fraction)
+            XCTAssertGreaterThanOrEqual(next, previous, "Server updates must not move progress backwards")
+            XCTAssertLessThan(next, 1, "A finished transfer must still wait for installation and verification")
+            previous = next
+        }
+        XCTAssertGreaterThan(previous, 0)
     }
 
     func testStreamingSHA256() throws {
@@ -131,7 +129,7 @@ final class S1MiniPostProcessingTests: XCTestCase {
 
     func testIntegrityRejectsWrongFileSize() throws {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("s1-mini-invalid-\(UUID().uuidString)")
+            .appendingPathComponent("s1-mini-invalid-\(UUID().uuidString).gguf")
         try Data("not a model".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
 

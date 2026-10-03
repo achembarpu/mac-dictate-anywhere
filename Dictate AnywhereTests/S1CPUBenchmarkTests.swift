@@ -6,9 +6,6 @@ import XCTest
 @MainActor
 final class S1CPUBenchmarkTests: XCTestCase {
     func testCPUCachePrecisionComparison() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --release --only s1-cpu")
-        #else
         let env = ProcessInfo.processInfo.environment
         let iterations = max(1, min(10, Int(env["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))
         let manager = S1MiniModelManager(recommendedRuntime: .llama)
@@ -45,7 +42,6 @@ final class S1CPUBenchmarkTests: XCTestCase {
         await engine.configureCPUForTesting(false)
         await engine.unload()
         XCTAssertGreaterThan(ran, 0)
-        #endif
     }
 }
 #endif

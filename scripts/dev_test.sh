@@ -22,6 +22,9 @@ cat > "$MOCK_BIN/xcodebuild" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$XCODEBUILD_ARGS_LOG"
 printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS:-}" > "$XCODEBUILD_ACOUSTIC_ENV_LOG"
+printf '%s\n' "${TEST_RUNNER_S1_MINI_MODEL_PATH:-}" \
+  "${TEST_RUNNER_S1_MLX_MODEL_PATH:-}" \
+  "${TEST_RUNNER_PIPELINE_BENCHMARK_S1_MODES:-}" > "$XCODEBUILD_S1_ENV_LOG"
 printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_FIXTURE:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_GOLDEN:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_DOWNLOAD_MODELS:-}" \
@@ -62,6 +65,7 @@ export HOME="$TEST_HOME" PATH RM_LOG XCODEBUILD_ARGS_LOG="$TEST_ROOT/xcodebuild-
 export XCODEBUILD_ENV_LOG="$TEST_ROOT/xcodebuild-env.log"
 export XCODEBUILD_RESEARCH_ENV_LOG="$TEST_ROOT/xcodebuild-research-env.log"
 export XCODEBUILD_ACOUSTIC_ENV_LOG="$TEST_ROOT/xcodebuild-acoustic-env.log"
+export XCODEBUILD_S1_ENV_LOG="$TEST_ROOT/xcodebuild-s1-env.log"
 
 unset DERIVED_DATA_PATH
 default_path="$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"
@@ -160,6 +164,7 @@ assert_benchmark_selector_count() {
 assert_benchmark_selector_count 1
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/OverlayPerformanceBenchmarkTests'
 assert_benchmark_arg 'SWIFT_OPTIMIZATION_LEVEL=-O'
+assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) DEBUG PIPELINE_BENCHMARK'
 assert_benchmark_arg "$default_path/Logs/Test/DictateAnywhere-Benchmark.xcresult"
 
 "$SCRIPT" benchmark --only audio,overlay --only audio --only cleanup >/dev/null
@@ -208,6 +213,17 @@ done < "$XCODEBUILD_ARGS_LOG"
 assert_benchmark_selector_count 1
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/S1MiniModelTests'
 
+S1_MINI_MODEL_PATH='/fixture/model with spaces.gguf' S1_MLX_MODEL_PATH='/fixture/mlx package' \
+  PIPELINE_BENCHMARK_S1_MODES=mlx,mlx-uncached \
+  "$SCRIPT" benchmark --only s1-runtime,s1-prepare,s1-cpu,s1-mlx-regressions >/dev/null
+assert_benchmark_selector_count 4
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/S1RuntimeBenchmarkTests'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/S1MiniMLXModelTests'
+if [[ "$(<"$XCODEBUILD_S1_ENV_LOG")" != $'/fixture/model with spaces.gguf\n/fixture/mlx package\nmlx,mlx-uncached' ]]; then
+  printf 'FAIL: S1 runtime selection was not forwarded exactly\n' >&2
+  exit 1
+fi
+
 "$SCRIPT" benchmark --only asr-file >/dev/null
 assert_benchmark_selector_count 1
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/GoldenFileASRBenchmarkTests/testInstalledModelsDecodeCompleteGoldenFiles'
@@ -219,7 +235,7 @@ assert_benchmark_selector_count 1
 assert_benchmark_arg Release
 assert_benchmark_arg 'CODE_SIGN_IDENTITY=Apple Development'
 assert_benchmark_arg 'ENABLE_TESTABILITY=YES'
-assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=PIPELINE_BENCHMARK'
+assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) PIPELINE_BENCHMARK'
 
 /bin/rm -f "$XCODEBUILD_ARGS_LOG"
 if "$SCRIPT" benchmark >/dev/null 2>&1; then

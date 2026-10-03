@@ -6,9 +6,6 @@ import XCTest
 @MainActor
 final class S1PreparationBenchmarkTests: XCTestCase {
     func testColdEngineVersusPreparedFirstRequest() async throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Use scripts/dev.sh benchmark --release --only s1-prepare")
-        #else
         let env = ProcessInfo.processInfo.environment
         let manager = S1MiniModelManager()
         let url: URL
@@ -41,7 +38,6 @@ final class S1PreparationBenchmarkTests: XCTestCase {
             print("S1_PREPARATION_RESULT " + String(decoding: try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]), as: UTF8.self))
         }
         await S1MiniPostProcessingService.unload()
-        #endif
     }
 
     private func cleanup(_ text: String, url: URL) async throws -> String {
