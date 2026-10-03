@@ -26,8 +26,8 @@ local loader runs offline. No implicit inference-time download.
 Isolated Python 3.12, mlx-audio 0.5.7, MLX/Metal 0.32.3, NumPy 2.5.3,
 SoundFile 0.14.0, Transformers 5.18.0 and huggingface-hub 1.33.0. Public
 `generate` API; SDK prefill 2048 and chunk duration 1200 seconds. All selected
-files are under 30 seconds, so each is one complete chunk. Production S1's
-MLX 0.31.4 / LM 3.31.3 pins are unchanged.
+files are under 30 seconds, so each is one complete chunk. The S1 MLX child's
+production MLX 0.31.4 / LM 3.31.3 pins are unchanged.
 
 One M3 Max, 36 GiB, macOS 26.7.1. Five selected 4-bit cases, three measured
 trials each over two serial runs. Only the two substantive failures advance to
@@ -129,3 +129,11 @@ test skipped. Ruff and the existing two Python SDK-error/release tests pass;
 a tampered pinned config fails before model import, inference or output.
 `asr-file` now accepts exact comma-separated fixture IDs and rejects duplicates
 or unknown IDs, allowing bounded comparisons without another full matrix.
+
+Fresh normal Team-signed Debug builds and suites pass at `af5183f` (parent):
+639 total / 564 passed / 75 skipped / zero failures; `ca30de5` (MLX child):
+656 / 574 / 82 / zero. Both fresh detached checkouts were removed. Later
+research-script import/executable fixes leave generation logic unchanged;
+full-repository Ruff and both pytest cases pass on both branches. Historical
+source hashes retain their original collection provenance. Final verification
+and formatting hashes are in the [readiness artifact](benchmarks/model-stack-readiness-2026-10-03.json).

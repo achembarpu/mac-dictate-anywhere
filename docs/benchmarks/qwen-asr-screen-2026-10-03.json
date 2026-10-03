@@ -12,7 +12,7 @@
     "Process RSS is lifetime high water including integrity reads/Python/native/Metal; MLX allocator is not whole-system RAM or model-only RAM; cache bytes are storage, not RAM.",
     "EOS is inferred from reviewed single-chunk generator stop paths; SDK does not expose a finish reason. All17 outputs are below256 tokens, none are silently omitted.",
     "Historical native v3 NL/DE audio/reference hashes and production source hashes match. AMI v3 comes from NativeCandidateASRBenchmarkTests; use that row for quality context, not an identical app recording-path latency claim.",
-    "Production S1 retains MLX0.31.4/LM3.31.3; isolated research MLX0.32.3/mlx-audio0.5.7 is not a dependency upgrade. App cannot select Qwen today; no weights or personal settings committed."
+    "The S1 MLX child retains production MLX0.31.4/LM3.31.3; isolated research MLX0.32.3/mlx-audio0.5.7 is not a dependency upgrade. App cannot select Qwen today; no weights or personal settings committed."
   ],
   "fixtures": [
     {
@@ -2053,7 +2053,13 @@
     "qwen-asr-first-gate.log": "3dbe1392043aeb0fa61e203cc6589298f6a000d41aed7a987ca3d38defbe1106",
     "qwen-asr-repeat-gate.log": "e8c49cf40c966781f75d224a810ac927f86ee2188ab2f3c8224bbac741f68576",
     "qwen-asr-8bit-contrast.log": "2b37796d247a28d46f69b6b18f2d17e46a58899c7586d69957e337b9bb778615",
-    "qwen-asr-sensevoice-comparison.log": "f487db330250436b0439ca19307e082a4e28b7c03b5d7129f012aa816cf22816"
+    "qwen-asr-sensevoice-comparison.log": "f487db330250436b0439ca19307e082a4e28b7c03b5d7129f012aa816cf22816",
+    "qwen-parent-fresh-debug-build.log": "9301e737fb0aabf3c7f94bc0c1f99bbe8b4d159ba2c6843d14e6203d6c3958be",
+    "qwen-parent-fresh-debug-tests.log": "3170e06ef59b9ca05153e063d725505c959b71f39b9de2f45321af3a50ca0253",
+    "qwen-mlx-fresh-debug-build.log": "31ed9624b8d18e36ad102827bddbc40248e1a242e0eaf4ed04df9b3ea6adb040",
+    "qwen-mlx-fresh-debug-tests.log": "97f0cf6907ca33b30c541e2c91f28e96f919989ce26a686b974dff075f6f05ef",
+    "qwen-asr-dev-script-tests.log": "52bac880020534851a2be4fed9bfb108c0103fe788bde2789abcd54d19916abb",
+    "qwen-asr-mlx-dev-script-tests.log": "52bac880020534851a2be4fed9bfb108c0103fe788bde2789abcd54d19916abb"
   },
   "raw_report_sha256": {
     "qwen-asr-first-gate.json": "ff3ee94458355a70e33d2968099bebd8bde2a39d02662baad93ea601d41ce2f5",
@@ -2066,6 +2072,26 @@
     "budget": "17/17 below256 tokens",
     "asset_integrity": "Both checkpoints verify all10 assets by pinned Git blob/LFS SHA256; tampered config rejected before model import/inference/output",
     "python": "Ruff collector and script tests pass; existing two pytest SDK-error/release cases pass",
-    "review": "Checked hashes, local/offline strict load, tokenizer custom-code guard, timer/synchronization boundaries, all saved output/budget rows, reference independence and precision-specific conclusions"
-  }
+    "review": "Checked hashes, local/offline strict load, tokenizer custom-code guard, timer/synchronization boundaries, all saved output/budget rows, reference independence and precision-specific conclusions",
+    "normal_debug": {
+      "parent": {
+        "commit": "af5183f",
+        "build": "passed",
+        "total": 639,
+        "passed": 564,
+        "skipped": 75,
+        "failed": 0
+      },
+      "mlx_child": {
+        "commit": "ca30de5",
+        "build": "passed",
+        "total": 656,
+        "passed": 574,
+        "skipped": 82,
+        "failed": 0
+      },
+      "method": "Fresh detached worktrees, ignored Team K5Z9P4C6P2 Debug configuration, normal scripts/dev.sh build and test. Both temporary worktrees subsequently removed. Later changes are research-script import/mode normalization and docs only; production Swift unchanged."
+    }
+  },
+  "source_hash_scope": "Qwen was collected from the standalone parent script and native SenseVoice from the parent signed Release host. source_sha256 records those measured sources, not a claim that both branch dependency locks are identical. Both fresh normal Debug suites are recorded separately."
 }
