@@ -63,8 +63,6 @@ accepts one exact ID or a comma-separated list; unknown or duplicate IDs fail.
 Saved external speech outputs
 can be checked with `PIPELINE_BENCHMARK_ASR_RESULTS_PATH` and
 `--only external-asr-quality`; the manifest hash must match the bundled inventory.
-See [S1 context reuse](s1-context-reuse.md) and
-[Phonon file comparison](phonon-file-comparison.md) for measurements and limits.
 The standalone [native MLX probe](../tools/s1-mlx-probe/README.md) and
 `scripts/evaluate_s1_mlx.py` collect S1 outputs for the existing
 `PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH` / `--only cleanup-prompts` scorer.
@@ -75,7 +73,6 @@ using one installed TDT model. It preserves the golden reference, tests
 peak-capped gains and synthetic silence/noise controls, and records raw outputs,
 shared error scores, input hashes/RMS/peaks and process CPU/RSS. This is research
 only; transforms are outside decode timers and product audio is unchanged.
-See [the acoustic screen](tdt-acoustic-screen.md) for selection and limitations.
 `PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS=reference-pcm16,reference-gain4` selects only
 those variants, avoiding unnecessary gain sweeps on follow-up clips.
 
@@ -83,13 +80,13 @@ those variants, avoiding unnecessary gain sweeps on follow-up clips.
 v3/Ultra using English goldens and the same shared scorer. Explicit downloads
 use the normal app cache; cached-only runs stay local. This group accepts a
 comma-separated `PIPELINE_BENCHMARK_FIXTURE` list to bound new-clip comparisons.
-See [the native Phonon screen](phonon-coreml-screen.md) for results and reuse.
+Use `scripts/dev.sh benchmark --list` to discover the current candidate selector.
 
 `scripts/evaluate_qwen_asr.py` collects pinned local Qwen3-ASR 0.6B 4-bit/8-bit
 outputs for `external-asr-quality`, with asset/reference hashes, completion
 budget flags and CPU/MLX/RSS counters. It requires an isolated research runtime
-and performs no downloads. See [the precision screen](qwen-asr-evaluation.md)
-for the rejected integration, exact versions and bounded reproduction commands.
+and performs no downloads. Use the pinned asset-integrity inputs described below
+and the collector's `--help` output for its required local runtime and options.
 
 The pending-audio workload shares the production preview predicate and 15-second
 preview bound. Its 60-second speech simulation requests 60 previews, including
@@ -149,11 +146,10 @@ debug logging is disabled unless explicitly enabled in a local Debug build.
 Use a separate stable `DERIVED_DATA_PATH` for each worktree to avoid sharing
 Xcode build products.
 
-The [hardware defaults and optimized encoder evidence](model-hardware-defaults.md)
-record which execution paths the app chooses internally. Hardware comparisons
-remain developer benchmarks; the app has no processor tuning workflow or
-startup calibration. The latest comparison uses five paired repeats with both
-app and harness optimized, retaining first-use and warm trials separately.
+The [model runtime policy](model-aware-transcription.md) describes the app's
+execution paths. Hardware comparisons remain developer benchmarks; the app has
+no processor tuning workflow or startup calibration. Record first-use and warm
+trials separately when comparing configurations.
 
 The bundled [golden reference inventory](../Dictate%20AnywhereTests/Fixtures/Golden/README.md)
 includes exact references, license, source IDs, hashes and reproduction commands.
@@ -173,9 +169,9 @@ First-visible audio position is the amount fed when text appears, not wall-clock
 user latency. Golden quality inventory uses the manifest's supported languages
 and WER/CER metric, and deliberately has no uncalibrated model-independent gate.
 
-The `cleanup-prompts` and `external-asr-quality` groups are research tools.
-See [candidate evaluation and reproduction](model-candidate-evaluation.md) for
-explicit prompt/model/result-file selection. The default benchmark run skips
+The `cleanup-prompts` and `external-asr-quality` groups accept explicit local
+prompt/model/result-file selection, documented in the golden inventory.
+The default benchmark run skips
 these groups unless their corresponding environment variables are supplied.
 Candidate quality misses remain visible even when the protocol completed;
 test success does not establish that a model is safe to adopt. Only bundled
@@ -230,8 +226,8 @@ high-water mark ([Apple documentation](https://developer.apple.com/documentation
 
 ## Bounded Whistle screens and process resources
 
-[Whistle evaluation](whistle-evaluation.md) uses the existing `asr-file` and
-`external-asr-quality` groups with the expanded 20-pair golden inventory.
+The local Whistle collector uses the existing `asr-file` and
+`external-asr-quality` groups with the shared golden inventory.
 `scripts/evaluate_whistle.py` selects local pinned assets and accepts repeated
 `--fixture ID` filters; it never starts a server or downloads weights. Skip
 unsupported languages and audio beyond the native 30-second limit explicitly.
@@ -244,3 +240,21 @@ allocations, includes the app/test harness, and retains the peak of earlier case
 Use isolated processes for memory comparisons, and never label these counters
 as total model/system RAM or energy. `ASR_SAVED_RESULT` emits structured shared
 WER/CER scores, preserving candidate output and iteration identity.
+
+## Result storage
+
+Keep raw outputs, benchmark JSON, logs, xcresult exports, dated evaluations and
+PR/readiness notes outside the Git checkout. In the development workspace, use
+an absolute path under workspace `docs/<topic>/`; elsewhere use a local output
+directory outside the repo. Collector `--output` paths must follow the same rule.
+Commit reusable collectors, independent golden references, licenses and input
+hashes, not generated measurements. Record revisions and configuration alongside
+local results. Project guides describe the current runtime and commands.
+
+Qwen and Moonshine collectors require explicit asset-integrity inputs. Supply
+`--model-metadata scripts/fixtures/qwen-asr-4bit-metadata.json` (or the 8-bit
+variant) to `scripts/evaluate_qwen_asr.py`, and
+`--model-catalog scripts/fixtures/moonshine-small-catalog.json` to
+`scripts/evaluate_moonshine.py`. These pinned upstream manifests are inputs,
+not benchmark output. Use each collector's `--help` for the required local model,
+fixture and output options; collectors do not download weights automatically.

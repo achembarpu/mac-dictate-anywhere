@@ -178,8 +178,8 @@ production preset; the first is not a forced OS/model-cache-cold measurement.
 Single-run cleanup measurements and two Apple Speech sessions do not establish
 p95 latency, population WER or performance across every Mac. Cleanup WER/CER can
 penalize valid editing alternatives; consult semantic misses, lost facts and
-fallback status alongside it. Detailed results belong in
-`docs/model-stack-benchmark-results.md` and its structured evidence file.
+fallback status alongside it. Store dated results and raw outputs outside the
+repository, as described in the [benchmark guide](../../../docs/performance-benchmarking.md).
 
 Apple Speech asset installation is explicit: set
 `PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1` to use the framework's normal asset cache.
@@ -197,20 +197,19 @@ scorer checks the manifest hash to avoid comparing different input revisions.
 The `external-asr-quality` group accepts `PIPELINE_BENCHMARK_ASR_URL` for a
 loopback OpenAI-compatible speech runtime, `PIPELINE_BENCHMARK_MODEL`, languages
 and repeats. It uses the same licensed audio/reference files and WER/CER code,
-and does not launch a server or download models. See
-[candidate evaluation](../../../docs/model-candidate-evaluation.md) for pinned
-recipes and [measured outcomes](../../../docs/model-stack-benchmark-results.md).
+and does not launch a server or download models. Use the local collector
+`--help` output for its input/model options; save outputs outside the checkout.
 
 ## Small candidate screens and resource accounting
 
 `asr-acoustics` separates quiet Float32 input from PCM16 re-quantization and
 screens gain ceilings plus synthetic nonspeech. It uses the existing golden
 references, installed TDT models and shared WER. Select one model/fixture; no
-product audio/default changes. Results and limits are in
-[the acoustic screen](../../../docs/tdt-acoustic-screen.md).
+product audio/default changes. `PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS` narrows
+the selected transforms without changing the golden reference.
 
-The local Whistle collector is `scripts/evaluate_whistle.py`; installation, pinned
-assets and measured limitations are in [Whistle evaluation](../../../docs/whistle-evaluation.md).
+The local Whistle collector is `scripts/evaluate_whistle.py`; its `--help`
+output describes the required local model assets and fixture filters.
 It skips files beyond the documented 30-second native API limit; it never scores a
 truncated prefix against a complete reference. Saved outputs use the existing
 `external-asr-quality` scorer, now emitting `ASR_SAVED_RESULT` JSON rows.
@@ -218,5 +217,5 @@ truncated prefix against a complete reference. Saved outputs use the existing
 `asr-file` also records CPU time across all process threads and cumulative process
 peak RSS. These include the XCTest/app harness; they are not isolated model memory
 or energy. Use separate model runs for memory comparisons. Start with a small
-fixture/model screen and advance only useful candidates. Rejected historical
-configurations and their evidence remain documented, without an automatic rerun.
+fixture/model screen and advance only useful candidates. Store outputs and evaluations outside the repo; do not rerun a rejected
+configuration without a new question to resolve.

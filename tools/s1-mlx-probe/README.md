@@ -2,23 +2,22 @@
 
 This standalone Swift executable evaluates a possible Apple Silicon cleanup
 backend. It does not change the app's dependencies, model picker or decoder.
-The [evaluation](../../docs/s1-mlx-evaluation.md) retains measured outputs and
-explains the limits of the comparison with production llama.cpp.
+Use the [benchmark guide](../../docs/performance-benchmarking.md) to score
+saved outputs against the app's independent references.
 
 ## Reproduce
 
 Use Apple Silicon, Xcode's command line tools and the Metal compiler component.
-The measured build used Xcode 27 / Swift 6.4. Transitive MLX Swift 0.31.6 requires
+Transitive MLX Swift 0.31.6 requires
 Swift 6.3 or later for C generation. Install the optional compiler with
 `xcodebuild -downloadComponent MetalToolchain` if `xcrun metal --version` cannot
 find it. The committed `Package.resolved` pins the complete dependency graph;
-the package declares macOS 14, but this probe was run on macOS 26.7.1 only.
+the package declares macOS 14.
 
 Download the author's `superwhisper/s1-mini` snapshot at revision
 `88f6b15896c73bbb13a3b596e0afe8ea0d5150b4` into the usual Hugging Face cache.
-The research environment used Python 3.12.11, `mlx==0.32.3`,
-`mlx-lm==0.32.0`, `transformers==5.18.0` and `huggingface-hub==1.33.0`.
-For example, in an isolated environment with those versions:
+For conversion, use an isolated Python environment with `mlx-lm` and
+`huggingface-hub`, then verify the resulting assets before use:
 
 ```python
 from huggingface_hub import snapshot_download
@@ -70,8 +69,7 @@ loading and the app's postprocessing/fallback gates. Per-fixture first shape
 use remains visible in the three trials. This is neither live dictation nor a
 complete production lifecycle implementation.
 
-A production integration still needs the existing chunk/fallback rules, bounded
-cancellation and unload, cache/download validation, settings-driven preparation,
-model footprint/energy checks, and tests on additional supported Macs. Retain
-llama.cpp for Intel. The 4-bit native result justifies that work; the much slower
-Python loop and quantized MLX KV experiment are retained as rejected variants.
+This probe does not implement app chunking/fallback, lifecycle cancellation or
+installation. Use the production service for those contracts. Save raw outputs
+and evaluations outside the checkout, under workspace `docs/<topic>/` when using
+the development workspace. Model weights stay in the normal model cache.
