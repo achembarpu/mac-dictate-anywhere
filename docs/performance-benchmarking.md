@@ -24,6 +24,20 @@ uses optimized dependencies, testability and the ignored Team ID signing overrid
 Keep a stable DerivedData directory per worktree. Benchmark results use a separate
 `DictateAnywhere-Benchmark.xcresult` bundle.
 
+## Regression tests
+
+After configuring ignored Team ID signing, run `scripts/dev.sh build` and
+`scripts/dev.sh test` for the normal Debug suite. `scripts/dev_test.sh` checks
+command selection, signing and environment forwarding without invoking Xcode;
+the Python collector checks live in `scripts/tests/`.
+
+Keep regression tests that detect a distinct user-visible failure or external
+contract violation. Assert consumer outcomes with independent references; avoid
+copied implementation formulas, constant/enum assertions and screenshots without
+a comparison oracle. Use fixture tables when cases share setup and behavior.
+Keep ordering-sensitive lifecycle/cancellation cases separate. Browser, live
+provider and microphone integration checks require their explicit opt-ins.
+
 ## Choose the smallest useful run
 
 | Groups | Purpose |
