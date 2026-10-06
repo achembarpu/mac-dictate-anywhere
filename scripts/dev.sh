@@ -12,6 +12,9 @@ SIGNING_CONFIG_PATH="${SIGNING_CONFIG_PATH:-$ROOT_DIR/Config/Signing.local.xccon
 ALLOW_PROVISIONING_UPDATES=0
 RESULT_BUNDLE_PATH="$DERIVED_DATA_PATH/Logs/Test/DictateAnywhere.xcresult"
 DEV_EXECUTABLE_NAME="Dictate Anywhere Dev"
+BENCHMARK_GROUPS=(all)
+BENCHMARK_FILTER_SET=0
+BENCHMARK_LIST=0
 
 usage() {
   cat <<EOF
@@ -23,9 +26,11 @@ Commands:
   launch  Build and launch the canonical Debug app
   test [OPTIONS]
           Build and run the project tests
-  benchmark
+  benchmark [OPTIONS]
           Run repeatable ASR and synthetic pipeline benchmarks
           Accepts --configuration Debug|Release and --release
+          --only GROUP[,GROUP] selects focused groups (repeatable; default all)
+          --list shows available benchmark groups without building
   check   Validate the Xcode project and Debug scheme
   clean   Stop the app and remove project DerivedData
   stop    Stop the running canonical app
@@ -55,6 +60,87 @@ fail() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+}
+
+# One registry owns group names, descriptions, and Xcode test selectors.
+benchmark_catalog() {
+  cat <<'EOF'
+asr|Installed-model speech accuracy and latency|RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark RecoveryASRSmokeTests/testInstalledMandarinASRBenchmark RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark
+preview|Non-streaming pending-audio work|RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark
+audio|Meter polling and PCM buffer construction|PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark PipelineWorkloadBenchmarkTests/testPCMBufferConstruction
+overlay|Preview observation and suffix cost|OverlayContentTests OverlayPerformanceBenchmarkTests
+transcript|Long transcript assembly and normalization|PipelineWorkloadBenchmarkTests/testLongTranscriptAssemblyAndNormalization
+insertion|Insertion formatting and paste-script caching|PipelinePerformanceBenchmarkTests/testInsertionPreparationBenchmark PipelinePerformanceBenchmarkTests/testPasteScriptCacheBenchmark PipelinePerformanceBenchmarkTests/testPasteScriptPrecompilesWithoutExecuting
+cloud-request|AssemblyAI request encoding without network|PipelineWorkloadBenchmarkTests/testAssemblyAIRequestEncoding
+recovery|Recovery audio write and read|PipelineWorkloadBenchmarkTests/testRecoveryWriteAndRead
+cleanup|S1-mini prewarm/cleanup and Apple Intelligence|PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark PipelineWorkloadBenchmarkTests/testS1MiniCleanupWithInstalledModel PipelineWorkloadBenchmarkTests/testAppleIntelligenceCleanupWhenAvailable
+model-switch|Installed-model switch timings (opt-in)|ModelSwitchBenchmarkTests/testModelSwitchTimings
+EOF
+}
+
+list_benchmarks() {
+  local group description selectors
+  printf '%-16s %s\n' all 'All registered groups (default)'
+  while IFS='|' read -r group description selectors; do
+    printf '%-16s %s\n' "$group" "$description"
+  done < <(benchmark_catalog)
+}
+
+add_benchmark_groups() {
+  local value="$1" requested group description selectors known existing
+  local -a requested_groups
+  [[ -n "$value" && "$value" != ,* && "$value" != *, && "$value" != *,,* ]] || \
+    fail "--only requires nonempty comma-separated groups; use benchmark --list"
+  IFS=',' read -r -a requested_groups <<< "$value"
+  for requested in "${requested_groups[@]}"; do
+    known=0
+    [[ "$requested" == all ]] && known=1
+    while IFS='|' read -r group description selectors; do
+      [[ "$requested" == "$group" ]] && known=1
+    done < <(benchmark_catalog)
+    [[ "$known" == 1 ]] || fail "Unknown benchmark group: $requested (use benchmark --list)"
+    if [[ "$BENCHMARK_FILTER_SET" == 0 ]]; then
+      BENCHMARK_GROUPS=("$requested")
+      BENCHMARK_FILTER_SET=1
+    else
+      existing=0
+      for group in "${BENCHMARK_GROUPS[@]}"; do
+        [[ "$group" == "$requested" ]] && existing=1
+      done
+      [[ "$existing" == 1 ]] || BENCHMARK_GROUPS+=("$requested")
+    fi
+  done
+}
+
+parse_benchmark_options() {
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --only)
+        [[ "$#" -ge 2 && "$2" != --* ]] || fail "--only requires a group; use benchmark --list"
+        add_benchmark_groups "$2"
+        shift 2
+        ;;
+      --list) BENCHMARK_LIST=1; shift ;;
+      --configuration)
+        [[ "$#" -ge 2 ]] || fail "Missing value for --configuration"
+        parse_configuration_options "$1" "$2"
+        shift 2
+        ;;
+      --release|--allow-provisioning-updates)
+        parse_configuration_options "$1"
+        shift
+        ;;
+      *) fail "Unknown benchmark option: $1" ;;
+    esac
+  done
+}
+
+benchmark_group_selected() {
+  local group
+  for group in "${BENCHMARK_GROUPS[@]}"; do
+    [[ "$group" == all || "$group" == "$1" ]] && return 0
+  done
+  return 1
 }
 
 parse_configuration_options() {
@@ -165,7 +251,17 @@ run_benchmark() {
   local -a benchmark_xcodebuild_args=("${xcodebuild_args[@]}")
   # Keep nonempty for macOS's Bash 3.2 with `set -u` array expansion.
   local -a benchmark_test_environment=("TEST_RUNNER_PIPELINE_BENCHMARK=1")
-  local name
+  local name group description selectors selector
+  local -a group_selectors
+  local benchmark_result_bundle_path="${RESULT_BUNDLE_PATH%.xcresult}-Benchmark.xcresult"
+  while IFS='|' read -r group description selectors; do
+    if benchmark_group_selected "$group"; then
+      read -r -a group_selectors <<< "$selectors"
+      for selector in "${group_selectors[@]}"; do
+        benchmark_xcodebuild_args+=("-only-testing:Dictate AnywhereTests/$selector")
+      done
+    fi
+  done < <(benchmark_catalog)
   # xcodebuild does not pass ordinary shell variables to its test host. Xcode
   # strips TEST_RUNNER_ and forwards only these explicitly opted-in settings.
   for name in DICTATE_ANYWHERE_PERF_TRACE PIPELINE_BENCHMARK_ITERATIONS \
@@ -189,18 +285,13 @@ run_benchmark() {
       CODE_COVERAGE_ENABLED=NO
     )
   fi
-  rm -rf "$RESULT_BUNDLE_PATH"
+  printf 'Benchmark groups: %s; app and test optimization: -O\n' "${BENCHMARK_GROUPS[*]}"
+  rm -rf "$benchmark_result_bundle_path"
   env "${benchmark_test_environment[@]}" xcodebuild "${benchmark_xcodebuild_args[@]}" \
+    SWIFT_OPTIMIZATION_LEVEL=-O \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
     -enableCodeCoverage NO \
-    -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark" \
-    -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testInstalledMandarinASRBenchmark" \
-    -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark" \
-    -only-testing:"Dictate AnywhereTests/RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark" \
-    -only-testing:"Dictate AnywhereTests/PipelinePerformanceBenchmarkTests" \
-    -only-testing:"Dictate AnywhereTests/PipelineWorkloadBenchmarkTests" \
-    -only-testing:"Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings" \
-    -resultBundlePath "$RESULT_BUNDLE_PATH" test
+    -resultBundlePath "$benchmark_result_bundle_path" test
 }
 
 report_test_results() {
@@ -383,8 +474,12 @@ if [[ "$command" == "signing" ]]; then
 fi
 
 case "$command" in
-  build|test|benchmark)
+  build|test)
     parse_configuration_options "${@:2}"
+    ;;
+  benchmark)
+    parse_benchmark_options "${@:2}"
+    if [[ "$BENCHMARK_LIST" == 1 ]]; then list_benchmarks; exit 0; fi
     ;;
   launch|check|clean|stop)
     [[ "$#" -eq 1 ]] || fail "Usage: $(basename "$0") $command"

@@ -1122,7 +1122,7 @@ final class AppState {
 
         // Show overlay only after mic is confirmed active
         guard !isShuttingDown else { return }
-        overlay.show(state: .listening(level: 0, transcript: currentTranscript))
+        overlay.showListening(level: 0, transcript: currentTranscript)
 
         // Start audio level polling
         startAudioLevelPolling(engine: engine)
@@ -1893,7 +1893,7 @@ final class AppState {
                     }
                 }
 
-                self.overlay.show(state: .listening(level: level, transcript: displayTranscript))
+                self.overlay.showListening(level: level, transcript: displayTranscript)
                 levelPollTrace?.end()
                 try? await Task.sleep(for: .milliseconds(33))
             }

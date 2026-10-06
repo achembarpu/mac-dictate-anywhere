@@ -47,7 +47,7 @@ final class OverlayWindowScreenSessionTests: XCTestCase {
 
     private func showListening(updates: Int) {
         for update in 0..<updates {
-            overlay.show(state: .listening(level: Float(update % 10) / 10, transcript: ""))
+            overlay.showListening(level: Float(update % 10) / 10, transcript: "")
         }
     }
 
@@ -60,7 +60,7 @@ final class OverlayWindowScreenSessionTests: XCTestCase {
     /// One dictation walks through several states without hiding in between;
     /// the overlay must not re-pick its display partway through.
     func testStateChangesWithinOneSessionKeepTheSameDisplay() {
-        overlay.show(state: .listening(level: 0.2, transcript: "hello"))
+        overlay.showListening(level: 0.2, transcript: "hello")
         overlay.show(state: .processing)
         overlay.show(state: .success)
 

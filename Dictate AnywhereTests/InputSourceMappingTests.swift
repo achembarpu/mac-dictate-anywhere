@@ -298,7 +298,7 @@ final class InputSourceMappingTests: XCTestCase {
 }
 
 #if DEBUG
-private final class ProfileTraceRecords: @unchecked Sendable {
+nonisolated private final class ProfileTraceRecords: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [(String, String)] = []
 

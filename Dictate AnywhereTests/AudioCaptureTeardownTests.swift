@@ -72,7 +72,7 @@ private final class DelayedStopController: @unchecked Sendable, AudioCaptureCont
     }
 }
 
-private final class TeardownDurations: @unchecked Sendable {
+nonisolated private final class TeardownDurations: @unchecked Sendable {
     private let lock = NSLock()
     private var durations: [Int] = []
 

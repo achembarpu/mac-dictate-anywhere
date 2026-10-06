@@ -9,11 +9,7 @@ final class DesignSystemTests: XCTestCase {
     private func components(_ color: Color) -> (r: Double, g: Double, b: Double, a: Double) {
         // Pin light appearance: tokens are dynamic, and the suite must assert
         // the design.pen light palette regardless of the machine's setting.
-        let previous = NSAppearance.current
-        NSAppearance.current = NSAppearance(named: .aqua) ?? previous
-        defer { NSAppearance.current = previous }
-        let ns = NSColor(color).usingColorSpace(.sRGB)!
-        return (ns.redComponent, ns.greenComponent, ns.blueComponent, ns.alphaComponent)
+        components(color, appearance: .aqua)
     }
 
     func testColorHexDecodesChannels() {
@@ -98,11 +94,13 @@ final class DesignSystemTests: XCTestCase {
     // MARK: - Dark scheme (system appearance)
 
     private func components(_ color: Color, appearance: NSAppearance.Name) -> (r: Double, g: Double, b: Double, a: Double) {
-        let previous = NSAppearance.current
-        NSAppearance.current = NSAppearance(named: appearance) ?? previous
-        defer { NSAppearance.current = previous }
-        let ns = NSColor(color).usingColorSpace(.sRGB)!
-        return (ns.redComponent, ns.greenComponent, ns.blueComponent, ns.alphaComponent)
+        let drawingAppearance = NSAppearance(named: appearance) ?? NSAppearance.currentDrawing()
+        var result = (r: 0.0, g: 0.0, b: 0.0, a: 0.0)
+        drawingAppearance.performAsCurrentDrawingAppearance {
+            let ns = NSColor(color).usingColorSpace(.sRGB)!
+            result = (ns.redComponent, ns.greenComponent, ns.blueComponent, ns.alphaComponent)
+        }
+        return result
     }
 
     private func XCTAssertHex(

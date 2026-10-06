@@ -103,5 +103,74 @@ for host_arch in arm64 x86_64; do
   done
 done
 
+assert_benchmark_arg() {
+  /usr/bin/grep -Fxq -- "$1" "$XCODEBUILD_ARGS_LOG" || {
+    printf 'FAIL: missing benchmark argument: %s\n' "$1" >&2
+    exit 1
+  }
+}
+
+assert_benchmark_selector_count() {
+  local count
+  count="$(/usr/bin/grep -c '^-only-testing:' "$XCODEBUILD_ARGS_LOG")"
+  [[ "$count" == "$1" ]] || {
+    printf 'FAIL: expected %s focused selectors, got %s\n' "$1" "$count" >&2
+    exit 1
+  }
+}
+
+/bin/rm -f "$XCODEBUILD_ARGS_LOG"
+"$SCRIPT" benchmark --list > "$TEST_ROOT/benchmark-list.log"
+[[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: --list invoked Xcode\n' >&2; exit 1; }
+for group in all asr preview audio overlay transcript insertion cloud-request recovery cleanup model-switch; do
+  /usr/bin/grep -Eq "^$group +" "$TEST_ROOT/benchmark-list.log" || {
+    printf 'FAIL: group %s missing from --list\n' "$group" >&2
+    exit 1
+  }
+done
+
+"$SCRIPT" benchmark --only overlay >/dev/null
+assert_benchmark_selector_count 2
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/OverlayContentTests'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/OverlayPerformanceBenchmarkTests'
+assert_benchmark_arg 'SWIFT_OPTIMIZATION_LEVEL=-O'
+assert_benchmark_arg "$default_path/Logs/Test/DictateAnywhere-Benchmark.xcresult"
+
+"$SCRIPT" benchmark --only audio,overlay --only audio --only cleanup >/dev/null
+assert_benchmark_selector_count 7
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchmarkTests/testPCMBufferConstruction'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
+
+"$SCRIPT" benchmark >/dev/null
+assert_benchmark_selector_count 18
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
+
+touch "$TEST_ROOT/Signing.local.xcconfig"
+SIGNING_CONFIG_PATH="$TEST_ROOT/Signing.local.xcconfig" \
+  PIPELINE_BENCHMARK_ITERATIONS=7 "$SCRIPT" benchmark --only overlay --release >/dev/null
+assert_benchmark_selector_count 2
+assert_benchmark_arg Release
+assert_benchmark_arg 'CODE_SIGN_IDENTITY=Apple Development'
+assert_benchmark_arg 'ENABLE_TESTABILITY=YES'
+assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED'
+
+for invalid in unknown '' ',overlay' 'overlay,' 'overlay,,audio'; do
+  /bin/rm -f "$XCODEBUILD_ARGS_LOG"
+  if "$SCRIPT" benchmark --only "$invalid" >/dev/null 2>&1; then
+    printf 'FAIL: invalid benchmark group accepted: %s\n' "$invalid" >&2
+    exit 1
+  fi
+  [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: invalid group invoked Xcode\n' >&2; exit 1; }
+done
+if "$SCRIPT" benchmark --only >/dev/null 2>&1 || \
+   "$SCRIPT" benchmark --only --list >/dev/null 2>&1 || \
+   "$SCRIPT" test --only overlay >/dev/null 2>&1; then
+  printf 'FAIL: missing benchmark group or benchmark-only flag accepted\n' >&2
+  exit 1
+fi
+
 printf 'Development script architecture selection tests passed.\n'
 printf 'Development script clean safety tests passed.\n'
+printf 'Benchmark discovery, focused/combined/default selection, signing and invalid-input tests passed.\n'

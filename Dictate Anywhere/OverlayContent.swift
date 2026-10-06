@@ -22,7 +22,7 @@ enum OverlayMetrics {
 
 /// Overlay display states
 enum OverlayState: Equatable {
-    case listening(level: Float, transcript: String)
+    case listening
     case processing
     case success
     case copiedOnly
@@ -32,9 +32,24 @@ enum OverlayState: Equatable {
 /// Observable model bridging OverlayWindow → SwiftUI
 @Observable
 final class OverlayModel {
-    var overlayState: OverlayState = .listening(level: 0, transcript: "")
+    private(set) var overlayState: OverlayState = .listening
+    private(set) var audioLevel: Float = 0
+    private(set) var transcript: String = ""
     var isVisible: Bool = false
     var cancellationProgress: Double?
+
+    /// Keep waveform updates independent of the transcript and pill layout.
+    func updateListening(level: Float, transcript: String) {
+        if audioLevel != level { audioLevel = level }
+        if self.transcript != transcript { self.transcript = transcript }
+    }
+
+    func updateState(_ state: OverlayState) {
+        if state != .listening {
+            updateListening(level: 0, transcript: "")
+        }
+        if overlayState != state { overlayState = state }
+    }
 }
 
 struct OverlayContent: View {
@@ -124,13 +139,6 @@ struct OverlayContent: View {
         }
     }
 
-    private var hasTranscript: Bool {
-        if case .listening(_, let transcript) = state {
-            return !transcript.isEmpty
-        }
-        return false
-    }
-
     var body: some View {
         VStack {
             Spacer()
@@ -162,8 +170,12 @@ struct OverlayContent: View {
             CancellationProgressView(progress: progress, tint: overlayTextColor)
         } else {
             switch state {
-            case .listening(let level, let transcript):
-                listeningContent(level: level, transcript: transcript)
+            case .listening:
+                ListeningOverlayContent(
+                    model: model,
+                    showTextPreview: showTextPreview,
+                    textColor: overlaySecondaryTextColor
+                )
 
             case .processing:
                 ProcessingStatusView(tint: overlayTextColor)
@@ -193,17 +205,23 @@ struct OverlayContent: View {
             }
         }
     }
+}
 
-    @ViewBuilder
-    private func listeningContent(level: Float, transcript: String) -> some View {
-        let previewText = trimmedPreviewText(for: transcript)
-        if showTextPreview && !transcript.isEmpty {
+/// Transcript observation is independent of the waveform level.
+struct ListeningOverlayContent: View {
+    let model: OverlayModel
+    let showTextPreview: Bool
+    let textColor: Color
+
+    var body: some View {
+        if showTextPreview && !model.transcript.isEmpty {
+            let previewText = OverlayPreviewText.trimmed(model.transcript)
             VStack(spacing: OverlayMetrics.size(6)) {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         Text(previewText)
                             .font(.system(size: OverlayMetrics.type(13), weight: .light))
-                            .foregroundStyle(overlaySecondaryTextColor)
+                            .foregroundStyle(textColor)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .id("transcript")
@@ -218,28 +236,42 @@ struct OverlayContent: View {
                 .padding(.horizontal, OverlayMetrics.size(16))
                 .padding(.top, OverlayMetrics.size(10))
 
-                WaveformView(audioLevel: level)
+                OverlayWaveformContent(model: model)
                     .padding(.horizontal, OverlayMetrics.size(16))
                     .padding(.bottom, OverlayMetrics.size(8))
             }
         } else if showTextPreview {
             VStack {
                 Spacer()
-                WaveformView(audioLevel: level)
+                OverlayWaveformContent(model: model)
                     .padding(.horizontal, OverlayMetrics.size(16))
                     .padding(.bottom, OverlayMetrics.size(8))
             }
         } else {
-            WaveformView(audioLevel: level)
+            OverlayWaveformContent(model: model)
                 .padding(.horizontal, OverlayMetrics.size(20))
         }
     }
+}
 
-    private func trimmedPreviewText(for transcript: String) -> String {
-        guard !transcript.isEmpty else { return "" }
-        let maxCharacters = Int(320 * OverlayMetrics.footprintScale)
-        guard transcript.count > maxCharacters else { return transcript }
-        return "..." + String(transcript.suffix(maxCharacters))
+struct OverlayWaveformContent: View {
+    let model: OverlayModel
+
+    var body: some View {
+        WaveformView(audioLevel: model.audioLevel)
+    }
+}
+
+enum OverlayPreviewText {
+    static let maximumCharacters = Int(320 * OverlayMetrics.footprintScale)
+
+    static func trimmed(_ transcript: String) -> String {
+        guard let start = transcript.index(
+            transcript.endIndex,
+            offsetBy: -maximumCharacters,
+            limitedBy: transcript.startIndex
+        ), start != transcript.startIndex else { return transcript }
+        return "..." + String(transcript[start...])
     }
 }
 

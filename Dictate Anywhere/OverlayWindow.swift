@@ -62,6 +62,11 @@ final class OverlayWindow {
         }
     }
 
+    func showListening(level: Float, transcript: String) {
+        model.updateListening(level: level, transcript: transcript)
+        show(state: .listening)
+    }
+
     func show(state: OverlayState) {
         let supersedesFinishingSession = hideTask != nil
         hideTask?.cancel()
@@ -112,8 +117,8 @@ final class OverlayWindow {
             window?.contentView = hostingView
         }
 
-        model.overlayState = state
-        model.isVisible = true
+        model.updateState(state)
+        if !model.isVisible { model.isVisible = true }
 
         positionWindow()
         window?.orderFrontRegardless()
