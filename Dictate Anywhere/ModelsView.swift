@@ -79,9 +79,11 @@ struct ModelsView: View {
                             : "On-device speech-to-text"
                     )
                     DSDivider()
+                    DSInfoRow(label: "Underlying model", value: selectedModel.modelName)
+                    DSDivider()
                     DSInfoRow(label: "Languages", value: selectedModel.languageSummary)
                     DSDivider()
-                    DSInfoRow(label: "Size", value: selectedModel.sizeSummary)
+                    DSInfoRow(label: "Download size", value: selectedModel.sizeSummary)
                     if let alternateModel = alternateInstalledModel(excluding: selectedModel) {
                         DSDivider()
                         DSInfoRow(label: "Also installed", value: alternateModel.displayName)
@@ -119,7 +121,9 @@ struct ModelsView: View {
                 DSHint(text: selectedModel.speechModelFooter)
             } else if settings.engineChoice == .appleSpeech {
                 DSSection(overline: "Apple Speech") {
-                    DSInfoRow(label: "Type", value: "Latest on-device speech-to-text from Apple")
+                    DSInfoRow(label: "Model", value: "Apple Speech — managed by macOS")
+                    DSDivider()
+                    DSInfoRow(label: "Type", value: "On-device speech-to-text")
                     DSDivider()
                     DSInfoRow(label: "Language", value: settings.appleSpeechLanguage.displayName)
                     DSDivider()
@@ -199,6 +203,8 @@ struct ModelsView: View {
         @Bindable var settings = settings
 
         DSSection(overline: "AssemblyAI") {
+            DSInfoRow(label: "Model", value: "AssemblyAI Dictation — provider-managed")
+            DSDivider()
             DSDetailRow(
                 label: "API key",
                 caption:

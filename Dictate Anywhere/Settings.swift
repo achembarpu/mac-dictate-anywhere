@@ -266,43 +266,75 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
 
     nonisolated var displayName: String {
         switch self {
-        case .multilingual: return "Multilingual"
-        case .multilingualUltra: return "Multilingual Ultra"
-        case .englishOnly: return "English Only"
-        case .compactEnglish: return "English Compact (110M)"
-        case .parakeetEou320: return "Parakeet EOU Streaming"
-        case .nemotron560: return "Nemotron Streaming (560 ms)"
-        case .nemotron1120: return "Nemotron Streaming (1120 ms)"
-        case .nemotron2240: return "Nemotron Streaming (2240 ms)"
-        case .senseVoice: return "Chinese (SenseVoice)"
-        case .nemotronMultilingual: return "Multilingual Streaming (Nemotron)"
+        case .multilingual: return "Parakeet v3"
+        case .multilingualUltra: return "Parakeet Ultra"
+        case .englishOnly: return "Parakeet v2"
+        case .compactEnglish: return "Parakeet 110M"
+        case .parakeetEou320: return "Parakeet EOU 120M"
+        case .nemotron560, .nemotron1120, .nemotron2240: return "Nemotron EN 0.6B"
+        case .senseVoice: return "SenseVoice Small"
+        case .nemotronMultilingual: return "Nemotron 3.5 0.6B"
         }
     }
 
     nonisolated var detail: String {
         switch self {
         case .multilingual:
-            return "25 European languages with automatic language detection."
+            return "Balanced dictation across 25 European languages, with automatic language detection."
         case .multilingualUltra:
-            return "Updated Parakeet model for stronger multilingual accuracy across 25 European languages."
+            return "An alternative Parakeet checkpoint for 25 European languages. Results vary by language and recording; the download is larger than v3."
         case .englishOnly:
-            return "English-only vocabulary tuned for stronger English accuracy."
+            return "Accuracy-focused English dictation. Uses Parakeet's English-only v2 checkpoint."
         case .compactEnglish:
-            return "Smaller English-only Parakeet model with faster downloads and lower memory use."
+            return "A smaller English model when download size and memory use matter."
         case .parakeetEou320:
-            return "True streaming English dictation with end-of-speech detection and lower preview latency."
-        case .nemotron560:
-            return "True streaming English dictation with the lowest Nemotron latency tier."
-        case .nemotron1120:
-            return "True streaming English dictation with a balanced Nemotron latency and accuracy tier."
-        case .nemotron2240:
-            return "True streaming English dictation with Nemotron's higher-throughput tier."
+            return "Compact live English preview, with optional automatic stop after speech ends. Trades some accuracy for size and responsiveness."
+        case .nemotron560, .nemotron1120, .nemotron2240:
+            return "A larger English streaming alternative. The performance preset balances preview delay and processing throughput."
         case .senseVoice:
-            return "Chinese (Simplified) dictation with mixed English, native punctuation, and the best accuracy for Mandarin."
+            return "Mandarin dictation with mixed English and native punctuation. Chinese output uses Simplified characters."
         case .nemotronMultilingual:
-            return "True streaming dictation across 40+ languages including Chinese, with lower accuracy than SenseVoice for Mandarin."
+            return "Live multilingual preview on Apple Silicon. Language coverage and accuracy vary; SenseVoice is recommended for Mandarin final accuracy."
         }
     }
+
+
+    nonisolated var modelName: String {
+        switch self {
+        case .multilingual: return "NVIDIA Parakeet TDT 0.6B v3"
+        case .multilingualUltra: return "moondream Parakeet Ultra"
+        case .englishOnly: return "NVIDIA Parakeet TDT 0.6B v2"
+        case .compactEnglish: return "NVIDIA Parakeet TDT-CTC 110M"
+        case .parakeetEou320: return "NVIDIA Parakeet Realtime EOU 120M"
+        case .nemotron560, .nemotron1120, .nemotron2240:
+            return "NVIDIA Nemotron Speech Streaming EN 0.6B"
+        case .senseVoice: return "FunAudioLLM SenseVoiceSmall"
+        case .nemotronMultilingual: return "NVIDIA Nemotron 3.5 ASR Streaming 0.6B"
+        }
+    }
+
+    nonisolated var recommendationTitle: String {
+        switch self {
+        case .multilingual: return "European languages"
+        case .multilingualUltra: return "Multilingual alternative"
+        case .englishOnly: return "English accuracy"
+        case .compactEnglish: return "Compact English"
+        case .parakeetEou320: return "Live English + auto-stop"
+        case .nemotron560, .nemotron1120, .nemotron2240: return "English streaming alternative"
+        case .senseVoice: return "Mandarin + English"
+        case .nemotronMultilingual: return "Multilingual live preview"
+        }
+    }
+
+    nonisolated var streamingPresetTitle: String {
+        switch self {
+        case .nemotron560: return "Fast preview (560 ms)"
+        case .nemotron1120: return "Balanced (1120 ms)"
+        case .nemotron2240: return "Higher throughput (2240 ms)"
+        default: return displayName
+        }
+    }
+
 
     nonisolated var modelDirectoryName: String {
         switch self {
