@@ -645,6 +645,48 @@ final class RecoveryASRSmokeTests: XCTestCase {
         #endif
     }
 
+    func testCancelledBatchReplayKeepsFinalAudioWithoutStartingAPreview() async throws {
+        #if !PIPELINE_BENCHMARK
+        throw XCTSkip("Run scripts/dev.sh benchmark with an installed batch model")
+        #else
+        let name = ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_MODEL"] ?? "englishOnly"
+        let choice = try XCTUnwrap(ParakeetModelChoice(rawValue: name))
+        try XCTSkipUnless(!choice.usesTrueStreaming, "Select a batch model")
+        let fixture = try benchmarkFixture(model: choice)
+        let engine = ParakeetEngine()
+        try XCTSkipUnless(hasInstalledBenchmarkModel(choice, engine: engine), "Install selected model and VAD")
+        let reader = try RecoveryAudioReader(url: fixture.url)
+        var audio: [Float] = []
+        while let block = try reader.nextSamples() { audio.append(contentsOf: block) }
+        let settings = Settings.shared
+        let oldChoice = settings.parakeetModelChoice
+        let oldMode = settings.transcriptPostProcessingMode
+        defer { settings.parakeetModelChoice = oldChoice; settings.transcriptPostProcessingMode = oldMode }
+        settings.parakeetModelChoice = choice
+        settings.transcriptPostProcessingMode = .none
+        try await engine.prepare()
+        try await engine.beginBatchReplayForTesting()
+        // Main-actor scheduling makes cancellation precede this task's first
+        // instruction. Audio must still reach the finalizer before checking it.
+        let replay = Task { try await engine.replayBatchAudioForTesting(audio) }
+        replay.cancel()
+        do { try await replay.value; XCTFail("A cancelled replay must skip preview decoding") }
+        catch is CancellationError {}
+        XCTAssertTrue(engine.currentTranscript.isEmpty)
+        XCTAssertEqual(engine.capturedSampleCountsForTesting.total, audio.count)
+        let final = await engine.stopRecording()
+        XCTAssertFalse(final.isEmpty, "Stopping preview work cannot discard captured audio")
+        try await engine.beginBatchReplayForTesting()
+        try await engine.replayBatchAudioForTesting(audio)
+        let normal = await engine.stopRecording()
+        let cancelledError = GoldenSpeechFixture.errorRate(reference: fixture.reference, hypothesis: final, metric: fixture.metric)
+        let normalError = GoldenSpeechFixture.errorRate(reference: fixture.reference, hypothesis: normal, metric: fixture.metric)
+        XCTAssertEqual(cancelledError, normalError, accuracy: 0.000_001,
+            "Cancelled previews must leave authoritative final quality unchanged")
+        print("CANCELLED_PREVIEW_RESULT model=\(choice.rawValue) fixture=\(fixture.id) error_rate=\(cancelledError) normal_error_rate=\(normalError)")
+        #endif
+    }
+
     /// Isolates the SDK's encoder placement recommendation from preview policy.
     /// Report both timings and exact golden-reference errors before adopting it.
     func testTDTEncoderPlacementBenchmark() async throws {

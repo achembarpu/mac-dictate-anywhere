@@ -30,6 +30,8 @@ then one second. TDT preview input is capped at 15 seconds. Timestamp-based
 splicing preserves the earlier provisional prefix and repeated words; it never
 determines final text. Capture awaits inference serially so stale previews do not
 form a queue.
+Stop cancellation feeds any already-drained audio to the decoder, then skips
+starting another provisional decode before authoritative finalization.
 Recent volume windows are copied only for eligible previews; volume tests use
 array slices and stop after the RMS threshold qualifies speech. Native streaming
 retains bounded pending/level audio and the independent recovery file, without

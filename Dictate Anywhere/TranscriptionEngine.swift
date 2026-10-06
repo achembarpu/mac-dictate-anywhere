@@ -1258,6 +1258,8 @@ final class ParakeetEngine: TranscriptionEngine {
             guard isTranscribing, !Task.isCancelled else { break }
             do {
                 try await processBatchAudio()
+            } catch is CancellationError {
+                break
             } catch {
                 logger.error("Batch transcription failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -1276,10 +1278,12 @@ final class ParakeetEngine: TranscriptionEngine {
             return (pending, total, recent, shouldPreview)
         }
         try await asrCoordinator.appendBatchAudio(pending)
+        try Task.checkCancellation()
         guard shouldPreview else { return }
         if !hasSignificantAudio(recent) {
             guard await asrCoordinator.hasRecentBatchSpeech() else { return }
         }
+        try Task.checkCancellation()
         lastBatchPreviewSampleCount = total
         let text = try await asrCoordinator.batchPreview().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !Task.isCancelled else { return }

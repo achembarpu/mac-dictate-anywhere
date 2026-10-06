@@ -174,7 +174,7 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 47
+assert_benchmark_selector_count 48
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 
@@ -220,7 +220,7 @@ fi
 PIPELINE_BENCHMARK_FIXTURE=golden-zh-boundaries PIPELINE_BENCHMARK_GOLDEN=1 \
   PIPELINE_BENCHMARK_METRIC=cer PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1 \
   PIPELINE_BENCHMARK_ENCODER=1 "$SCRIPT" benchmark --only asr-quality >/dev/null
-assert_benchmark_selector_count 4
+assert_benchmark_selector_count 5
 expected_environment=$'golden-zh-boundaries\n1\ncer\n1\n1'
 if [[ "$(<"$XCODEBUILD_ENV_LOG")" != "$expected_environment" ]]; then
   printf 'FAIL: golden fixture benchmark settings were not forwarded to the test host\n' >&2
