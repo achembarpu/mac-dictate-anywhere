@@ -115,11 +115,14 @@ struct DictationListInsertion: Equatable, Sendable {
         let isNativeBullet: Bool
     }
 
+    private nonisolated static let itemExpression = try? NSRegularExpression(
+        pattern: #"^(\h*)(?:([•◦▪‣⁃●○∙])\h*|([-+*]|[0-9]{1,4}[.)])(?:\h+|$))(.*)$"#
+    )
+
     private nonisolated static func parse(_ line: String) -> Item? {
         // Native AX bullets can have no separator at all. Markdown bullets and
         // numbered markers require whitespace (or the end of an empty prefix).
-        let pattern = #"^(\h*)(?:([•◦▪‣⁃●○∙])\h*|([-+*]|[0-9]{1,4}[.)])(?:\h+|$))(.*)$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
+        guard let regex = itemExpression,
               let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) else { return nil }
         let value = line as NSString
         let nativeRange = match.range(at: 2)
