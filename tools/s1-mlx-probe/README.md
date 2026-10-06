@@ -80,8 +80,7 @@ app benchmark for production behavior. Collector timings exclude live capture, U
 ## Runtime matrix
 
 Optional positional arguments after KV_BITS are prefill size, `prefix`/`none`,
-allocator cache limit in MiB, and `qwen-card` for the pinned Qwen3.5-0.8B candidate.
-The last argument can instead be `fp16` to cast floating model tensors to FP16
+allocator cache limit in MiB, and optional `fp16` to cast floating model tensors to FP16
 while keeping packed integer weights unchanged. This is a benchmark option;
 production keeps the original BF16 tensors.
 S1 always uses its trained prompt, greedy sampling and author token budget.
@@ -91,17 +90,9 @@ Prefix mode copies only the public system-prompt cache and checks its offsets.
 tools/s1-mlx-probe/.build/release/S1MLXProbe /path/to/4bit /path/to/app/repo 3 /absolute/workspace/docs/s1-probe/results.json 16 256 prefix 64
 ```
 
-Qwen uses its own chat template, thinking disabled, temperature 1, top-p 1,
-top-k 20 and presence penalty 2 over the full bounded sequence, following the
-author's text-task recipe. Three reproducible seeds (100–102) exercise variability.
-Its prompt explicitly asks for faithful cleanup, preserved facts/questions and
-literal instructions; it is a candidate evaluation, not the production S1 prompt.
-All unfinished responses are marked `completed=false`. Do not compare the latency
-of a shortened/incomplete response with a complete S1 response as a speed win.
-
 The collector includes the shared references plus `s1-cleanup-stress-manifest.json`.
 For group32/128 comparisons, convert the same pinned author snapshot with
 `q_bits=4`, `q_group_size=32` or `128`, affine mode and remote code disabled.
 Keep inference serial and avoid concurrent builds during latency measurements.
 New collector outputs also record both fixture hashes, system-prompt/dependency
-hashes, allocator limit, floating tensor policy and candidate seeds for reuse.
+hashes, allocator limit and floating tensor policy for reuse.
