@@ -211,6 +211,46 @@ final class CleanupProviderContractTests: XCTestCase {
         XCTAssertEqual(calls.withLock { $0 }, 2)
     }
 
+    func testGenericFormatErrorsDoNotRetryPortableOrOllamaGeneration() async throws {
+        for message in ["unsupported model file format", "audio format is not supported", "unsupported information format"] {
+            for useOllama in [false, true] {
+                let generations = OSAllocatedUnfairLock(initialState: 0)
+                CleanupHTTPStub.handler.withLock { $0 = { request in
+                    if request.url?.path.hasSuffix("show") == true { return (200, Data(#"{}"#.utf8)) }
+                    generations.withLock { $0 += 1 }
+                    let error: [String: Any] = useOllama
+                        ? ["error": message]
+                        : ["error": ["message": message]]
+                    return (400, try JSONSerialization.data(withJSONObject: error))
+                } }
+                do {
+                    if useOllama {
+                        _ = try await OllamaPostProcessingService.process(text: "keep all details", baseURL: "http://cleanup.test",
+                            model: UUID().uuidString, prompt: "Clean punctuation.", session: session)
+                    } else {
+                        _ = try await OpenAICompatiblePostProcessingService.process(text: "keep all details", baseURL: "http://cleanup.test",
+                            model: "model", apiKey: "", prompt: "Clean punctuation.", session: session)
+                    }
+                    XCTFail("An unrelated format failure must propagate")
+                } catch {
+                    XCTAssertEqual(error.localizedDescription, message)
+                }
+                XCTAssertEqual(generations.withLock { $0 }, 1, "\(useOllama ? "Ollama" : "Portable"): \(message)")
+            }
+        }
+    }
+
+    func testUnsupportedSchemaClassificationRequiresAnExplicitParameter() {
+        for message in ["response_format is not supported", "json_schema is not supported", "structured output is not supported",
+                        "format is not supported for cloud models", "unknown parameter: format"] {
+            XCTAssertEqual(CleanupRequestAdaptation.unsupportedParameter(in: message), .structuredOutput, message)
+        }
+        for message in ["unsupported model file format", "audio format is not supported", "unsupported information format",
+                        "unsupported model format", "format validation failed", "unknown parameter: model"] {
+            XCTAssertNil(CleanupRequestAdaptation.unsupportedParameter(in: message), message)
+        }
+    }
+
     func testThinkingAndUnsupportedOptionPoliciesUseReportedCapabilities() throws {
         for (values, expected) in [("[false,true]", OllamaReasoningCapability.toggle), ("[true]", .required),
                                    ("[false]", .unsupported), ("[\"low\",\"medium\",\"high\"]", .level)] {

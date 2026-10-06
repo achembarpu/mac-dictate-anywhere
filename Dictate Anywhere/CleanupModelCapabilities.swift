@@ -76,7 +76,19 @@ nonisolated enum CleanupRequestAdaptation {
         let text = message.lowercased()
         guard ["unsupported", "not supported", "not support", "not allowed", "only supports", "unknown parameter", "unrecognized"].contains(where: text.contains) else { return nil }
         if text.contains("temperature") { return .temperature }
-        if text.contains("response_format") || text.contains("json_schema") || text.contains("structured output") || text.contains("format") {
+        if text.contains("response_format") || text.contains("json_schema") || text.contains("structured output") {
+            return .structuredOutput
+        }
+        // Ollama names its schema parameter `format`. A generic file, model
+        // or audio format error does not reject that request parameter.
+        let formatParameterErrors = [
+            "format is not supported",
+            "format is not supported for cloud models",
+            "unsupported parameter: format",
+            "unknown parameter: format",
+            "unrecognized parameter: format"
+        ]
+        if formatParameterErrors.contains(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
             return .structuredOutput
         }
         return nil
