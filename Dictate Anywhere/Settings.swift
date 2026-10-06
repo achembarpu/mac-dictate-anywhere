@@ -336,6 +336,44 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     }
 
 
+    /// Explicit checkpoint sets, not everything in the app's language enum.
+    nonisolated var transcriptionLanguages: [SupportedLanguage] {
+        switch self {
+        case .multilingual, .multilingualUltra:
+            return [.english, .german, .dutch, .swedish, .danish, .spanish,
+                .french, .italian, .portuguese, .romanian, .polish, .czech,
+                .slovak, .slovenian, .croatian, .bulgarian, .ukrainian,
+                .russian, .latvian, .lithuanian, .estonian, .hungarian,
+                .finnish, .greek, .maltese]
+        case .nemotronMultilingual:
+            // Existing export presets only. New upstream locales need export
+            // parity and native hint/quality checks before being offered.
+            return [.english, .german, .dutch, .swedish, .danish, .norwegian,
+                .spanish, .french, .italian, .portuguese, .romanian, .polish,
+                .czech, .slovak, .slovenian, .croatian, .bulgarian,
+                .ukrainian, .russian, .latvian, .lithuanian, .estonian,
+                .hungarian, .finnish, .greek, .chinese]
+        case .senseVoice: return [.english, .chinese]
+        case .englishOnly, .compactEnglish, .parakeetEou320,
+             .nemotron560, .nemotron1120, .nemotron2240: return [.english]
+        }
+    }
+
+    nonisolated func hasLimitedLanguageCoverage(_ language: SupportedLanguage) -> Bool {
+        self == .nemotronMultilingual
+            && [.greek, .lithuanian, .latvian, .slovenian].contains(language)
+    }
+
+    nonisolated func languageSupportNotice(for language: SupportedLanguage) -> String? {
+        if !supportsLanguage(language) {
+            return "\(displayName) does not support \(language.displayName). Choose another model or expected language. Apple Speech may offer additional languages on this Mac."
+        }
+        if hasLimitedLanguageCoverage(language) {
+            return "\(language.displayName) has limited coverage in Nemotron and may require model adaptation. Parakeet v3 is the recommended choice for everyday dictation in this language."
+        }
+        return nil
+    }
+
     nonisolated var modelDirectoryName: String {
         switch self {
         case .multilingual:
@@ -392,10 +430,10 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     nonisolated var languageSummary: String {
         switch self {
         case .multilingual, .multilingualUltra: return "25 European languages"
-        case .senseVoice: return "Chinese (Simplified) + English; also Cantonese, Japanese, Korean"
-        case .nemotronMultilingual: return "40+ languages including Chinese"
-        case .englishOnly, .compactEnglish, .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
-            return "English only"
+        case .senseVoice: return "Mandarin + English (automatic detection)"
+        case .nemotronMultilingual: return "26 language presets; coverage varies"
+        case .englishOnly, .compactEnglish, .parakeetEou320,
+             .nemotron560, .nemotron1120, .nemotron2240: return "English only"
         }
     }
 
@@ -422,17 +460,14 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     nonisolated var languageSettingsFooter: String {
         switch self {
         case .multilingual, .multilingualUltra:
-            return "The multilingual Parakeet model auto-detects among 25 supported European languages."
-        case .englishOnly:
-            return "The English-only Parakeet model is optimized for English dictation."
-        case .compactEnglish:
-            return "The compact 110M Parakeet model is English-only and optimized for faster startup with lower memory use."
-        case .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:
-            return "The selected streaming model is English-only. Choose Multilingual if you dictate in other languages."
-        case .senseVoice:
-            return "SenseVoice auto-detects Chinese (Simplified) and English, including mixed-language dictation. Output uses Simplified characters."
+            return "Auto-detects among 25 supported European languages. The expected language helps guide recognition without forcing translation."
         case .nemotronMultilingual:
-            return "The multilingual Nemotron model streams transcription with a language hint for the selected language when available, including Chinese (Simplified); other languages fall back to automatic detection."
+            return "Uses the expected language as a hint when the export supports it. Some language presets have limited coverage."
+        case .senseVoice:
+            return "Automatically recognizes Mandarin and English, including mixed speech. Chinese output uses Simplified characters."
+        case .englishOnly, .compactEnglish, .parakeetEou320,
+             .nemotron560, .nemotron1120, .nemotron2240:
+            return "This model transcribes English. Choose another model for other languages."
         }
     }
 
@@ -465,10 +500,8 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     /// language handling is fixed (picker hidden, `fixedLanguageLabel` shown).
     nonisolated var selectableLanguages: [SupportedLanguage]? {
         switch self {
-        case .multilingual, .multilingualUltra:
-            return SupportedLanguage.allCases.filter { $0 != .chinese }
-        case .nemotronMultilingual:
-            return SupportedLanguage.allCases
+        case .multilingual, .multilingualUltra, .nemotronMultilingual:
+            return transcriptionLanguages
         case .senseVoice, .englishOnly, .compactEnglish, .parakeetEou320,
              .nemotron560, .nemotron1120, .nemotron2240:
             return nil
@@ -488,15 +521,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     }
 
     nonisolated func supportsLanguage(_ language: SupportedLanguage) -> Bool {
-        switch self {
-        case .senseVoice, .nemotronMultilingual:
-            return true
-        case .multilingual, .multilingualUltra:
-            return language != .chinese
-        case .englishOnly, .compactEnglish, .parakeetEou320,
-             .nemotron560, .nemotron1120, .nemotron2240:
-            return language == .english
-        }
+        transcriptionLanguages.contains(language)
     }
 
     /// TDT models use CTC final rescoring; multilingual Nemotron uses native

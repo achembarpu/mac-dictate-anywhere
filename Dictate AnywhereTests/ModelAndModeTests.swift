@@ -143,7 +143,11 @@ final class ModelAndModeTests: XCTestCase {
             let fallback = ParakeetModelChoice.availableFallback(for: language, hasNeuralEngine: false)
             XCTAssertNotEqual(fallback, .nemotronMultilingual, "\(language) fell back to an Intel-incapable model")
             XCTAssertTrue(fallback.isAvailable(hasNeuralEngine: false))
-            XCTAssertTrue(fallback.supportsLanguage(language), "\(language) lost language support on Intel")
+            if language == .norwegian {
+                XCTAssertFalse(fallback.supportsLanguage(language))
+            } else {
+                XCTAssertTrue(fallback.supportsLanguage(language), "\(language) lost language support on Intel")
+            }
         }
     }
 
@@ -447,9 +451,9 @@ final class ModelAndModeTests: XCTestCase {
         XCTAssertNil(ParakeetModelChoice.senseVoice.selectableLanguages)
         XCTAssertNotNil(ParakeetModelChoice.senseVoice.fixedLanguageLabel)
         XCTAssertEqual(ParakeetModelChoice.nemotronMultilingual.selectableLanguages,
-                       SupportedLanguage.allCases)
-        XCTAssertEqual(ParakeetModelChoice.multilingual.selectableLanguages,
-                       SupportedLanguage.allCases.filter { $0 != .chinese })
+                       SupportedLanguage.allCases.filter { $0 != .maltese })
+        XCTAssertEqual(Set(ParakeetModelChoice.multilingual.selectableLanguages ?? []),
+                       Set(SupportedLanguage.allCases.filter { $0 != .chinese && $0 != .norwegian }))
         XCTAssertFalse(ParakeetModelChoice.multilingual.supportsLanguage(.chinese))
         XCTAssertTrue(ParakeetModelChoice.nemotronMultilingual.supportsLanguage(.chinese))
         XCTAssertTrue(ParakeetModelChoice.senseVoice.supportsLanguage(.chinese))
