@@ -277,3 +277,10 @@ The shared S1 stress references and saved-output scorer apply to any runtime.
 through production file and live replay paths, using the shared human goldens.
 It alternates ordering and records outputs, error, resource use and input hashes.
 Select the model/fixture/iterations with the existing benchmark environment.
+
+`asr-vocabulary` checks multilingual Nemotron's genuine names, absent terms,
+cleared state, file recovery and live previews/finalization. It uses the normal
+app cache and records preparation separately from recognition latency.
+`PIPELINE_BENCHMARK_NATIVE_VOCAB_WEIGHT` is benchmark-only and enables comparison
+with SDK weights; it does not add a product setting. Uses existing iterations
+and golden audio/reference hashes, WER and process CPU/peak RSS accounting.

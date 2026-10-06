@@ -796,6 +796,7 @@ final class ParakeetEngine: TranscriptionEngine {
         logger.info("prepare: entry for \(modelChoice.displayName, privacy: .public)")
         if await asrCoordinator.isInitialized(for: modelChoice) {
             logger.info("prepare: coordinator already initialized for selected model, early return")
+            await prepareVocabularyIfNeeded()
             await MainActor.run {
                 self.isReady = true
                 self.isModelDownloaded = true
@@ -842,6 +843,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
             loadedModels = nil
             modelOnDiskCached[modelChoice] = true
+            await prepareVocabularyIfNeeded()
 
             await MainActor.run {
                 self.isReady = true
@@ -894,16 +896,25 @@ final class ParakeetEngine: TranscriptionEngine {
     /// is enabled after the speech model has already been prepared.
     @discardableResult
     func prepareVocabularyIfNeeded() async -> Bool {
-        guard Settings.shared.transcriptPostProcessingMode == .fluidAudioVocabulary,
-              selectedModelChoice.supportsFluidAudioVocabulary,
-              await asrCoordinator.isInitialized(for: selectedModelChoice) else { return false }
+        let model = selectedModelChoice
+        guard model.supportsFluidAudioVocabulary,
+              await asrCoordinator.isInitialized(for: model) else { return false }
         do {
-            try await asrCoordinator.prepareVocabulary()
+            if model == .nemotronMultilingual {
+                // Also clear a previous bias when vocabulary cleanup is disabled.
+                try await asrCoordinator.prepareStreamingVocabulary(terms: activeVocabularyTerms)
+            } else if Settings.shared.fluidAudioVocabularyEnabled {
+                try await asrCoordinator.prepareVocabulary()
+            } else { return false }
             return true
         } catch {
             logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)")
             return false
         }
+    }
+
+    private var activeVocabularyTerms: [String] {
+        Settings.shared.fluidAudioVocabularyEnabled ? Settings.shared.customVocabulary : []
     }
 
     func startRecording(deviceID: AudioDeviceID?) async throws {
@@ -933,6 +944,9 @@ final class ParakeetEngine: TranscriptionEngine {
             throw TranscriptionError.engineNotReady
         }
         guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
+        if modelChoice == .nemotronMultilingual {
+            try await asrCoordinator.prepareStreamingVocabulary(terms: activeVocabularyTerms)
+        }
         let language = scriptLanguage(for: modelChoice)
         try await asrCoordinator.resetSession(for: modelChoice, language: language)
         recordingModelChoice = modelChoice
@@ -1006,7 +1020,7 @@ final class ParakeetEngine: TranscriptionEngine {
             if audioCaptureStartupCancellation === startupCancellation {
                 audioCaptureStartupCancellation = nil
                 recordingModelChoice = nil
-        recordingScriptLanguage = nil
+                recordingScriptLanguage = nil
                 await asrCoordinator.cancelBatch()
             }
             throw error
@@ -1110,6 +1124,9 @@ final class ParakeetEngine: TranscriptionEngine {
             // Independently transcribing file chunks can split and lose words.
             return try await asrCoordinator.transcribeRecording(at: url, language: scriptLanguage(for: model))
         }
+        if model == .nemotronMultilingual {
+            try await asrCoordinator.prepareStreamingVocabulary(terms: activeVocabularyTerms)
+        }
         try await asrCoordinator.resetSession(for: model, language: scriptLanguage(for: model))
         if model == .nemotronMultilingual {
             await asrCoordinator.setStreamingLanguage(Settings.shared.selectedLanguage.nemotronLanguageCode)
@@ -1210,6 +1227,29 @@ final class ParakeetEngine: TranscriptionEngine {
             totalSampleCount += samples.count
         }
         try await processBatchAudio()
+    }
+
+    func beginStreamingReplayForTesting() async throws {
+        let model = selectedModelChoice
+        guard model.usesTrueStreaming, await asrCoordinator.isInitialized(for: model) else {
+            throw TranscriptionError.engineNotReady
+        }
+        if model == .nemotronMultilingual {
+            try await asrCoordinator.prepareStreamingVocabulary(terms: activeVocabularyTerms)
+            await asrCoordinator.setStreamingLanguage(Settings.shared.selectedLanguage.nemotronLanguageCode)
+        }
+        try await asrCoordinator.resetSession(for: model, language: nil)
+        recordingModelChoice = model
+        isRecordingActive = true
+        currentTranscript = ""
+        sampleLock.withLock { totalSampleCount = 0 }
+    }
+
+    func replayStreamingAudioForTesting(_ samples: [Float]) async throws {
+        sampleLock.withLock { totalSampleCount += samples.count }
+        try await asrCoordinator.appendStreamingAudio(makePCMBuffer(from: samples))
+        try await asrCoordinator.processStreamingAudio()
+        currentTranscript = await asrCoordinator.currentStreamingTranscript()
     }
 
     func batchReplayHasSignificantAudioForTesting(_ samples: [Float]) -> Bool {
@@ -1507,6 +1547,9 @@ private actor AsrManagerCoordinator {
     private var pendingEndOfUtterance = false
     private var ctcModels: CtcModels?
     private var modelGeneration = UUID()
+    private var multilingualModelDirectory: URL?
+    private var preparedStreamingTerms: [String] = []
+    private var streamingVocabularyPreparation: (id: UUID, terms: [String], task: Task<Void, Error>)?
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
         category: "AsrCoordinator"
@@ -1625,6 +1668,7 @@ private actor AsrManagerCoordinator {
             )
             try await streaming.loadModels(from: variantDir)
             multilingualManager = streaming
+            multilingualModelDirectory = variantDir
             streamingModelChoice = modelChoice
         case .multilingual, .multilingualUltra, .englishOnly, .compactEnglish, .senseVoice:
             // .senseVoice never reaches this switch (usesTrueStreaming is false, guarded above).
@@ -1662,6 +1706,77 @@ private actor AsrManagerCoordinator {
         _ = try await vad.processStreamingChunk(
             [Float](repeating: 0, count: VadManager.chunkSize), state: .initial()
         )
+    }
+
+    /// Serialize preparation against capture and other preparation requests.
+    /// Reset clears the match tail, while the unchanged term index stays resident.
+    func prepareStreamingVocabulary(terms: [String]) async throws {
+        let terms = Array(Set(terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })).sorted()
+        let generation = modelGeneration
+        while let pending = streamingVocabularyPreparation {
+            do { try await pending.task.value }
+            catch {
+                if streamingVocabularyPreparation?.id == pending.id { streamingVocabularyPreparation = nil }
+                throw error
+            }
+            guard generation == modelGeneration else { throw CancellationError() }
+            if streamingVocabularyPreparation?.id == pending.id {
+                preparedStreamingTerms = pending.terms
+                streamingVocabularyPreparation = nil
+            }
+            try Task.checkCancellation()
+            guard generation == modelGeneration else { throw CancellationError() }
+        }
+        guard terms != preparedStreamingTerms else { return }
+        guard let streaming = multilingualManager, let directory = multilingualModelDirectory else {
+            throw TranscriptionError.engineNotReady
+        }
+        // The SDK setter cannot report failure for an argmax-only asset set.
+        // Verify a logits decoder exists before advertising applied vocabulary.
+        if !terms.isEmpty {
+            func has(_ name: String) -> Bool {
+                ["mlmodelc", "mlpackage"].contains {
+                    FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(name).\($0)").path)
+                }
+            }
+            guard has("decoder_joint") || has("decoder_joint_noencproj") || (has("decoder") && has("joint")) else {
+                throw ASRError.processingFailed("Vocabulary requires a Nemotron logits decoder")
+            }
+        }
+        let id = UUID()
+        let task = Task {
+            try Task.checkCancellation()
+            // A lower bonus preserves unrelated speech on our goldens;
+            // SDK research's 3.0/4.5 weights both over-fired on AMI.
+            #if PIPELINE_BENCHMARK
+            let weight = Float(ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_NATIVE_VOCAB_WEIGHT"] ?? "1") ?? 1
+            #else
+            let weight: Float = 1
+            #endif
+            await streaming.setCustomVocabulary(terms.map { CustomVocabularyTerm(text: $0, weight: weight) })
+            try Task.checkCancellation()
+            if !terms.isEmpty {
+                // loadModels warms the argmax path. Exercise the logits path
+                // after bias configuration, before any microphone samples.
+                _ = try await streaming.process(samples: [Float](repeating: 0, count: 16_000 * 3))
+                _ = try await streaming.finish()
+            }
+            await streaming.reset()
+        }
+        streamingVocabularyPreparation = (id, terms, task)
+        do {
+            try await task.value
+            try Task.checkCancellation()
+            guard generation == modelGeneration else { throw CancellationError() }
+            if streamingVocabularyPreparation?.id == id {
+                preparedStreamingTerms = terms
+                streamingVocabularyPreparation = nil
+            }
+        } catch {
+            if streamingVocabularyPreparation?.id == id { streamingVocabularyPreparation = nil }
+            throw error
+        }
     }
 
     func prepareVocabulary() async throws {
@@ -1850,6 +1965,12 @@ private actor AsrManagerCoordinator {
 
     func cleanup() async {
         modelGeneration = UUID()
+        let vocabularyTask = streamingVocabularyPreparation?.task
+        streamingVocabularyPreparation = nil
+        vocabularyTask?.cancel()
+        _ = try? await vocabularyTask?.value
+        preparedStreamingTerms = []
+        multilingualModelDirectory = nil
         await cancelBatch()
         logger.info("cleanup: releasing manager (was initialized=\(self.isInitialized(), privacy: .public))")
         if let manager {

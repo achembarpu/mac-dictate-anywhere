@@ -693,12 +693,14 @@ struct AIPostProcessingView: View {
     private func fluidAudioVocabularyContent(settings: Settings) -> some View {
         if settings.engineChoice != .parakeet || !settings.parakeetModelChoice.supportsFluidAudioVocabulary {
             DSSection(overline: "FluidAudio Vocabulary") {
-                DSInfoRow(label: "Status", value: "Requires a Parakeet TDT model")
+                DSInfoRow(label: "Status", value: "Requires Parakeet TDT or multilingual Nemotron")
             }
         } else if settings.transcriptPostProcessingMode.supportedFeatures.contains(.customVocabulary) {
             vocabularySection(
                 settings: settings,
-                footer: "These terms are applied by FluidAudio's vocabulary rescoring on Parakeet TDT final transcripts only. Keep the list short and domain-specific for best precision."
+                footer: settings.parakeetModelChoice == .nemotronMultilingual
+                    ? "These terms guide multilingual Nemotron while it recognizes speech, including live previews. Keep the list short and domain-specific for best precision."
+                    : "These terms are applied by FluidAudio's vocabulary rescoring on Parakeet TDT final transcripts only. Keep the list short and domain-specific for best precision."
             )
         }
     }

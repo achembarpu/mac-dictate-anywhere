@@ -20,6 +20,7 @@ final class DictationStartupContextTests: XCTestCase {
         let localLanguage = settings.selectedLanguage
         let cloudLanguage = settings.assemblyAILanguage
         let processing = settings.transcriptPostProcessingMode
+        let vocabulary = settings.customVocabulary
         let model = settings.parakeetModelChoice
         let prewarm = settings.prewarmEnginesAtStartup
         let history = settings.transcriptHistory
@@ -35,6 +36,7 @@ final class DictationStartupContextTests: XCTestCase {
             settings.selectedLanguage = localLanguage
             settings.assemblyAILanguage = cloudLanguage
             settings.transcriptPostProcessingMode = processing
+            settings.customVocabulary = vocabulary
             settings.prewarmEnginesAtStartup = prewarm
         }
         settings.engineChoice = .assemblyAI
@@ -123,9 +125,15 @@ final class DictationStartupContextTests: XCTestCase {
         settings.transcriptPostProcessingMode = .fluidAudioVocabulary
         await app.prepareCleanupEngineIfNeeded()
         XCTAssertEqual(modes, [.s1Mini, .fluidAudioVocabulary])
+        let oldKey = app.cleanupPreparationKey
+        settings.customVocabulary = ["Quilter"]
+        XCTAssertNotEqual(app.cleanupPreparationKey, oldKey)
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertEqual(modes, [.s1Mini, .fluidAudioVocabulary, .fluidAudioVocabulary])
         settings.engineChoice = .assemblyAI
         await app.prepareCleanupEngineIfNeeded()
-        XCTAssertEqual(modes.count, 2)
+        XCTAssertEqual(modes.count, 3)
         await app.shutdown()
     }
 

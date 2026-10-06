@@ -456,14 +456,14 @@ final class ModelAndModeTests: XCTestCase {
         XCTAssertFalse(ParakeetModelChoice.englishOnly.supportsLanguage(.chinese))
     }
 
-    func testMandarinModelsDisableFluidAudioVocabulary() {
+    func testVocabularySupportMatchesAvailableDecoderPaths() {
         XCTAssertFalse(ParakeetModelChoice.senseVoice.supportsFluidAudioVocabulary)
-        XCTAssertFalse(ParakeetModelChoice.nemotronMultilingual.supportsFluidAudioVocabulary)
+        XCTAssertTrue(ParakeetModelChoice.nemotronMultilingual.supportsFluidAudioVocabulary)
         XCTAssertTrue(ParakeetModelChoice.multilingual.supportsFluidAudioVocabulary)
     }
 
     func testNativeStreamingDoesNotOfferUnusedCTCVocabularyFinalizer() {
-        for model in ParakeetModelChoice.allCases where model.usesTrueStreaming {
+        for model in ParakeetModelChoice.allCases where model.usesTrueStreaming && model != .nemotronMultilingual {
             XCTAssertFalse(model.supportsFluidAudioVocabulary, model.rawValue)
         }
         XCTAssertTrue(ParakeetModelChoice.multilingualUltra.supportsFluidAudioVocabulary)

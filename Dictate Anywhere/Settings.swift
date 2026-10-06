@@ -467,13 +467,12 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         }
     }
 
-    /// Only TDT batch models use the app's CTC vocabulary finalizer. Native
-    /// streaming decoders must not advertise a mode their finish path ignores.
+    /// TDT models use CTC final rescoring; multilingual Nemotron uses native
+    /// decode-time bias. Other streaming models expose neither vocabulary path.
     nonisolated var supportsFluidAudioVocabulary: Bool {
         switch self {
-        case .multilingual, .multilingualUltra, .englishOnly, .compactEnglish: return true
-        case .senseVoice, .parakeetEou320, .nemotron560, .nemotron1120,
-             .nemotron2240, .nemotronMultilingual: return false
+        case .multilingual, .multilingualUltra, .englishOnly, .compactEnglish, .nemotronMultilingual: return true
+        case .senseVoice, .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240: return false
         }
     }
 

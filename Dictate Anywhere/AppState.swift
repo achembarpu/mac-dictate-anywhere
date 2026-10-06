@@ -586,7 +586,8 @@ final class AppState {
             installed: s1MiniModelManager.isModelDownloaded,
             speechReady: activeEngine.isReady, idle: status == .idle,
             prompt: settings.transcriptPostProcessingMode == .appleIntelligence ? settings.aiPostProcessingPrompt : "",
-            vocabulary: settings.transcriptPostProcessingMode == .appleIntelligence ? settings.customVocabulary : [],
+            vocabulary: [.appleIntelligence, .fluidAudioVocabulary].contains(settings.transcriptPostProcessingMode)
+                ? settings.customVocabulary : [],
             providerURL: settings.transcriptPostProcessingMode == .ollama ? settings.ollamaBaseURL
                 : (settings.transcriptPostProcessingMode == .openAICompatible ? settings.openAICompatibleBaseURL : ""),
             providerModel: settings.transcriptPostProcessingMode == .ollama ? settings.ollamaModel

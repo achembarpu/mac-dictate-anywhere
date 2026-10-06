@@ -138,3 +138,13 @@ Languages absent from the SDK mapping retain automatic decoding.
 Cyrillic and Greek TDT dictation retains automatic script decoding: the SDK's
 strict filters exclude Latin names. The language benchmark reports preserved
 Latin names alongside WER so this loss cannot hide behind an unchanged score.
+
+Multilingual Nemotron supports native vocabulary in live previews and final
+speech, using explicit terms from the existing vocabulary mode. The term index
+and logits decoder are prepared before capture and reused unchanged. Reset
+clears partial matches; disabling the mode clears bias before the next session.
+Other native streaming models expose no supported vocabulary path.
+
+The per-token bias is 1. SDK research's 3.0/4.5 bonuses over-fired with absent
+terms on spontaneous goldens; the lower weight retained a checked name repair
+without those insertions. Preparation warms the logits path after configuration.

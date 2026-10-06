@@ -67,6 +67,7 @@ benchmark_catalog() {
   cat <<'EOF'
 asr|Installed-model speech accuracy and latency|RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark RecoveryASRSmokeTests/testInstalledMandarinASRBenchmark RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark
 asr-quality|Golden speech, model-policy and encoder comparisons|RecoveryASRSmokeTests/testDownloadModelsIntoApplicationCache RecoveryASRSmokeTests/testModelAwareBatchComparisonBenchmark RecoveryASRSmokeTests/testGoldenSpeechReferenceBenchmark RecoveryASRSmokeTests/testTDTEncoderPlacementBenchmark
+asr-vocabulary|Native vocabulary bias and reset on human speech|NativeVocabularyBenchmarkTests/testNativeVocabularyOnFiles NativeVocabularyBenchmarkTests/testNativeVocabularyOnLiveSessions
 asr-language|Paired multilingual script filtering on production file/live paths|ModelVocabularyBenchmarkTests/testLanguageScriptFilteringOnFiles ModelVocabularyBenchmarkTests/testLanguageScriptFilteringOnLiveSessions
 asr-file|Installed models on complete golden files without live previews|GoldenFileASRBenchmarkTests/testInstalledModelsDecodeCompleteGoldenFiles
 asr-acoustics|TDT quiet Float32/PCM16 and gain/nonspeech research screen|AcousticASRBenchmarkTests/testQuietFloatAudioAndPCM16GainScreen
@@ -294,7 +295,7 @@ run_benchmark() {
     PIPELINE_BENCHMARK_MODEL PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS PIPELINE_BENCHMARK_AUDIO_PATH \
     PIPELINE_BENCHMARK_REFERENCE_PATH PIPELINE_BENCHMARK_MAX_WER \
     PIPELINE_BENCHMARK_FIXTURE PIPELINE_BENCHMARK_GOLDEN PIPELINE_BENCHMARK_METRIC \
-    PIPELINE_BENCHMARK_DOWNLOAD_MODELS PIPELINE_BENCHMARK_ENCODER \
+    PIPELINE_BENCHMARK_DOWNLOAD_MODELS PIPELINE_BENCHMARK_ENCODER PIPELINE_BENCHMARK_NATIVE_VOCAB_WEIGHT \
     PIPELINE_BENCHMARK_CLEANUP_PROVIDER PIPELINE_BENCHMARK_CLEANUP_MODEL \
     PIPELINE_BENCHMARK_CLEANUP_URL PIPELINE_BENCHMARK_CLEANUP_API_KEY \
     PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES \
