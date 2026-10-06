@@ -18,13 +18,24 @@ final class CleanupPromptBenchmarkTests: XCTestCase {
         let manifest = try GoldenSpeechFixture.resource("cleanup-golden-manifest.json")
         let hash = SHA256.hash(data: try Data(contentsOf: manifest)).map { String(format: "%02x", $0) }.joined()
         XCTAssertEqual(report.manifestSHA256, hash, "Candidate used different fixture inputs")
-        let fixtures = Dictionary(uniqueKeysWithValues: try GoldenCleanupFixture.all().map { ($0.id, $0) })
+        var references = try GoldenCleanupFixture.all()
+        if let stressHash = report.stressManifestSHA256 {
+            let stressURL = try GoldenSpeechFixture.resource("s1-cleanup-stress-manifest.json")
+            let actual = SHA256.hash(data: try Data(contentsOf: stressURL)).map { String(format: "%02x", $0) }.joined()
+            XCTAssertEqual(stressHash, actual, "Candidate used different S1 stress inputs")
+            references += try GoldenCleanupFixture.s1Stress()
+        }
+        let fixtures = Dictionary(uniqueKeysWithValues: references.map { ($0.id, $0) })
         XCTAssertFalse(report.rows.isEmpty)
         for row in report.rows {
             let fixture = try XCTUnwrap(fixtures[row.fixture])
             let issues = fixture.violations(in: row.output), lost = fixture.lostFacts(in: row.output)
             let rate = GoldenSpeechFixture.errorRate(reference: fixture.reference, hypothesis: row.output,
                 metric: fixture.language == "zh" ? .cer : .wer)
+            let result: [String: Any] = ["fixture": row.fixture, "model": row.model, "iteration": row.iteration,
+                "latency_ms": row.latencyMs, "output": row.output, "completed": row.completed,
+                "issues": issues, "lost_facts": lost, "error_rate": rate]
+            print("CLEANUP_SAVED_RESULT " + String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
             print("CLEANUP_SAVED model=\(row.model) fixture=\(row.fixture) iteration=\(row.iteration) latency_ms=\(row.latencyMs) error_rate=\(rate) completed=\(row.completed) issues=\(issues.count) lost_facts=\(lost.count)")
             XCTAssertTrue(row.completed, "\(row.fixture): saved generation did not finish")
             if !issues.isEmpty || !lost.isEmpty { print("CLEANUP_SAVED_ISSUES fixture=\(row.fixture) issues=\(issues) lost=\(lost) output=\(row.output)") }
@@ -137,8 +148,11 @@ final class CleanupPromptBenchmarkTests: XCTestCase {
 
     private struct SavedOutputs: Decodable {
         let manifestSHA256: String
+        let stressManifestSHA256: String?
         let rows: [Row]
-        enum CodingKeys: String, CodingKey { case manifestSHA256 = "manifest_sha256", rows }
+        enum CodingKeys: String, CodingKey {
+            case manifestSHA256 = "manifest_sha256", stressManifestSHA256 = "stress_manifest_sha256", rows
+        }
         struct Row: Decodable {
             let fixture: String, model: String, output: String
             let iteration: Int

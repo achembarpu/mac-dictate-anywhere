@@ -78,6 +78,8 @@ insertion|Insertion formatting and paste-script caching|PipelinePerformanceBench
 cloud-request|AssemblyAI request encoding without network|PipelineWorkloadBenchmarkTests/testAssemblyAIRequestEncoding
 recovery|Recovery audio write and read|PipelineWorkloadBenchmarkTests/testRecoveryWriteAndRead
 cleanup|S1-mini prewarm/cleanup and Apple Intelligence|PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark PipelineWorkloadBenchmarkTests/testS1MiniCleanupWithInstalledModel PipelineWorkloadBenchmarkTests/testAppleIntelligenceCleanupWhenAvailable
+s1-prepare|S1 engine loading, preparation and first-use latency|S1PreparationBenchmarkTests/testColdEngineVersusPreparedFirstRequest
+s1-cpu|S1 CPU cache precision and golden cleanup (Intel or Apple Silicon)|S1CPUBenchmarkTests/testCPUCachePrecisionComparison
 s1-context|Paired S1-mini context allocation and golden cleanup|S1ContextBenchmarkTests/testPairedFreshAndReusedContextGoldenCleanup
 cleanup-quality|Authored cleanup references and Apple session isolation|AppleCleanupBenchmarkTests/testGoldenCleanupAndPreparedSessionIsolation AppleCleanupBenchmarkTests/testLongInputAcrossContextWindows DictationStartupContextTests/testAppleDefaultCleanupWithoutPromptOrContext ProviderCleanupBenchmarkTests/testGoldenCleanupWithSelectedProvider
 apple-speech-quality|Installed Apple locales, golden accuracy and preparation|AppleSpeechBenchmarkTests/testInstalledLocalesGoldenSpeechAndFreshSessionPreparation
@@ -254,7 +256,7 @@ run_tests() {
   set +e
   env TEST_RUNNER_RUN_AUDIO_CAPTURE_SMOKE="${RUN_AUDIO_CAPTURE_SMOKE:-0}" \
     xcodebuild "${xcodebuild_args[@]}" \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK_OPTIMIZED" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) DEBUG PIPELINE_BENCHMARK_OPTIMIZED' \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
   local test_status=$?
   set -e
@@ -319,7 +321,7 @@ run_benchmark() {
   rm -rf "$benchmark_result_bundle_path"
   env "${benchmark_test_environment[@]}" xcodebuild "${benchmark_xcodebuild_args[@]}" \
     SWIFT_OPTIMIZATION_LEVEL=-O \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) $benchmark_conditions" \
     -enableCodeCoverage NO \
     -resultBundlePath "$benchmark_result_bundle_path" test
 }

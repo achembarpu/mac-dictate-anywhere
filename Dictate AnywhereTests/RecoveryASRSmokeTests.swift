@@ -243,7 +243,10 @@ final class RecoveryASRSmokeTests: XCTestCase {
 
         // A quiet steady mechanical tone has no speech. Keep it below the old
         // volume gate, so classification rather than volume determines eligibility.
-        let tone = (0..<32_000).map { Float(sin(Double($0) * 2 * .pi * 120 / 16_000)) * 0.003 }
+        let radiansPerSample = 2.0 * Double.pi * 120.0 / 16_000.0
+        let tone: [Float] = (0..<32_000).map { index in
+            Float(sin(Double(index) * radiansPerSample)) * Float(0.003)
+        }
         try await engine.beginBatchReplayForTesting()
         for offset in stride(from: 0, to: tone.count, by: 8_000) {
             try await engine.replayBatchAudioForTesting(Array(tone[offset..<offset + 8_000]))

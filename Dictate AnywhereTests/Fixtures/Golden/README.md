@@ -200,6 +200,13 @@ and repeats. It uses the same licensed audio/reference files and WER/CER code,
 and does not launch a server or download models. Use the local collector
 `--help` output for its input/model options; save outputs outside the checkout.
 
+S1's additional authored stress references live in
+`s1-cleanup-stress-manifest.json`: signs/decimals, IDs, email/URL/code spelling,
+negation, spoken corrections, literal instructions/control tokens, names,
+questions and apologies. `s1-cpu` compares GGUF CPU KV precision on either
+architecture; `s1-prepare` measures cold engine vs prepared first use. Both
+reuse the existing fact/meaning scorer and retain results as JSON lines.
+
 ## Small candidate screens and resource accounting
 
 `asr-acoustics` separates quiet Float32 input from PCM16 re-quantization and

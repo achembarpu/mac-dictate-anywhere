@@ -91,7 +91,7 @@ custom prompts are preserved, and clearing the field restores the default.
 
 | Provider | Request and preparation policy |
 | --- | --- |
-| S1-mini | English-only trained control prompt, empty thinking prefix and greedy sampling. Q4_K_M weights, 4,096-token context and Q8 KV. Tokenizer-aware chunks stay within 1,000 input tokens; output budget is `ceil(inputTokens * 1.3) + 32`. EOS is required; an incomplete response cannot replace the original. |
+| S1-mini | English-only trained control prompt, empty thinking prefix and greedy sampling. Q4_K_M weights and a 4,096-token context. Metal uses FP16 KV; Intel uses Q8 KV and up to eight physical cores. Tokenizer-aware chunks stay within 1,000 input tokens; output budget is `ceil(inputTokens * 1.3) + 32`. EOS is required; an incomplete response cannot replace the original. |
 | Apple Intelligence | Greedy guided action/text output, fresh sessions and a single-use prepared prefix. Context planning reserves instruction/schema/output space and limits each input to 1,024 tokens. Source paragraphs over 1,024 UTF-8 bytes use independent sessions; lost numeric literals/counts preserve the passage. |
 | Ollama | Inspect `/api/show` capabilities, preserve server sampling/reasoning defaults and use strict structured output. Working context is bounded to 8,192 tokens or the smaller model limit. Explicit non-thinking capabilities permit an input-derived output ceiling; unknown/thinking models retain natural EOS. Empty generation preloads the same model/context for ten minutes. |
 | OpenRouter | Catalog capabilities supply context/output limits and supported parameters. Preserve declared sampling/reasoning defaults; schema requests require schema-capable routing. Preparation refreshes catalog/connection without a billable completion. |
@@ -122,3 +122,6 @@ Policy sources: [FluidAudio overlap configuration](https://github.com/FluidInfer
 [SenseVoice](https://github.com/FluidInference/FluidAudio/blob/v0.17.5/Documentation/ASR/SenseVoice.md),
 [multilingual Nemotron](https://github.com/FluidInference/FluidAudio/blob/v0.17.5/Documentation/ASR/NemotronMultilingual.md),
 [S1 author recipe](https://huggingface.co/superwhisper/s1-mini).
+
+S1 preserves the original when cleanup removes a numeric minus sign, including
+repeated occurrences, or when literal chat markers could become prompt controls.

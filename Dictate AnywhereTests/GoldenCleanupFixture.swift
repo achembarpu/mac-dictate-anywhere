@@ -18,6 +18,11 @@ struct GoldenCleanupFixture: Decodable {
         return try JSONDecoder().decode([Self].self, from: Data(contentsOf: url))
     }
 
+    static func s1Stress() throws -> [Self] {
+        let url = try GoldenSpeechFixture.resource("s1-cleanup-stress-manifest.json")
+        return try JSONDecoder().decode([Self].self, from: Data(contentsOf: url))
+    }
+
     func violations(in output: String) -> [String] {
         let normalized = output.folding(options: [.caseInsensitive, .widthInsensitive], locale: nil)
         var issues = required.compactMap { alternatives -> String? in
@@ -42,7 +47,7 @@ struct GoldenCleanupFixture: Decodable {
 
 final class GoldenCleanupFixtureTests: XCTestCase {
     func testAuthoredReferencesMeetTheirOwnContentRequirements() throws {
-        let fixtures = try GoldenCleanupFixture.all()
+        let fixtures = try GoldenCleanupFixture.all() + GoldenCleanupFixture.s1Stress()
         XCTAssertEqual(Set(fixtures.map(\.id)).count, fixtures.count)
         XCTAssertGreaterThanOrEqual(Set(fixtures.map(\.language)).count, 4)
         for fixture in fixtures {

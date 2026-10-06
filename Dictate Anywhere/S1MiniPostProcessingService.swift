@@ -200,6 +200,10 @@ actor S1MiniInferenceEngine {
     // generate() never suspends, so the actor owns exclusive use of both
     // pointers. Retain allocations, never a previous request's KV contents.
     private var inferenceContext: OpaquePointer?
+    #if DEBUG || PIPELINE_BENCHMARK
+    private var useF16CacheForTesting: Bool?
+    private var forceCPUForTesting = false
+    #endif
     private var loadedModelPath: String?
     private var warmedModelPath: String?
     private var backendInitialized = false
@@ -292,7 +296,9 @@ actor S1MiniInferenceEngine {
             }
         }
 
-        let promptEvalTrace = PerfTrace.begin("cleanup.promptEval")
+        let firstTokenTrace = PerfTrace.begin("cleanup.firstToken")
+        defer { firstTokenTrace.end() }
+        let promptEvalTrace = PerfTrace.begin("cleanup.prefillSchedule")
         let promptStatus = promptTokens.withUnsafeMutableBufferPointer { buffer in
             llama_decode(
                 context,
@@ -314,7 +320,7 @@ actor S1MiniInferenceEngine {
             context: context,
             vocabulary: vocabulary,
             sampler: sampler,
-            maximumOutputTokens: maximumOutputTokens
+            maximumOutputTokens: maximumOutputTokens, firstTokenTrace: firstTokenTrace
         )
         trace.recordCounts(["output_tokens": outputTokenCount, "output_bytes": output.count])
 
@@ -340,9 +346,21 @@ actor S1MiniInferenceEngine {
         parameters.n_ubatch = 512
         parameters.n_outputs_max = 1
         parameters.n_outputs_max_per_seq = 1
+        #if arch(arm64)
+        // Metal measurements favor FP16 KV; keep the CPU Q8 path on Intel.
+        parameters.type_k = GGML_TYPE_F16
+        parameters.type_v = GGML_TYPE_F16
+        #else
         parameters.type_k = GGML_TYPE_Q8_0
         parameters.type_v = GGML_TYPE_Q8_0
-        let threadCount = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
+        #endif
+        #if DEBUG || PIPELINE_BENCHMARK
+        if let useF16CacheForTesting {
+            parameters.type_k = useF16CacheForTesting ? GGML_TYPE_F16 : GGML_TYPE_Q8_0
+            parameters.type_v = useF16CacheForTesting ? GGML_TYPE_F16 : GGML_TYPE_Q8_0
+        }
+        #endif
+        let threadCount = S1MiniCPUConfiguration.threadCount
         parameters.n_threads = threadCount
         parameters.n_threads_batch = threadCount
         guard let context = llama_init_from_model(model, parameters) else {
@@ -362,6 +380,16 @@ actor S1MiniInferenceEngine {
     // Installed-model tests/benchmarks can recreate the old allocation cost
     // without a second production decoder or unloading the shared weights.
     func discardInferenceContextForTesting() { discardInferenceContext() }
+
+    func configureCPUForTesting(_ enabled: Bool) {
+        if forceCPUForTesting != enabled { unload() }
+        forceCPUForTesting = enabled
+    }
+
+    func configureCacheForTesting(f16: Bool?) {
+        if useF16CacheForTesting != f16 { discardInferenceContext() }
+        useF16CacheForTesting = f16
+    }
 
     func inferenceContextStateForTesting() -> (allocated: Bool, maximumPosition: Int32) {
         guard let inferenceContext else { return (false, -1) }
@@ -406,7 +434,7 @@ actor S1MiniInferenceEngine {
         context: OpaquePointer,
         vocabulary: OpaquePointer,
         sampler: UnsafeMutablePointer<llama_sampler>,
-        maximumOutputTokens: Int
+        maximumOutputTokens: Int, firstTokenTrace: PerfInterval
     ) throws -> (Data, Int) {
         let trace = PerfTrace.begin("cleanup.decode")
         defer { trace.end() }
@@ -415,6 +443,7 @@ actor S1MiniInferenceEngine {
         for _ in 0...maximumOutputTokens {
             try Task.checkCancellation()
             let token = llama_sampler_sample(sampler, context, -1)
+            firstTokenTrace.end()
             if llama_vocab_is_eog(vocabulary, token) {
                 trace.recordCounts(["output_tokens": outputTokenCount])
                 return (output, outputTokenCount)
@@ -460,6 +489,9 @@ actor S1MiniInferenceEngine {
         var parameters = llama_model_default_params()
 #if arch(arm64)
         parameters.n_gpu_layers = -1
+        #if DEBUG || PIPELINE_BENCHMARK
+        if forceCPUForTesting { parameters.n_gpu_layers = 0 }
+        #endif
 #else
         parameters.n_gpu_layers = 0
 #endif
@@ -555,6 +587,12 @@ enum S1MiniPostProcessingService {
     ) async throws -> String {
         let trace = PerfTrace.begin("cleanup.request")
         defer { trace.end() }
+        // Literal chat markers would be interpreted as prompt boundaries.
+        // Preserve that dictated content without loading or invoking a model.
+        if text.contains("<|"), text.contains("|>") {
+            trace.end(outcome: "literal_control_marker_fallback")
+            return text
+        }
         let resolvedContext = contextSetting.resolved(for: context)
         do {
             return try await processChunk(text, modelURL: modelURL, styling: styling,
@@ -607,6 +645,9 @@ enum S1MiniPostProcessingService {
         }
 
         let cleaned = normalizePostProcessedTranscript(output)
+        if S1MiniOutputSafety.removesNumericSign(input: text, output: cleaned) {
+            return text
+        }
         if looksLikeNewRefusalMessage(input: text, output: cleaned) || looksLikeGeneratedContent(input: text, output: cleaned) {
             return text
         }

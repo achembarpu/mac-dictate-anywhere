@@ -59,7 +59,7 @@ final class S1MiniPostProcessingTests: XCTestCase {
         await engine.unload()
         try await engine.prewarm(from: url)
         PerfTrace.onIntervalCompleted = { name, _, _ in
-            if name == "cleanup.promptEval" {
+            if name == "cleanup.prefillSchedule" {
                 withUnsafeCurrentTask { $0?.cancel() }
             }
         }

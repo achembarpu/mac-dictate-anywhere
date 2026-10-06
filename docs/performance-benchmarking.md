@@ -63,10 +63,6 @@ accepts one exact ID or a comma-separated list; unknown or duplicate IDs fail.
 Saved external speech outputs
 can be checked with `PIPELINE_BENCHMARK_ASR_RESULTS_PATH` and
 `--only external-asr-quality`; the manifest hash must match the bundled inventory.
-The standalone [native MLX probe](../tools/s1-mlx-probe/README.md) and
-`scripts/evaluate_s1_mlx.py` collect S1 outputs for the existing
-`PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH` / `--only cleanup-prompts` scorer.
-They do not change the app's runtime or download models implicitly.
 
 For Apple prompt comparisons, set `PIPELINE_BENCHMARK_CLEANUP_PROVIDER=apple`
 and `PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH` to an external JSON array of
@@ -272,3 +268,7 @@ variant) to `scripts/evaluate_qwen_asr.py`, and
 `scripts/evaluate_moonshine.py`. These pinned upstream manifests are inputs,
 not benchmark output. Use each collector's `--help` for the required local model,
 fixture and output options; collectors do not download weights automatically.
+
+`--only s1-cpu` compares GGUF CPU KV precision. `--only s1-prepare`
+compares unloaded and prepared first requests using the installed GGUF model.
+The shared S1 stress references and saved-output scorer apply to any runtime.
