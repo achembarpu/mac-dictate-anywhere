@@ -27,7 +27,7 @@ Commands:
   test [OPTIONS]
           Build and run the project tests
   benchmark [OPTIONS]
-          Run repeatable ASR and synthetic pipeline benchmarks
+          Run selected benchmarks and integration workloads
           Accepts --configuration Debug|Release and --release
           --only GROUP[,GROUP] is required (repeatable; use all for a broad run)
           --list shows available benchmark groups without building
@@ -76,6 +76,9 @@ asr-file|Installed models on complete golden files without live previews|GoldenF
 asr-acoustics|TDT quiet Float32/PCM16 and gain/nonspeech research screen|AcousticASRBenchmarkTests/testQuietFloatAudioAndPCM16GainScreen
 audio-conversion|Microphone conversion continuity, work and golden quality|PCMStreamConversionBenchmarkTests/testCaptureConversionWorkAndSampleContinuity PCMStreamConversionBenchmarkTests/testCaptureConversionOnGoldenSpeech PCMStreamConversionBenchmarkTests/testRecoveryPCMFilePullWork
 audio|Meter polling and PCM buffer construction|PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark PipelineWorkloadBenchmarkTests/testPCMBufferConstruction
+audio-hardware|Explicit Debug microphone stop/restart smoke|AudioCaptureStartupTests/testRealAudioRapidRestartSmoke
+browser-context|Isolated Chromium capture and optional live insertion|ChromiumContextCaptureTests
+live-insertion|Explicit live AssemblyAI sentence/list insertion|AssemblyAILiveInsertionTests
 overlay|Current preview suffix cost|OverlayPerformanceBenchmarkTests
 transcript|Long transcript assembly and normalization|PipelineWorkloadBenchmarkTests/testLongTranscriptAssemblyAndNormalization
 cloud-request|AssemblyAI request encoding without network|PipelineWorkloadBenchmarkTests/testAssemblyAIRequestEncoding
@@ -256,11 +259,12 @@ build() {
 
 run_tests() {
   [[ "$CONFIGURATION" == "Debug" ]] || fail "Tests require the Debug configuration because Release is not testable"
+  [[ "${RUN_AUDIO_CAPTURE_SMOKE:-0}" != 1 ]] || \
+    fail "Microphone checks require RUN_AUDIO_CAPTURE_SMOKE=1 scripts/dev.sh benchmark --only audio-hardware"
   printf 'Testing %s (%s)\n' "$SCHEME" "$CONFIGURATION"
   rm -rf "$RESULT_BUNDLE_PATH"
   set +e
-  env TEST_RUNNER_RUN_AUDIO_CAPTURE_SMOKE="${RUN_AUDIO_CAPTURE_SMOKE:-0}" \
-    xcodebuild "${xcodebuild_args[@]}" \
+  xcodebuild "${xcodebuild_args[@]}" \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
   local test_status=$?
   set -e
@@ -303,7 +307,9 @@ run_benchmark() {
     PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH PIPELINE_BENCHMARK_CLEANUP_INPUT_BYTES \
     PIPELINE_BENCHMARK_CLEANUP_GREEDY PIPELINE_BENCHMARK_ASR_URL PIPELINE_BENCHMARK_LANGUAGES \
     PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH PIPELINE_BENCHMARK_ASR_RESULTS_PATH \
-    S1_MINI_MODEL_PATH S1_MLX_MODEL_PATH PIPELINE_BENCHMARK_S1_MODES RUN_MODEL_SWITCH_BENCHMARK; do
+    S1_MINI_MODEL_PATH S1_MLX_MODEL_PATH PIPELINE_BENCHMARK_S1_MODES RUN_MODEL_SWITCH_BENCHMARK \
+    RUN_AUDIO_CAPTURE_SMOKE DICTATE_CHROMIUM_CAPTURE_TESTS \
+    DICTATE_ASSEMBLYAI_LIVE_TESTS DICTATE_LIVE_CAPTURE_TESTS; do
     if [[ -n "${!name:-}" ]]; then
       benchmark_test_environment+=("TEST_RUNNER_${name}=${!name}")
     fi

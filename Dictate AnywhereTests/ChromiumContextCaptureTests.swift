@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import AppKit
 import XCTest
 @testable import Dictate_Anywhere
@@ -223,3 +224,4 @@ final class ChromiumContextCaptureTests: XCTestCase {
         }
     }
 }
+#endif

@@ -22,6 +22,10 @@ cat > "$MOCK_BIN/xcodebuild" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$XCODEBUILD_ARGS_LOG"
 printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS:-}" > "$XCODEBUILD_ACOUSTIC_ENV_LOG"
+printf '%s\n' "${TEST_RUNNER_RUN_AUDIO_CAPTURE_SMOKE:-}" \
+  "${TEST_RUNNER_DICTATE_CHROMIUM_CAPTURE_TESTS:-}" \
+  "${TEST_RUNNER_DICTATE_ASSEMBLYAI_LIVE_TESTS:-}" \
+  "${TEST_RUNNER_DICTATE_LIVE_CAPTURE_TESTS:-}" > "$XCODEBUILD_OPTIONAL_ENV_LOG"
 printf '%s\n' "${TEST_RUNNER_S1_MINI_MODEL_PATH:-}" \
   "${TEST_RUNNER_S1_MLX_MODEL_PATH:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_S1_MODES:-}" > "$XCODEBUILD_S1_ENV_LOG"
@@ -66,6 +70,7 @@ export XCODEBUILD_ENV_LOG="$TEST_ROOT/xcodebuild-env.log"
 export XCODEBUILD_RESEARCH_ENV_LOG="$TEST_ROOT/xcodebuild-research-env.log"
 export XCODEBUILD_ACOUSTIC_ENV_LOG="$TEST_ROOT/xcodebuild-acoustic-env.log"
 export XCODEBUILD_S1_ENV_LOG="$TEST_ROOT/xcodebuild-s1-env.log"
+export XCODEBUILD_OPTIONAL_ENV_LOG="$TEST_ROOT/xcodebuild-optional-env.log"
 
 unset DERIVED_DATA_PATH
 default_path="$HOME/Library/Developer/Xcode/DerivedData/DictateAnywhereDev"
@@ -177,13 +182,10 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBen
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testGoldenSpeechReferenceBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPreviewAvoidsDiscardedOverlapDecoder'
-
-"$SCRIPT" benchmark --only tdt-vocabulary >/dev/null
-assert_benchmark_selector_count 4
-assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPoliciesAndSharedHead'
-assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testPreparedVocabularyProductionSessions'
-assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testAuxiliaryHeadInstallationAndRepair'
-assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPreviewAvoidsDiscardedOverlapDecoder'
+if [[ -n "$(<"$XCODEBUILD_OPTIONAL_ENV_LOG")" ]]; then
+  printf 'FAIL: selecting all enabled browser, provider or microphone opt-ins\n' >&2
+  exit 1
+fi
 
 # Check the actual source inventory rather than maintaining a second catalog.
 # A stale selector can otherwise make a requested benchmark silently run nothing.
@@ -208,6 +210,31 @@ while IFS= read -r argument; do
       ;;
   esac
 done < "$XCODEBUILD_ARGS_LOG"
+
+"$SCRIPT" benchmark --only tdt-vocabulary >/dev/null
+assert_benchmark_selector_count 4
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPoliciesAndSharedHead'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testPreparedVocabularyProductionSessions'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testAuxiliaryHeadInstallationAndRepair'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPreviewAvoidsDiscardedOverlapDecoder'
+
+RUN_AUDIO_CAPTURE_SMOKE=1 DICTATE_CHROMIUM_CAPTURE_TESTS=1 \
+  DICTATE_ASSEMBLYAI_LIVE_TESTS=1 DICTATE_LIVE_CAPTURE_TESTS=1 \
+  "$SCRIPT" benchmark --only audio-hardware,browser-context,live-insertion >/dev/null
+assert_benchmark_selector_count 3
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AudioCaptureStartupTests/testRealAudioRapidRestartSmoke'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ChromiumContextCaptureTests'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AssemblyAILiveInsertionTests'
+if [[ "$(<"$XCODEBUILD_OPTIONAL_ENV_LOG")" != $'1\n1\n1\n1' ]]; then
+  printf 'FAIL: optional integration opt-ins were not forwarded exactly\n' >&2
+  exit 1
+fi
+/bin/rm -f "$XCODEBUILD_ARGS_LOG"
+if RUN_AUDIO_CAPTURE_SMOKE=1 "$SCRIPT" test >/dev/null 2>&1; then
+  printf 'FAIL: the ordinary suite silently accepted a compiled-out microphone check\n' >&2
+  exit 1
+fi
+[[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: invalid microphone selection invoked Xcode\n' >&2; exit 1; }
 
 "$SCRIPT" benchmark --only s1-regressions >/dev/null
 assert_benchmark_selector_count 1
@@ -305,3 +332,4 @@ printf 'Development script clean safety tests passed.\n'
 printf 'Benchmark discovery, focused/combined/explicit-all selection, signing and invalid-input tests passed.\n'
 printf 'Golden speech benchmark forwarding tests passed.\n'
 printf 'Candidate benchmark forwarding tests passed.\n'
+printf 'Optional browser/provider/microphone selection and forwarding tests passed.\n'

@@ -36,7 +36,8 @@ contract violation. Assert consumer outcomes with independent references; avoid
 copied implementation formulas, constant/enum assertions and screenshots without
 a comparison oracle. Use fixture tables when cases share setup and behavior.
 Keep ordering-sensitive lifecycle/cancellation cases separate. Browser, live
-provider and microphone integration checks require their explicit opt-ins.
+provider and microphone integration checks also compile only for selected
+workloads and require their explicit environment opt-ins.
 
 ## Choose the smallest useful run
 
@@ -44,6 +45,7 @@ provider and microphone integration checks require their explicit opt-ins.
 | --- | --- |
 | `audio`, `overlay`, `transcript`, `cloud-request`, `recovery` | Model-free current-path timing: meter polling, PCM buffers, preview suffixes, transcript assembly, multipart encoding and recovery I/O. No network or microphone. |
 | `audio-conversion` | Continuous capture conversion against reset-per-block conversion, exact whole-stream PCM continuity, golden decode quality and direct recovery PCM read work. |
+| `audio-hardware`, `browser-context`, `live-insertion` | Explicit microphone, isolated Chromium, or live AssemblyAI integration. Each also requires its environment opt-in; microphone checks use Debug. |
 | `asr` | One supplied recording and reference: recovery decode latency and WER. |
 | `asr-quality` | Independent human goldens through live batch replay/native recovery; optional encoder placement comparison. |
 | `asr-regressions` | Installed-model prepare/recovery isolation, v2 vocabulary seams, batch cancellation/tails and cancelled previews, quiet speech versus noise and Apple recovery. |
@@ -155,9 +157,22 @@ process counters exclude accelerator/helper allocations and do not establish
 whole-app energy or peak system memory. Process CPU sums threads; process peak
 RSS retains earlier cases' high-water marks. Use isolated processes for comparisons.
 
-For microphone stop/restart integration, run
-`RUN_AUDIO_CAPTURE_SMOKE=1 scripts/dev.sh test` with existing Dev-app microphone
-permission. Audio samples are discarded. Accessibility activation, target-app
+For optional integration checks, select the workload explicitly:
+
+```sh
+RUN_AUDIO_CAPTURE_SMOKE=1 scripts/dev.sh benchmark --only audio-hardware
+DICTATE_CHROMIUM_CAPTURE_TESTS=1 scripts/dev.sh benchmark --only browser-context
+DICTATE_ASSEMBLYAI_LIVE_TESTS=1 scripts/dev.sh benchmark --only live-insertion
+```
+
+Microphone stop/restart uses Debug and existing Dev-app microphone permission;
+audio samples are discarded. Chromium uses an isolated disposable profile and
+existing Accessibility permission. Live insertion uses the Dev app's configured
+AssemblyAI credentials and Polished/context-sharing settings. Adding
+`DICTATE_ASSEMBLYAI_LIVE_TESTS=1` to the browser workload enables its live-provider
+path; `DICTATE_LIVE_CAPTURE_TESTS=1` enables native field capture in the live
+insertion workload. Selecting `--only all` supplies none of these opt-ins.
+Accessibility activation, target-app
 paste latency, routing and live UI latency need real app traces or Instruments;
 see the [tracing map](performance-tracing.md).
 

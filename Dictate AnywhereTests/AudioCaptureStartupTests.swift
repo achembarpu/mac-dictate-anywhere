@@ -105,8 +105,9 @@ final class AudioCaptureStartupTests: XCTestCase {
         XCTAssertFalse(prematureCapture.value, "Construction must honor a stop recorded while queued")
     }
 
-    #if DEBUG
+    #if PIPELINE_BENCHMARK
     func testRealAudioRapidRestartSmoke() async throws {
+        #if DEBUG
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["RUN_AUDIO_CAPTURE_SMOKE"] == "1",
             "Opt in with RUN_AUDIO_CAPTURE_SMOKE=1 for the microphone hardware test"
@@ -137,8 +138,13 @@ final class AudioCaptureStartupTests: XCTestCase {
             await engine.stopAudioCapture()
         }
         await engine.cancel()
+        #else
+        throw XCTSkip("Select --only audio-hardware in Debug for the microphone hardware test")
+        #endif
     }
+    #endif
 
+    #if DEBUG
     func testAudioCaptureStartupHonorsPendingRestartGap() async throws {
         let gate = AudioCaptureRestartGate(minimumGap: .milliseconds(250))
         gate.recordStop()

@@ -73,7 +73,9 @@ final class SettingsInteractionTests: XCTestCase {
         window.orderFront(nil)
         defer { window.close() }
         host.layoutSubtreeIfNeeded()
-        try await Task.sleep(for: .milliseconds(100))
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
         let editor = try XCTUnwrap(findTextView(in: host))
         editor.insertText("abcdef", replacementRange: NSRange(location: 0, length: 0))
         XCTAssertEqual(acceptedText, "abcd")
@@ -81,11 +83,9 @@ final class SettingsInteractionTests: XCTestCase {
         editor.breakUndoCoalescing()
         XCTAssertTrue(editor.undoManager?.canUndo == true)
         editor.undoManager?.undo()
-        try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(acceptedText, "")
         XCTAssertEqual(editor.string, "")
         editor.undoManager?.redo()
-        try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(acceptedText, "abcd")
         XCTAssertEqual(editor.string, "abcd")
         editor.insertText("ef", replacementRange: NSRange(location: 4, length: 0))

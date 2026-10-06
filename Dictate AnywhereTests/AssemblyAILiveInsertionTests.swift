@@ -1,9 +1,10 @@
+#if PIPELINE_BENCHMARK
 import AppKit
 import XCTest
 @testable import Dictate_Anywhere
 
-/// Explicitly opt in with TEST_RUNNER_DICTATE_ASSEMBLYAI_LIVE_TESTS=1 when
-/// invoking xcodebuild. Uses the Dev app's configured provider and credentials;
+/// Select --only live-insertion with DICTATE_ASSEMBLYAI_LIVE_TESTS=1.
+/// Uses the Dev app's configured provider and credentials;
 /// sends only generated grocery audio and the fixture text below.
 final class AssemblyAILiveInsertionTests: XCTestCase {
     @MainActor
@@ -99,3 +100,4 @@ final class AssemblyAILiveInsertionTests: XCTestCase {
         }
     }
 }
+#endif
