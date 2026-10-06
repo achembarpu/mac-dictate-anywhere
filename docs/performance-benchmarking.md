@@ -71,8 +71,7 @@ can be checked with `PIPELINE_BENCHMARK_ASR_RESULTS_PATH` and
 The standalone [native MLX probe](../tools/s1-mlx-probe/README.md) and
 `scripts/evaluate_s1_mlx.py` collect S1 outputs for the existing
 `PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH` / `--only cleanup-prompts` scorer.
-The Swift collector includes both original and S1 stress references, recording
-their hashes; saved candidate scoring reports content checks, WER and completion.
+The Swift collector records hashes for both original and S1 stress references.
 The collectors do not change the app's runtime or download models implicitly.
 
 `--only audio-conversion` compares continuous capture conversion with the frozen
