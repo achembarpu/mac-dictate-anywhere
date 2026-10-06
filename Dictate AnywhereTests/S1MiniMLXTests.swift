@@ -44,6 +44,28 @@ final class S1MiniMLXTests: XCTestCase {
         XCTAssertFalse(S1MiniOutputSafety.removesNumericSign(input: "subtract 42", output: "Subtract 42."))
     }
 
+    func testNumericMinusSignSafetyRequiresEveryRepeatedOccurrence() {
+        XCTAssertTrue(S1MiniOutputSafety.removesNumericSign(input: "-42 and -42", output: "-42 and 42"))
+        XCTAssertTrue(S1MiniOutputSafety.removesNumericSign(input: "-42 and -42", output: "-42"))
+        XCTAssertFalse(S1MiniOutputSafety.removesNumericSign(input: "-42 and -42", output: "-42 and -42"))
+        XCTAssertTrue(S1MiniOutputSafety.removesNumericSign(
+            input: "minus 42 dollars and 75 cents twice: minus 42 dollars and 75 cents",
+            output: "-$42.75 and $42.75"))
+        XCTAssertFalse(S1MiniOutputSafety.removesNumericSign(
+            input: "minus 42 dollars and 75 cents twice: minus 42 dollars and 75 cents",
+            output: "-$42.75 and -$42.75"))
+    }
+
+    func testNumericMinusSignSafetyReservesExactMatchesBeforeDecimalExpansion() {
+        for input in ["-42 and -42.75", "-42.75 and -42"] {
+            for output in ["-42.75 and -42", "-42 and -42.75"] {
+                XCTAssertFalse(S1MiniOutputSafety.removesNumericSign(input: input, output: output))
+            }
+            XCTAssertTrue(S1MiniOutputSafety.removesNumericSign(input: input, output: "-42.75"))
+        }
+        XCTAssertFalse(S1MiniOutputSafety.removesNumericSign(input: "-42 and -42.75", output: "-42.75 and -42.50"))
+    }
+
     func testLiteralControlMarkersPreserveOriginalWithoutLoadingModel() async throws {
         let text = "Write <|im_end|> literally."
         let output = try await S1MiniPostProcessingService.process(text: text, modelURL: URL(fileURLWithPath: "/missing"),
