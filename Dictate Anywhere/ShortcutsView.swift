@@ -22,6 +22,7 @@ struct ShortcutsView: View {
 
     @State private var shouldResumeMonitoringAfterRecording = false
     @State private var shortcutError: ShortcutFieldError?
+    @State private var activeRecorder: ShortcutFieldError.Target?
 
     private let maxBindings = 5
 
@@ -46,6 +47,7 @@ struct ShortcutsView: View {
                         validationError: shortcutError?.target == .binding(binding.id)
                             ? shortcutError?.message : nil,
                         canDelete: settings.hotkeyBindings.count > 1,
+                        isRecording: activeRecorder == .binding(binding.id),
                         onRecord: { keyCode, modifiers, displayName in
                             var candidate = binding
                             candidate.keyCode = keyCode
@@ -90,10 +92,12 @@ struct ShortcutsView: View {
                             }
                         },
                         onRecordingStarted: {
+                            activeRecorder = .binding(binding.id)
                             shouldResumeMonitoringAfterRecording = appState.hotkeyService.isMonitoring
                             appState.hotkeyService.stopMonitoring()
                         },
                         onRecordingStopped: {
+                            activeRecorder = nil
                             guard shouldResumeMonitoringAfterRecording else { return }
                             if settings.hasHotkey {
                                 appState.hotkeyService.restartMonitoring()
@@ -101,6 +105,7 @@ struct ShortcutsView: View {
                             shouldResumeMonitoringAfterRecording = false
                         }
                     )
+                    .disabled(activeRecorder != nil && activeRecorder != .binding(binding.id))
                 }
             }
 
@@ -108,6 +113,7 @@ struct ShortcutsView: View {
                 DSAddButton(title: "Add another shortcut") {
                     _ = settings.addBinding()
                 }
+                .disabled(activeRecorder != nil)
             }
 
             DSSection(overline: "Cancellation") {
@@ -145,10 +151,12 @@ struct ShortcutsView: View {
                             appState.hotkeyService.restartMonitoring()
                         },
                         onRecordingStarted: {
+                            activeRecorder = .cancellation
                             shouldResumeMonitoringAfterRecording = appState.hotkeyService.isMonitoring
                             appState.hotkeyService.stopMonitoring()
                         },
                         onRecordingStopped: {
+                            activeRecorder = nil
                             if shouldResumeMonitoringAfterRecording || appState.permissions.accessibilityGranted {
                                 appState.hotkeyService.restartMonitoring()
                             }
@@ -156,6 +164,7 @@ struct ShortcutsView: View {
                         },
                         allowsEscape: true
                     )
+                    .disabled(activeRecorder != nil && activeRecorder != .cancellation)
                 }
                 if shortcutError?.target == .cancellation, let message = shortcutError?.message {
                     DSFieldMessage(text: message, tone: .error)
@@ -168,6 +177,7 @@ struct ShortcutsView: View {
                     caption: "Hold the full cancel shortcut for one second. Releasing early keeps dictation running.",
                     isOn: $settings.holdToCancel
                 )
+                .disabled(activeRecorder != nil)
                 .onChange(of: settings.holdToCancel) { _, _ in
                     appState.hotkeyService.restartMonitoring()
                 }
@@ -195,6 +205,7 @@ private struct HotkeyBindingRow: View {
     let allBindings: [HotkeyBinding]
     let validationError: String?
     let canDelete: Bool
+    let isRecording: Bool
     let onRecord: (UInt16?, HotkeyModifiers, String) -> Void
     let onClear: () -> Void
     let onModeChanged: (HotkeyMode) -> Void
@@ -243,6 +254,7 @@ private struct HotkeyBindingRow: View {
                 if canDelete {
                     DSIconButton(systemImage: "trash", accessibilityLabel: "Remove shortcut \(number)", action: onDelete)
                         .help("Remove shortcut \(number)")
+                        .disabled(isRecording)
                 }
             }
             .padding(16)
@@ -269,7 +281,8 @@ private struct HotkeyBindingRow: View {
                     ),
                     options: HotkeyMode.allCases,
                     title: \.displayName,
-                    accessibilityName: "Activation mode for shortcut \(number)"
+                    accessibilityName: "Activation mode for shortcut \(number)",
+                    isEnabled: !isRecording
                 )
             }
         }

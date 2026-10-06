@@ -56,7 +56,7 @@ struct SettingsMultilineTextArea: View {
                     )
                 )
 
-            AppKitMultilineTextView(text: $text, isFocused: $isFocused, label: label)
+            AppKitMultilineTextView(text: $text, isFocused: $isFocused, label: label, placeholder: placeholder)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .padding(.trailing, showsResizeHandle ? 10 : 0)
@@ -68,6 +68,7 @@ struct SettingsMultilineTextArea: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 11)
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
         .frame(height: height, alignment: .topLeading)
@@ -146,6 +147,7 @@ private struct AppKitMultilineTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
     let label: String
+    let placeholder: String
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text, isFocused: $isFocused)
@@ -163,6 +165,7 @@ private struct AppKitMultilineTextView: NSViewRepresentable {
 
         let textView = FocusAwareTextView()
         textView.delegate = context.coordinator
+        textView.observeUndoCompletion()
         textView.onFocusChange = { isFocused in
             context.coordinator.isFocused = isFocused
         }
@@ -178,6 +181,7 @@ private struct AppKitMultilineTextView: NSViewRepresentable {
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         textView.string = text
         textView.setAccessibilityLabel(label)
+        textView.setAccessibilityPlaceholderValue(placeholder)
 
         guard let textContainer = textView.textContainer else {
             scrollView.documentView = textView
@@ -201,6 +205,7 @@ private struct AppKitMultilineTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? FocusAwareTextView else { return }
         textView.setAccessibilityLabel(label)
+        textView.setAccessibilityPlaceholderValue(placeholder)
         if textView.string != text {
             textView.string = text
             textView.clearUndoHistory()
@@ -226,6 +231,22 @@ private struct AppKitMultilineTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text = textView.string
+            // Some settings bindings enforce a limit or normalize an edit. Keep
+            // the native editor in sync even when the accepted value is unchanged.
+            if textView.string != text,
+               textView.undoManager?.isUndoing != true,
+               textView.undoManager?.isRedoing != true {
+                let acceptedText = text
+                let insertionPoint = min(textView.selectedRange().location, (acceptedText as NSString).length)
+                let range = NSRange(location: 0, length: (textView.string as NSString).length)
+                // Record the normalization with the edit so native undo ranges
+                // remain valid after a binding truncates or transforms input.
+                if textView.shouldChangeText(in: range, replacementString: acceptedText) {
+                    textView.textStorage?.replaceCharacters(in: range, with: acceptedText)
+                    textView.didChangeText()
+                    textView.setSelectedRange(NSRange(location: insertionPoint, length: 0))
+                }
+            }
         }
     }
 }
@@ -254,11 +275,26 @@ private final class FocusAwareTextView: NSTextView {
         return didResignFirstResponder
     }
 
+    func observeUndoCompletion() {
+        for name in [NSNotification.Name.NSUndoManagerDidUndoChange, NSNotification.Name.NSUndoManagerDidRedoChange] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(undoDidComplete), name: name, object: localUndoManager
+            )
+        }
+    }
+
+    @objc private func undoDidComplete() {
+        // AppKit can coalesce change notifications while replaying grouped edits.
+        // Publish the final buffer after undo/redo, including binding normalization.
+        delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
+    }
+
     func clearUndoHistory() {
         localUndoManager.removeAllActions()
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         clearUndoHistory()
     }
 }

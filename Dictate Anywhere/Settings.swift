@@ -1406,9 +1406,12 @@ final class Settings {
         didSet {
             openRouterAPIKeyError = Self.storeOpenRouterAPIKey(openRouterAPIKey)
                 ? nil : Self.apiKeySaveError
+            if oldValue != openRouterAPIKey { openRouterCredentialsRevision &+= 1 }
         }
     }
     var openRouterAPIKeyError: String?
+    /// Invalidates provider checks without putting credentials in their task identity.
+    private(set) var openRouterCredentialsRevision = 0
 
     var openRouterAPIKeyEnvironmentVariable: String {
         didSet {
@@ -1416,6 +1419,7 @@ final class Settings {
                 openRouterAPIKeyEnvironmentVariable,
                 forKey: Keys.openRouterAPIKeyEnvironmentVariable
             )
+            if oldValue != openRouterAPIKeyEnvironmentVariable { openRouterCredentialsRevision &+= 1 }
         }
     }
 
@@ -1435,9 +1439,11 @@ final class Settings {
         didSet {
             openAICompatibleAPIKeyError = Self.storeOpenAICompatibleAPIKey(openAICompatibleAPIKey)
                 ? nil : Self.apiKeySaveError
+            if oldValue != openAICompatibleAPIKey { openAICompatibleCredentialsRevision &+= 1 }
         }
     }
     var openAICompatibleAPIKeyError: String?
+    private(set) var openAICompatibleCredentialsRevision = 0
 
     var openAICompatiblePostProcessingPrompt: String {
         didSet {

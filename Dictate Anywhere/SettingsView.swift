@@ -121,10 +121,19 @@ struct SettingsView: View {
                         title: { uid in
                             guard let uid else { return "System Default" }
                             return appState.audioDeviceManager.availableInputDevices
-                                .first { $0.uid == uid }?.name ?? uid
+                                .first { $0.uid == uid }?.name ?? "Selected microphone unavailable"
                         },
                         accessibilityName: "Microphone"
                     )
+                }
+                if let uid = settings.selectedMicrophoneUID,
+                   !appState.audioDeviceManager.availableInputDevices.contains(where: { $0.uid == uid }) {
+                    DSFieldMessage(
+                        text: "The selected microphone is disconnected or unavailable. Reconnect it, choose another microphone, or select System Default.",
+                        tone: .warning
+                    )
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+                    .padding(.bottom, 10)
                 }
                 DSDivider()
                 DSInfoRow(label: "Boost microphone volume during recording") {

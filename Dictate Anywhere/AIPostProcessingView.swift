@@ -17,12 +17,15 @@ struct AIPostProcessingView: View {
     @State private var ollamaPendingDeletionModel: String?
     @State private var ollamaStatusMessage: String?
     @State private var isCheckingOllama = false
+    @State private var ollamaCheckID: UUID?
     @State private var openRouterAvailability: OpenRouterPostProcessingService.Availability?
     @State private var openRouterStatusMessage: String?
     @State private var isCheckingOpenRouter = false
+    @State private var openRouterCheckID: UUID?
     @State private var openAICompatibleAvailability: OpenAICompatiblePostProcessingService.Availability?
     @State private var openAICompatibleStatusMessage: String?
     @State private var isCheckingOpenAICompatible = false
+    @State private var openAICompatibleCheckID: UUID?
     @State private var isConfirmingS1MiniDeletion = false
     @State private var s1MiniActionError: String?
     private let shouldAutoRefreshProviderAvailability: Bool
@@ -88,7 +91,10 @@ struct AIPostProcessingView: View {
                 localFillerWordCleanupContent(settings: settings)
             }
         }
-        .task(id: providerTaskID(settings: settings)) {
+        .task(id: Self.providerTaskID(
+            settings: settings,
+            ollamaModelActionsRevision: appState.ollamaModelActionsRevision
+        )) {
             guard shouldAutoRefreshProviderAvailability else { return }
             ollamaCLIAvailability = OllamaPostProcessingService.cliAvailability()
             await refreshProviderAvailabilityIfNeeded(settings: settings)
@@ -412,7 +418,7 @@ struct AIPostProcessingView: View {
     }
 
     private func appRuleRow(settings: Settings, index: Int, rule: DictationAppRule) -> some View {
-        HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(rule.appName)
                     .font(DS.Fonts.ui(13.5, .medium))
@@ -422,27 +428,29 @@ struct AIPostProcessingView: View {
                     .foregroundStyle(DS.Colors.textSecondary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 12)
-            DSDropdown(
-                selection: appRuleCategoryBinding(settings: settings, index: index),
-                options: DictationContextCategory.allCases,
-                title: \.displayName,
-                accessibilityName: "Category for \(rule.appName)"
-            )
-            Text("Read field context")
-                .font(DS.Fonts.ui(13.5, .medium))
-                .foregroundStyle(DS.Colors.ink)
-            DSSwitch(
-                accessibilityName: "Read field context for \(rule.appName)",
-                isOn: appRuleContextBinding(settings: settings, index: index)
-            )
-            DSIconButton(
-                systemImage: "trash",
-                tint: DS.Colors.destructive,
-                accessibilityLabel: "Remove \(rule.appName) override"
-            ) {
-                guard settings.dictationAppRules.indices.contains(index) else { return }
-                settings.dictationAppRules.remove(at: index)
+            HStack(spacing: 12) {
+                DSDropdown(
+                    selection: appRuleCategoryBinding(settings: settings, index: index),
+                    options: DictationContextCategory.allCases,
+                    title: \.displayName,
+                    accessibilityName: "Category for \(rule.appName)"
+                )
+                Spacer(minLength: 0)
+                Text("Read field context")
+                    .font(DS.Fonts.ui(13.5, .medium))
+                    .foregroundStyle(DS.Colors.ink)
+                DSSwitch(
+                    accessibilityName: "Read field context for \(rule.appName)",
+                    isOn: appRuleContextBinding(settings: settings, index: index)
+                )
+                DSIconButton(
+                    systemImage: "trash",
+                    tint: DS.Colors.destructive,
+                    accessibilityLabel: "Remove \(rule.appName) override"
+                ) {
+                    guard settings.dictationAppRules.indices.contains(index) else { return }
+                    settings.dictationAppRules.remove(at: index)
+                }
             }
         }
         .padding(.vertical, 12)
@@ -573,6 +581,36 @@ struct AIPostProcessingView: View {
         .padding(.horizontal, DS.Spacing.rowHorizontal)
     }
 
+    // MARK: - Shared prompt editor
+
+    private func cleanupPromptSection(
+        text: Binding<String>, label: String, defaultPrompt: String? = nil
+    ) -> some View {
+        DSSection(overline: "Prompt") {
+            cardPadded {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Cleanup instructions")
+                        .font(DS.Fonts.ui(13.5, .medium))
+                        .foregroundStyle(DS.Colors.ink)
+                    Spacer(minLength: 0)
+                    if let defaultPrompt {
+                        Button("Reset to Default") {
+                            text.wrappedValue = defaultPrompt
+                        }
+                        .buttonStyle(.dsSecondary)
+                        .disabled(text.wrappedValue == defaultPrompt)
+                        .accessibilityLabel("Reset \(label) to default")
+                    }
+                }
+                SettingsMultilineTextArea(
+                    text: text,
+                    label: label,
+                    placeholder: "Enter cleanup instructions."
+                )
+            }
+        }
+    }
+
     // MARK: - Local filler word removal
 
     @ViewBuilder
@@ -615,6 +653,7 @@ struct AIPostProcessingView: View {
                         Button("Add") { addFillerWord() }
                             .buttonStyle(.dsSecondary)
                             .disabled(addableFillerWord == nil)
+                            .accessibilityLabel("Add filler word")
 
                         Spacer(minLength: 0)
 
@@ -623,6 +662,7 @@ struct AIPostProcessingView: View {
                         }
                         .buttonStyle(.dsSecondary)
                         .disabled(settings.fillerWordsToRemove == Settings.defaultFillerWords)
+                        .accessibilityLabel("Reset filler words to defaults")
                     }
                 }
             }
@@ -668,17 +708,10 @@ struct AIPostProcessingView: View {
             let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
 
             if supportedFeatures.contains(.customPrompt) {
-                DSSection(overline: "Prompt") {
-                    cardPadded {
-                        SettingsMultilineTextArea(
-                            text: $settings.aiPostProcessingPrompt,
-                            label: "Apple Intelligence prompt",
-                            placeholder: "Enter your prompt, e.g. \"Break into sentences, fix grammar, and remove filler words.\""
-                        )
-                    }
-                    DSDivider()
-                    DSCardCaption(text: "This prompt tells Apple Intelligence how to transform your transcribed text. The transcript is appended after your prompt.")
-                }
+                cleanupPromptSection(
+                    text: $settings.aiPostProcessingPrompt,
+                    label: "Apple Intelligence prompt"
+                )
             }
 
             if supportedFeatures.contains(.customVocabulary) {
@@ -714,15 +747,7 @@ struct AIPostProcessingView: View {
         case .unavailable(.modelNotReady):
             DSSection(overline: "Apple Intelligence") {
                 cardPadded {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.down.circle")
-                            .foregroundStyle(DS.Colors.accent)
-                        Text("Apple Intelligence model is downloading…")
-                            .font(DS.Fonts.ui(13.5, .medium))
-                            .foregroundStyle(DS.Colors.ink)
-                        ProgressView()
-                            .controlSize(.small)
-                    }
+                    DSLoadingMessage(text: "Apple Intelligence model is downloading…")
                 }
                 DSDivider()
                 DSCardCaption(text: "The on-device model is being prepared. This may take a few minutes.")
@@ -747,6 +772,7 @@ struct AIPostProcessingView: View {
                 HStack(alignment: .center, spacing: 12) {
                     Image(systemName: s1MiniStatusIcon(manager: manager))
                         .foregroundStyle(manager.isModelDownloaded ? DS.Colors.success : DS.Colors.accent)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(s1MiniStatusTitle(manager: manager))
                             .font(DS.Fonts.ui(13.5, .semibold))
@@ -775,6 +801,7 @@ struct AIPostProcessingView: View {
                 if manager.isDownloading {
                     ProgressView(value: s1MiniVisibleDownloadProgress(manager: manager))
                         .progressViewStyle(.linear)
+                        .accessibilityLabel("Download S1-mini")
                     Text(s1MiniDownloadProgressText(manager: manager))
                         .font(DS.Fonts.ui(11.5, .medium))
                         .foregroundStyle(DS.Colors.textSecondary)
@@ -894,6 +921,7 @@ struct AIPostProcessingView: View {
 
     @ViewBuilder
     private func ollamaContent(settings: Settings) -> some View {
+        @Bindable var settings = settings
         DSSection(overline: "Ollama") {
             if !ollamaCLIAvailability.isAvailable {
                 ollamaInstallContent()
@@ -989,20 +1017,11 @@ struct AIPostProcessingView: View {
 
         let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
         if supportedFeatures.contains(.customPrompt) {
-            DSSection(overline: "Prompt") {
-                cardPadded {
-                    SettingsMultilineTextArea(
-                        text: Binding(
-                            get: { settings.ollamaPostProcessingPrompt },
-                            set: { settings.ollamaPostProcessingPrompt = $0 }
-                        ),
-                        label: "Ollama prompt",
-                        placeholder: "Optional: add style or cleanup instructions for Ollama."
-                    )
-                }
-                DSDivider()
-                DSCardCaption(text: "Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for Ollama.")
-            }
+            cleanupPromptSection(
+                text: $settings.ollamaPostProcessingPrompt,
+                label: "Ollama prompt",
+                defaultPrompt: Settings.recommendedTranscriptCleanupPrompt
+            )
         }
 
         if supportedFeatures.contains(.customVocabulary) {
@@ -1017,6 +1036,7 @@ struct AIPostProcessingView: View {
 
     @ViewBuilder
     private func openRouterContent(settings: Settings) -> some View {
+        @Bindable var settings = settings
         DSSection(overline: "OpenRouter") {
             fieldRow(label: "API key") {
                 DSTextField(
@@ -1096,20 +1116,11 @@ struct AIPostProcessingView: View {
 
         let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
         if supportedFeatures.contains(.customPrompt) {
-            DSSection(overline: "Prompt") {
-                cardPadded {
-                    SettingsMultilineTextArea(
-                        text: Binding(
-                            get: { settings.openRouterPostProcessingPrompt },
-                            set: { settings.openRouterPostProcessingPrompt = $0 }
-                        ),
-                        label: "OpenRouter prompt",
-                        placeholder: "Optional: add style or cleanup instructions for OpenRouter."
-                    )
-                }
-                DSDivider()
-                DSCardCaption(text: "Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for OpenRouter.")
-            }
+            cleanupPromptSection(
+                text: $settings.openRouterPostProcessingPrompt,
+                label: "OpenRouter prompt",
+                defaultPrompt: Settings.recommendedTranscriptCleanupPrompt
+            )
         }
 
         if supportedFeatures.contains(.customVocabulary) {
@@ -1124,6 +1135,7 @@ struct AIPostProcessingView: View {
 
     @ViewBuilder
     private func openAICompatibleContent(settings: Settings) -> some View {
+        @Bindable var settings = settings
         DSSection(overline: "OpenAI Compatible") {
             fieldRow(label: "Server URL") {
                 DSTextField(
@@ -1210,20 +1222,11 @@ struct AIPostProcessingView: View {
 
         let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
         if supportedFeatures.contains(.customPrompt) {
-            DSSection(overline: "Prompt") {
-                cardPadded {
-                    SettingsMultilineTextArea(
-                        text: Binding(
-                            get: { settings.openAICompatiblePostProcessingPrompt },
-                            set: { settings.openAICompatiblePostProcessingPrompt = $0 }
-                        ),
-                        label: "OpenAI-compatible prompt",
-                        placeholder: "Optional: add style or cleanup instructions for this server."
-                    )
-                }
-                DSDivider()
-                DSCardCaption(text: "Pre-filled with the recommended cleanup prompt. Customize it if you want different safe cleanup behavior for this server.")
-            }
+            cleanupPromptSection(
+                text: $settings.openAICompatiblePostProcessingPrompt,
+                label: "OpenAI-compatible prompt",
+                defaultPrompt: Settings.recommendedTranscriptCleanupPrompt
+            )
         }
 
         if supportedFeatures.contains(.customVocabulary) {
@@ -1388,6 +1391,7 @@ struct AIPostProcessingView: View {
                             }
                             .buttonStyle(.dsPrimary)
                             .disabled(isDownloading || isDeleting)
+                            .accessibilityLabel("Use \(suggestion.name)")
                         }
 
                         if canDelete {
@@ -1396,11 +1400,12 @@ struct AIPostProcessingView: View {
                             }
                             .buttonStyle(.dsDestructive)
                             .disabled(isDeleting || isDownloading || isAnotherDownloadRunning || isAnotherDeleteRunning)
+                            .accessibilityLabel(isDeleting ? "Deleting \(suggestion.name)" : "Delete \(suggestion.name)")
                         }
                     }
                 } else if canDownload {
                     if isDownloading {
-                        DSLoadingMessage(text: "Downloading…")
+                        DSLoadingMessage(text: "Downloading \(suggestion.name)…")
                     } else {
                         Button("Download") {
                             Task {
@@ -1409,6 +1414,7 @@ struct AIPostProcessingView: View {
                         }
                         .buttonStyle(.dsPrimary)
                         .disabled(isAnotherDownloadRunning || isAnotherDeleteRunning || isCheckingOllama)
+                        .accessibilityLabel("Download \(suggestion.name)")
                     }
                 } else {
                     Button("Use Name") {
@@ -1416,6 +1422,7 @@ struct AIPostProcessingView: View {
                     }
                     .buttonStyle(.dsSecondary)
                     .disabled(isAnotherDownloadRunning || isAnotherDeleteRunning)
+                    .accessibilityLabel("Use name \(suggestion.name)")
                 }
             }
 
@@ -1425,10 +1432,12 @@ struct AIPostProcessingView: View {
                         ProgressView(value: fractionCompleted)
                             .progressViewStyle(.linear)
                             .tint(DS.Colors.accent)
+                            .accessibilityLabel("Download \(suggestion.name)")
                     } else {
                         ProgressView()
                             .progressViewStyle(.linear)
                             .tint(DS.Colors.accent)
+                            .accessibilityLabel("Download \(suggestion.name)")
                     }
 
                     Text(ollamaDownloadCaption(downloadState))
@@ -1779,46 +1788,17 @@ struct AIPostProcessingView: View {
 
     // MARK: - Availability refresh
 
-    private func providerTaskID(settings: Settings) -> String {
+    static func providerTaskID(settings: Settings, ollamaModelActionsRevision: Int) -> String {
         [
             settings.transcriptPostProcessingMode.rawValue,
             settings.ollamaBaseURL,
             settings.ollamaModel,
-            openRouterAvailabilityRefreshKey(settings: settings),
+            String(settings.openRouterCredentialsRevision),
             settings.openAICompatibleBaseURL,
             settings.openAICompatibleModel,
-            openAICompatibleAvailabilityRefreshKey(settings: settings),
-            String(appState.ollamaModelActionsRevision),
+            String(settings.openAICompatibleCredentialsRevision),
+            String(ollamaModelActionsRevision),
         ].joined(separator: "|")
-    }
-
-    private func openRouterAvailabilityRefreshKey(settings: Settings) -> String {
-        let hasStoredKey = !settings.openRouterAPIKey
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty
-        let environmentValue = settings.openRouterAPIKeyEnvironmentVariable
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedEnvironmentValue: String
-
-        if environmentValue.isEmpty {
-            normalizedEnvironmentValue = ""
-        } else if environmentValue.lowercased().hasPrefix("sk-or-") {
-            normalizedEnvironmentValue = "inline-key"
-        } else {
-            normalizedEnvironmentValue = environmentValue
-        }
-
-        return [
-            hasStoredKey ? "stored-key" : "no-stored-key",
-            normalizedEnvironmentValue,
-        ].joined(separator: "|")
-    }
-
-    private func openAICompatibleAvailabilityRefreshKey(settings: Settings) -> String {
-        let hasStoredKey = !settings.openAICompatibleAPIKey
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty
-        return hasStoredKey ? "stored-key" : "no-stored-key"
     }
 
     private func refreshProviderAvailabilityIfNeeded(settings: Settings) async {
@@ -1848,6 +1828,16 @@ struct AIPostProcessingView: View {
             return
         }
 
+        let checkID = UUID()
+        ollamaCheckID = checkID
+        isCheckingOllama = true
+        defer {
+            if ollamaCheckID == checkID {
+                isCheckingOllama = false
+                ollamaCheckID = nil
+            }
+        }
+
         if debounce {
             do {
                 try await Task.sleep(for: .milliseconds(350))
@@ -1860,15 +1850,12 @@ struct AIPostProcessingView: View {
         let model = settings.ollamaModel
 
         ollamaCLIAvailability = OllamaPostProcessingService.cliAvailability()
-        isCheckingOllama = true
-        defer { isCheckingOllama = false }
-
         do {
             let availability = try await OllamaPostProcessingService.availability(
                 baseURL: baseURL,
                 selectedModel: model
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, ollamaCheckID == checkID else { return }
             ollamaAvailability = availability
             ollamaStatusMessage = nil
             if availability.selectedModelReasoningCapability.supportsReasoning {
@@ -1879,7 +1866,7 @@ struct AIPostProcessingView: View {
                 }
             }
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, ollamaCheckID == checkID else { return }
             ollamaAvailability = nil
             ollamaStatusMessage = error.localizedDescription
         }
@@ -1891,6 +1878,16 @@ struct AIPostProcessingView: View {
             return
         }
 
+        let checkID = UUID()
+        openRouterCheckID = checkID
+        isCheckingOpenRouter = true
+        defer {
+            if openRouterCheckID == checkID {
+                isCheckingOpenRouter = false
+                openRouterCheckID = nil
+            }
+        }
+
         if debounce {
             do {
                 try await Task.sleep(for: .milliseconds(350))
@@ -1899,19 +1896,16 @@ struct AIPostProcessingView: View {
             }
         }
 
-        isCheckingOpenRouter = true
-        defer { isCheckingOpenRouter = false }
-
         do {
             let availability = try await OpenRouterPostProcessingService.availability(
                 apiKey: settings.openRouterAPIKey,
                 apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, openRouterCheckID == checkID else { return }
             openRouterAvailability = availability
             openRouterStatusMessage = nil
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, openRouterCheckID == checkID else { return }
             openRouterAvailability = nil
             openRouterStatusMessage = error.localizedDescription
         }
@@ -1923,6 +1917,16 @@ struct AIPostProcessingView: View {
             return
         }
 
+        let checkID = UUID()
+        openAICompatibleCheckID = checkID
+        isCheckingOpenAICompatible = true
+        defer {
+            if openAICompatibleCheckID == checkID {
+                isCheckingOpenAICompatible = false
+                openAICompatibleCheckID = nil
+            }
+        }
+
         if debounce {
             do {
                 try await Task.sleep(for: .milliseconds(350))
@@ -1931,26 +1935,24 @@ struct AIPostProcessingView: View {
             }
         }
 
-        isCheckingOpenAICompatible = true
-        defer { isCheckingOpenAICompatible = false }
-
         do {
             let availability = try await OpenAICompatiblePostProcessingService.availability(
                 baseURL: settings.openAICompatibleBaseURL,
                 apiKey: settings.openAICompatibleAPIKey,
                 selectedModel: settings.openAICompatibleModel
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, openAICompatibleCheckID == checkID else { return }
             openAICompatibleAvailability = availability
             openAICompatibleStatusMessage = nil
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, openAICompatibleCheckID == checkID else { return }
             openAICompatibleAvailability = nil
             openAICompatibleStatusMessage = error.localizedDescription
         }
     }
 
     private func resetOllamaAvailability() {
+        ollamaCheckID = nil
         isCheckingOllama = false
         ollamaAvailability = nil
         ollamaCLIAvailability = OllamaPostProcessingService.cliAvailability()
@@ -1958,12 +1960,14 @@ struct AIPostProcessingView: View {
     }
 
     private func resetOpenRouterAvailability() {
+        openRouterCheckID = nil
         isCheckingOpenRouter = false
         openRouterAvailability = nil
         openRouterStatusMessage = nil
     }
 
     private func resetOpenAICompatibleAvailability() {
+        openAICompatibleCheckID = nil
         isCheckingOpenAICompatible = false
         openAICompatibleAvailability = nil
         openAICompatibleStatusMessage = nil

@@ -116,14 +116,12 @@ struct AttentionBanner: View {
                     .fill(DS.Colors.border)
                     .frame(height: 1)
             }
-            .onChange(of: selectedID) { _, _ in
-                issueIsFocused = true
-            }
         }
     }
 
     private func selectIssue(offset: Int) {
         selectedID = issues[(selectedIndex + offset + issues.count) % issues.count].id
+        issueIsFocused = true
     }
 }
 

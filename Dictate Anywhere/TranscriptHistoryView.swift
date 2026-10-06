@@ -95,23 +95,27 @@ struct TranscriptHistoryView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             VStack(spacing: 8) {
-                                Button(appState.continuingEntryID == entry.id
-                                       ? (appState.recoveringEntryID == entry.id ? "Preparing…"
-                                          : (appState.status == .recording ? "Stop" : "Finishing…"))
-                                       : "Continue") {
+                                let continueTitle = appState.continuingEntryID == entry.id
+                                    ? (appState.recoveringEntryID == entry.id ? "Preparing…"
+                                       : (appState.status == .recording ? "Stop" : "Finishing…"))
+                                    : "Continue"
+                                let recoverTitle = appState.recoveringEntryID == entry.id && appState.continuingEntryID == nil
+                                    ? "Recovering…" : "Recover text"
+                                Button(continueTitle) {
                                     Task {
                                         if appState.continuingEntryID == entry.id { await appState.stopDictation() }
                                         else { await appState.continueCancelledDictation(entry) }
                                     }
                                 }
                                 .buttonStyle(.dsPrimary)
+                                .accessibilityLabel("\(continueTitle) cancelled session from \(Self.dateFormatter.string(from: entry.createdAt))")
                                 .disabled(appState.continuingEntryID == entry.id
                                           ? !appState.canStopDictation : appState.status != .idle)
-                                Button(appState.recoveringEntryID == entry.id && appState.continuingEntryID == nil
-                                       ? "Recovering…" : "Recover text") {
+                                Button(recoverTitle) {
                                     Task { await appState.recoverCancelledDictation(entry) }
                                 }
                                 .buttonStyle(.dsSecondary)
+                                .accessibilityLabel("\(recoverTitle) from cancelled session on \(Self.dateFormatter.string(from: entry.createdAt))")
                                 .disabled(appState.status != .idle)
                             }
                             DSIconButton(

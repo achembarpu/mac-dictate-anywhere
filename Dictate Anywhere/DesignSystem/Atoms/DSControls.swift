@@ -76,6 +76,7 @@ struct DSSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
+                        guard width > knobSize else { return }
                         let fraction = ((drag.location.x - knobSize / 2) / (width - knobSize))
                             .clamped(to: 0...1)
                         value = range.lowerBound + fraction * (range.upperBound - range.lowerBound)
@@ -147,7 +148,7 @@ struct DSDropdown<SelectionValue: Hashable>: View {
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.5)
         .accessibilityLabel(accessibilityName)
@@ -182,17 +183,33 @@ struct DSSearchField: View {
     let placeholder: String
     @Binding var text: String
     let accessibilityName: String
+    @FocusState private var fieldIsFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(DS.Colors.textSecondary)
+                .accessibilityHidden(true)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(DS.Fonts.ui(13))
                 .foregroundStyle(DS.Colors.ink)
                 .accessibilityLabel(accessibilityName)
+                .focused($fieldIsFocused)
+                .onExitCommand { text = "" }
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                    fieldIsFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear \(accessibilityName)")
+                .help("Clear search")
+            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)

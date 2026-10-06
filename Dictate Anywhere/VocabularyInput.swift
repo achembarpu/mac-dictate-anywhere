@@ -59,6 +59,7 @@ struct CustomVocabularySection: View {
 
                     Button("Add") { addTerms() }
                         .buttonStyle(.dsSecondary)
+                        .accessibilityLabel("Add custom vocabulary")
                         .disabled(VocabularyInputParser.terms(
                             from: pendingTerm,
                             existingTerms: terms

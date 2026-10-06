@@ -47,7 +47,7 @@ final class QuickVocabularyPanel {
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
         panel.animationBehavior = .utilityWindow
-        panel.contentView = NSHostingView(rootView: QuickVocabularyView())
+        panel.contentView = NSHostingView(rootView: QuickVocabularyView(onClose: { [weak panel] in panel?.close() }))
         return panel
     }
 }
@@ -55,6 +55,8 @@ final class QuickVocabularyPanel {
 private struct QuickVocabularyView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var newTerm = ""
+    @FocusState private var entryIsFocused: Bool
+    let onClose: () -> Void
     private var settings: Settings { Settings.shared }
 
     var body: some View {
@@ -62,7 +64,7 @@ private struct QuickVocabularyView: View {
 
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Teach the transcription engine new words, names, or phrases.")
+                Text("Add names and phrases for supported transcription and cleanup methods.")
                     .font(DS.Fonts.ui(12.5))
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -73,10 +75,12 @@ private struct QuickVocabularyView: View {
                         text: $newTerm,
                         accessibilityName: "Add custom vocabulary word or phrase"
                     )
+                    .focused($entryIsFocused)
                     .onSubmit { addTerm() }
 
                     Button("Add", action: addTerm)
                     .buttonStyle(.dsSecondary)
+                    .accessibilityLabel("Add custom vocabulary")
                     .disabled(VocabularyInputParser.terms(
                         from: newTerm,
                         existingTerms: settings.customVocabulary
@@ -121,6 +125,8 @@ private struct QuickVocabularyView: View {
         }
         .frame(minHeight: 240, idealHeight: 336)
         .background(DS.Colors.bgWindow)
+        .onAppear { entryIsFocused = true }
+        .onExitCommand(perform: onClose)
     }
 
     private func addTerm() {
