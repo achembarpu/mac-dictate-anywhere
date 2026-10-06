@@ -463,6 +463,10 @@ final class ParakeetEngine: TranscriptionEngine {
     private var transcriptionTask: Task<Void, Never>?
     private var lastBatchPreviewSampleCount = 0
     private var recordingModelChoice: ParakeetModelChoice?
+    private var recordingScriptLanguage: Language?
+    #if DEBUG || PIPELINE_BENCHMARK
+    var usesScriptFilterForTesting = true
+    #endif
     private var isTranscribing = false
     private var isRecordingActive = false
     /// One-shot guard for the `stt.firstPartial` trace event. Reset at every
@@ -877,6 +881,13 @@ final class ParakeetEngine: TranscriptionEngine {
         }
     }
 
+    private func scriptLanguage(for model: ParakeetModelChoice) -> Language? {
+        #if DEBUG || PIPELINE_BENCHMARK
+        guard usesScriptFilterForTesting else { return nil }
+        #endif
+        return BatchTranscriptionPolicy.scriptLanguage(for: model, selected: Settings.shared.selectedLanguage)
+    }
+
     /// Vocabulary models must be resident before Stop, including when cleanup
     /// is enabled after the speech model has already been prepared.
     @discardableResult
@@ -920,8 +931,10 @@ final class ParakeetEngine: TranscriptionEngine {
             throw TranscriptionError.engineNotReady
         }
         guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
-        try await asrCoordinator.resetSession(for: modelChoice)
+        let language = scriptLanguage(for: modelChoice)
+        try await asrCoordinator.resetSession(for: modelChoice, language: language)
         recordingModelChoice = modelChoice
+        recordingScriptLanguage = language
         lastBatchPreviewSampleCount = 0
 
         if modelChoice == .nemotronMultilingual {
@@ -991,6 +1004,7 @@ final class ParakeetEngine: TranscriptionEngine {
             if audioCaptureStartupCancellation === startupCancellation {
                 audioCaptureStartupCancellation = nil
                 recordingModelChoice = nil
+        recordingScriptLanguage = nil
                 await asrCoordinator.cancelBatch()
             }
             throw error
@@ -1070,6 +1084,7 @@ final class ParakeetEngine: TranscriptionEngine {
         isRecordingActive = false
         firstPartialEmitted = false
         recordingModelChoice = nil
+        recordingScriptLanguage = nil
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: false)
             levelSampleBuffer.reset(keepingCapacity: false)
@@ -1091,9 +1106,9 @@ final class ParakeetEngine: TranscriptionEngine {
         if model.tdtModelVersion != nil {
             // The library's disk-backed decoder keeps context across windows.
             // Independently transcribing file chunks can split and lose words.
-            return try await asrCoordinator.transcribeRecording(at: url)
+            return try await asrCoordinator.transcribeRecording(at: url, language: scriptLanguage(for: model))
         }
-        try await asrCoordinator.resetSession(for: model)
+        try await asrCoordinator.resetSession(for: model, language: scriptLanguage(for: model))
         if model == .nemotronMultilingual {
             await asrCoordinator.setStreamingLanguage(Settings.shared.selectedLanguage.nemotronLanguageCode)
         }
@@ -1177,8 +1192,10 @@ final class ParakeetEngine: TranscriptionEngine {
     func beginBatchReplayForTesting() async throws {
         let model = selectedModelChoice
         guard !model.usesTrueStreaming else { throw TranscriptionError.engineNotReady }
-        try await asrCoordinator.resetSession(for: model)
+        let language = scriptLanguage(for: model)
+        try await asrCoordinator.resetSession(for: model, language: language)
         recordingModelChoice = model
+        recordingScriptLanguage = language
         lastBatchPreviewSampleCount = 0
         isRecordingActive = true
         currentTranscript = ""
@@ -1282,7 +1299,7 @@ final class ParakeetEngine: TranscriptionEngine {
                 // This opt-in full-recording pass already existed. Do not add
                 // an unboosted final-window decode in front of it at Stop.
                 await asrCoordinator.cancelBatch()
-                let result = try await asrCoordinator.transcribeWithCustomVocabulary(recorded, terms: settings.customVocabulary)
+                let result = try await asrCoordinator.transcribeWithCustomVocabulary(recorded, terms: settings.customVocabulary, language: recordingScriptLanguage)
                 return BatchTranscriptionPolicy.finalTranscript(result.text, fallback: liveText)
             }
             let finalText = try await asrCoordinator.finishBatch(recordedSamples: recorded)
@@ -1324,6 +1341,7 @@ final class ParakeetEngine: TranscriptionEngine {
         isTranscribing = false
         firstPartialEmitted = false
         recordingModelChoice = nil
+        recordingScriptLanguage = nil
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: false)
             levelSampleBuffer.reset(keepingCapacity: false)
@@ -1565,7 +1583,7 @@ private actor AsrManagerCoordinator {
         // persisted selection from starting a download that can never load.
         guard modelChoice.isAvailableOnThisMac else { throw TranscriptionError.engineNotReady }
         if isInitialized(for: modelChoice) {
-            try await resetSession(for: modelChoice)
+            try await resetSession(for: modelChoice, language: nil)
             return
         }
 
@@ -1668,7 +1686,7 @@ private actor AsrManagerCoordinator {
         return loaded
     }
 
-    func resetSession(for modelChoice: ParakeetModelChoice) async throws {
+    func resetSession(for modelChoice: ParakeetModelChoice, language: Language?) async throws {
         if !modelChoice.usesTrueStreaming {
             await cancelBatch()
             if modelChoice == .senseVoice {
@@ -1676,7 +1694,7 @@ private actor AsrManagerCoordinator {
                 batchSession = BatchTranscriptionSession.senseVoice(manager: senseVoiceManager, vad: batchVad)
             } else {
                 guard let manager, let models, let batchVad else { throw TranscriptionError.engineNotReady }
-                batchSession = try await BatchTranscriptionSession.parakeet(models: models, previewManager: manager, vad: batchVad)
+                batchSession = try await BatchTranscriptionSession.parakeet(models: models, previewManager: manager, vad: batchVad, language: language)
             }
             return
         }
@@ -1730,28 +1748,28 @@ private actor AsrManagerCoordinator {
         await session?.cancel()
     }
 
-    private func transcribe(_ samples: [Float]) async throws -> ASRResult {
+    private func transcribe(_ samples: [Float], language: Language?) async throws -> ASRResult {
         let trace = PerfTrace.begin("stt.transcribe", counts: ["input_samples": samples.count])
         defer { trace.end() }
         guard let manager else { throw TranscriptionError.engineNotReady }
         var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-        return try await manager.transcribe(samples, decoderState: &decoderState)
+        return try await manager.transcribe(samples, decoderState: &decoderState, language: language)
     }
 
-    func transcribeRecording(at url: URL) async throws -> String {
+    func transcribeRecording(at url: URL, language: Language?) async throws -> String {
         guard let manager else { throw TranscriptionError.engineNotReady }
         var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-        let result = try await manager.transcribe(url, decoderState: &decoderState)
+        let result = try await manager.transcribe(url, decoderState: &decoderState, language: language)
         try Task.checkCancellation()
         return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    func transcribeWithCustomVocabulary(_ samples: [Float], terms: [String]) async throws -> ASRResult {
+    func transcribeWithCustomVocabulary(_ samples: [Float], terms: [String], language: Language?) async throws -> ASRResult {
         let trace = PerfTrace.begin("stt.vocabularyBoost", counts: ["input_samples": samples.count, "vocabulary_terms": terms.count])
         defer { trace.end() }
         // Decode once with the same model-aware batch path used for recovery.
         // Reconstructing a second live-overlap stream loses clear v2 seam words.
-        let original = try await transcribe(samples)
+        let original = try await transcribe(samples, language: language)
         let terms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         guard !terms.isEmpty else { return original }
         do {

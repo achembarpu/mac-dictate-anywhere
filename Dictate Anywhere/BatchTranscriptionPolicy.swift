@@ -17,6 +17,12 @@ nonisolated enum BatchTranscriptionPolicy {
         ASRConfig(streamingEnabled: true, streamingThreshold: sampleRate * 10)
     }
 
+    /// The selected language constrains script, not vocabulary or language detection.
+    static func scriptLanguage(for model: ParakeetModelChoice, selected: SupportedLanguage) -> Language? {
+        guard model == .multilingual || model == .multilingualUltra else { return nil }
+        return Language(rawValue: selected.rawValue)
+    }
+
     static func shouldPreview(totalSamples: Int, lastPreviewSamples: Int, hasVisibleText: Bool) -> Bool {
         totalSamples - lastPreviewSamples >= (hasVisibleText ? previewDeltaSamples : firstPreviewSamples)
     }

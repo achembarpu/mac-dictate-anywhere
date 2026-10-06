@@ -272,3 +272,8 @@ fixture and output options; collectors do not download weights automatically.
 `--only s1-cpu` compares GGUF CPU KV precision. `--only s1-prepare`
 compares unloaded and prepared first requests using the installed GGUF model.
 The shared S1 stress references and saved-output scorer apply to any runtime.
+
+`--only asr-language` compares unfiltered and script-filtered v3/Ultra output
+through production file and live replay paths, using the shared human goldens.
+It alternates ordering and records outputs, error, resource use and input hashes.
+Select the model/fixture/iterations with the existing benchmark environment.

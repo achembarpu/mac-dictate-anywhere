@@ -128,3 +128,9 @@ Policy sources: [FluidAudio overlap configuration](https://github.com/FluidInfer
 
 S1 preserves the original when cleanup removes a numeric minus sign, including
 repeated occurrences, or when literal chat markers could become prompt controls.
+
+Multilingual v3/Ultra sessions capture the selected language at recording start
+and pass the SDK script hint through previews, final windows and vocabulary
+decoding. Recovery files use the requested language for the whole file. This
+filters alphabet confusion; it does not constrain vocabulary within a script.
+Languages absent from the SDK mapping retain automatic decoding.

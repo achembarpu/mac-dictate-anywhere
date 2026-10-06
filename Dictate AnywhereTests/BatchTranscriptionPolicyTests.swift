@@ -3,6 +3,19 @@ import FluidAudio
 @testable import Dictate_Anywhere
 
 final class BatchTranscriptionPolicyTests: XCTestCase {
+    func testScriptHintsUseOnlyTheMultilingualTDTModels() {
+        for model in ParakeetModelChoice.allCases {
+            let language = BatchTranscriptionPolicy.scriptLanguage(for: model, selected: .polish)
+            if model == .multilingual || model == .multilingualUltra {
+                XCTAssertEqual(language, .polish)
+            } else { XCTAssertNil(language, model.rawValue) }
+        }
+        XCTAssertEqual(BatchTranscriptionPolicy.scriptLanguage(for: .multilingual, selected: .greek), .greek)
+        XCTAssertEqual(BatchTranscriptionPolicy.scriptLanguage(for: .multilingualUltra, selected: .russian), .russian)
+        XCTAssertNil(BatchTranscriptionPolicy.scriptLanguage(for: .multilingual, selected: .norwegian))
+        XCTAssertNil(BatchTranscriptionPolicy.scriptLanguage(for: .multilingual, selected: .chinese))
+    }
+
     func testQuietSpeechQualificationSurvivesTrailingSilenceButExpiresForPreviews() {
         var presence = BatchSpeechPresence()
         XCTAssertFalse(presence.hasSpeech)

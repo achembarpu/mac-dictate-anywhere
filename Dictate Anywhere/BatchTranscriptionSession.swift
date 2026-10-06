@@ -12,6 +12,7 @@ actor BatchTranscriptionSession {
     }
 
     private let backend: Backend
+    private let language: Language?
     private let vad: VadManager
     private var updateTask: Task<Void, Never>?
     private var samples: [Float] = []
@@ -25,20 +26,21 @@ actor BatchTranscriptionSession {
     private var vadPending: [Float] = []
     private var speechPresence = BatchSpeechPresence()
 
-    private init(backend: Backend, vad: VadManager) {
+    private init(backend: Backend, vad: VadManager, language: Language? = nil) {
         self.backend = backend
         self.vad = vad
+        self.language = language
     }
 
-    static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager) async throws -> BatchTranscriptionSession {
+    static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager, language: Language?) async throws -> BatchTranscriptionSession {
         if models.version == .v2 {
             // The SDK batch path preserves v2 mel context and repairs gaps.
             // Its live overlap path drops clear speech in shifted-seam goldens.
             return BatchTranscriptionSession(backend: .parakeetBatch(previewManager), vad: vad)
         }
-        let overlapping = SlidingWindowAsrManager(config: .streaming)
+        let overlapping = SlidingWindowAsrManager(config: .streaming.applying(language: language))
         try await overlapping.loadModels(models)
-        let session = BatchTranscriptionSession(backend: .parakeet(previewManager, overlapping), vad: vad)
+        let session = BatchTranscriptionSession(backend: .parakeet(previewManager, overlapping), vad: vad, language: language)
         try await session.start()
         return session
     }
@@ -136,11 +138,11 @@ actor BatchTranscriptionSession {
         switch backend {
         case .parakeet(let manager, _):
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-            let result = try await manager.transcribe(input, decoderState: &state)
+            let result = try await manager.transcribe(input, decoderState: &state, language: language)
             return previewTimeline.preview(result, startingAt: startSample)
         case .parakeetBatch(let manager):
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-            let result = try await manager.transcribe(input, decoderState: &state)
+            let result = try await manager.transcribe(input, decoderState: &state, language: language)
             return previewTimeline.recordPreview(result, startingAt: startSample)
         case .senseVoice(let manager):
             let result = try await manager.transcribe(audio: input)
