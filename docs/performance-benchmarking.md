@@ -64,6 +64,16 @@ Saved external speech outputs
 can be checked with `PIPELINE_BENCHMARK_ASR_RESULTS_PATH` and
 `--only external-asr-quality`; the manifest hash must match the bundled inventory.
 
+`--only audio-conversion` compares continuous capture conversion with the frozen
+reset-per-block path at 16, 44.1 and 48 kHz. Input buffers are prepared outside
+timers; rows include sample counts, CPU time and process RSS. Its golden speech
+check resamples licensed references to 48 kHz, requires chunked conversion to
+match whole-stream samples exactly, and records production file decode output
+and WER. Select an installed batch model with `PIPELINE_BENCHMARK_MODEL` and
+fixtures/repeats with the usual settings. These checks do not capture a microphone
+or measure end-to-end dictation latency. Save logs and xcresults outside the
+checkout with an absolute output path.
+
 For Apple prompt comparisons, set `PIPELINE_BENCHMARK_CLEANUP_PROVIDER=apple`
 and `PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH` to an external JSON array of
 `{"id":"candidate-name","prompt":"cleanup instructions"}` objects, then run

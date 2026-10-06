@@ -7,6 +7,11 @@ Decoder and processor choices are automatic, separate from model selection.
 
 ## Speech decoding
 
+Microphone sample-rate conversion retains one converter for the recording and
+flushes its filter tail before final recognition. Already-compatible PCM bypasses
+conversion. Resets occur between recordings, preserving sample continuity across
+capture blocks without sharing filter history between sessions.
+
 | Model | Recording and finalization policy |
 | --- | --- |
 | Parakeet v3, Ultra and TDT-CTC 110M | Fresh SDK overlap session per recording, reused loaded weights; 11-second center with 2 seconds of left/right context. SDK token timings merge the result and finalization flushes the tail. |
