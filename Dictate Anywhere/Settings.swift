@@ -299,6 +299,62 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     }
 
 
+    /// English Nemotron exports are performance presets of one catalog model.
+    /// Keep their stored selections and caches; they are not three model choices.
+    nonisolated var catalogChoice: ParakeetModelChoice {
+        switch self {
+        case .nemotron560, .nemotron1120, .nemotron2240: return .nemotron560
+        default: return self
+        }
+    }
+
+    nonisolated var isEnglishNemotron: Bool { catalogChoice == .nemotron560 }
+
+    nonisolated static let catalogChoices: [ParakeetModelChoice] = [
+        .multilingual, .englishOnly, .compactEnglish, .parakeetEou320,
+        .senseVoice, .nemotronMultilingual, .multilingualUltra, .nemotron560,
+    ]
+
+    nonisolated static func compatibleCatalogChoices(
+        for language: SupportedLanguage, hasNeuralEngine: Bool
+    ) -> [ParakeetModelChoice] {
+        catalogChoices.filter { $0.isAvailable(hasNeuralEngine: hasNeuralEngine) && $0.supportsLanguage(language) }
+    }
+
+    nonisolated static func recommendedCatalogChoices(
+        for language: SupportedLanguage, hasNeuralEngine: Bool
+    ) -> [ParakeetModelChoice] {
+        let recommendations: [ParakeetModelChoice]
+        switch language {
+        case .english: recommendations = [.englishOnly, .compactEnglish, .parakeetEou320, .multilingual]
+        case .chinese: recommendations = [.senseVoice, .nemotronMultilingual]
+        case .norwegian: recommendations = [.nemotronMultilingual]
+        default: recommendations = [.multilingual, .nemotronMultilingual]
+        }
+        return recommendations.filter {
+            $0.isAvailable(hasNeuralEngine: hasNeuralEngine)
+                && $0.supportsLanguage(language)
+                && !$0.hasLimitedLanguageCoverage(language)
+        }
+    }
+
+    nonisolated static func catalogLanguages(hasNeuralEngine: Bool) -> [SupportedLanguage] {
+        SupportedLanguage.allCases.filter { language in
+            !compatibleCatalogChoices(for: language, hasNeuralEngine: hasNeuralEngine).isEmpty
+        }
+    }
+
+    nonisolated static func catalogLanguageOptions(
+        preserving language: SupportedLanguage, hasNeuralEngine: Bool
+    ) -> [SupportedLanguage] {
+        let available = catalogLanguages(hasNeuralEngine: hasNeuralEngine)
+        return available.contains(language) ? available : [language] + available
+    }
+
+    nonisolated func selectionPreservingPreset(_ current: ParakeetModelChoice) -> ParakeetModelChoice {
+        isEnglishNemotron && current.isEnglishNemotron ? current : self
+    }
+
     nonisolated var modelName: String {
         switch self {
         case .multilingual: return "NVIDIA Parakeet TDT 0.6B v3"
@@ -334,7 +390,6 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
         default: return displayName
         }
     }
-
 
     /// Explicit checkpoint sets, not everything in the app's language enum.
     nonisolated var transcriptionLanguages: [SupportedLanguage] {
@@ -472,28 +527,7 @@ enum ParakeetModelChoice: String, CaseIterable, Codable {
     }
 
     nonisolated var speechModelFooter: String {
-        switch self {
-        case .multilingual:
-            return "Choose Multilingual for automatic language detection across 25 supported languages."
-        case .multilingualUltra:
-            return "Choose Multilingual Ultra for stronger multilingual accuracy with a larger download."
-        case .englishOnly:
-            return "Choose English Only for stronger English accuracy when you never dictate in other languages."
-        case .compactEnglish:
-            return "Choose English Compact (110M) for a smaller, faster English-only model when download size and memory use matter most."
-        case .parakeetEou320:
-            return "Choose Parakeet EOU Streaming to test lower-latency true streaming and end-of-speech detection."
-        case .nemotron560:
-            return "Choose Nemotron 560 ms for the lowest Nemotron streaming latency."
-        case .nemotron1120:
-            return "Choose Nemotron 1120 ms for a balanced streaming option."
-        case .nemotron2240:
-            return "Choose Nemotron 2240 ms for the higher-throughput streaming option."
-        case .senseVoice:
-            return "Choose Chinese (SenseVoice) for the most accurate Mandarin dictation with native punctuation and mixed English support."
-        case .nemotronMultilingual:
-            return "Choose Multilingual Streaming (Nemotron) for lower-latency live preview in Chinese and 40+ other languages, at reduced accuracy."
-        }
+        "Download size is not a memory estimate. The language and model you select are kept until you change them."
     }
 
     /// Languages offered in the language picker, or nil when the model's
@@ -1111,9 +1145,8 @@ final class Settings {
     var parakeetModelChoice: ParakeetModelChoice {
         didSet {
             UserDefaults.standard.set(parakeetModelChoice.rawValue, forKey: Keys.parakeetModelChoice)
-            if !parakeetModelChoice.supportsLanguage(selectedLanguage) {
-                selectedLanguage = .english
-            }
+            // Keep the expected language. The catalog filters compatible models
+            // and recording validates the pair instead of silently choosing English.
             if engineChoice == .parakeet,
                !parakeetModelChoice.supportsFluidAudioVocabulary,
                transcriptPostProcessingMode == .fluidAudioVocabulary {
@@ -1919,7 +1952,7 @@ final class Settings {
         themeMode = ThemeMode(rawValue: themeStr) ?? .system
         NSApp.appearance = themeMode.nsAppearance
 
-        // Mandarin model coercion: reading `self` properties requires all stored
+        // Hardware/model capability checks: reading `self` requires all stored
         // properties to be initialized first, so these run last even though they
         // logically belong with the language/post-processing decoding above.
         // A stored selection can outlive the hardware that could run it — a
@@ -1930,9 +1963,6 @@ final class Settings {
         if !effectiveParakeetModelChoice.isAvailableOnThisMac {
             effectiveParakeetModelChoice = ParakeetModelChoice.availableFallback(for: selectedLanguage)
             parakeetModelChoice = effectiveParakeetModelChoice
-        }
-        if !effectiveParakeetModelChoice.supportsLanguage(selectedLanguage) {
-            selectedLanguage = .english
         }
         if engineChoice == .parakeet,
            !effectiveParakeetModelChoice.supportsFluidAudioVocabulary,

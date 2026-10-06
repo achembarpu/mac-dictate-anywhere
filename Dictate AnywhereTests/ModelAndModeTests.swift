@@ -145,6 +145,8 @@ final class ModelAndModeTests: XCTestCase {
             XCTAssertTrue(fallback.isAvailable(hasNeuralEngine: false))
             if language == .norwegian {
                 XCTAssertFalse(fallback.supportsLanguage(language))
+                XCTAssertTrue(ParakeetModelChoice.compatibleCatalogChoices(
+                    for: language, hasNeuralEngine: false).isEmpty)
             } else {
                 XCTAssertTrue(fallback.supportsLanguage(language), "\(language) lost language support on Intel")
             }
@@ -209,6 +211,49 @@ final class ModelAndModeTests: XCTestCase {
         for choice in ParakeetModelChoice.allCases {
             XCTAssertEqual(ParakeetModelChoice(rawValue: choice.rawValue), choice)
         }
+    }
+
+
+    func testCatalogConsolidatesNemotronWithoutDiscardingItsSavedPresets() {
+        XCTAssertEqual(ParakeetModelChoice.catalogChoices.count, 8)
+        XCTAssertEqual(Set(ParakeetModelChoice.catalogChoices).count, 8)
+        for preset in [ParakeetModelChoice.nemotron560, .nemotron1120, .nemotron2240] {
+            XCTAssertEqual(preset.catalogChoice, .nemotron560)
+            XCTAssertEqual(ParakeetModelChoice.nemotron560.selectionPreservingPreset(preset), preset)
+            XCTAssertEqual(ParakeetModelChoice(rawValue: preset.rawValue), preset)
+        }
+    }
+
+    func testCatalogRecommendationsMatchLanguageAndHardware() {
+        XCTAssertEqual(ParakeetModelChoice.recommendedCatalogChoices(
+            for: .chinese, hasNeuralEngine: true), [.senseVoice, .nemotronMultilingual])
+        XCTAssertEqual(ParakeetModelChoice.recommendedCatalogChoices(
+            for: .chinese, hasNeuralEngine: false), [.senseVoice])
+        XCTAssertEqual(ParakeetModelChoice.recommendedCatalogChoices(
+            for: .norwegian, hasNeuralEngine: true), [.nemotronMultilingual])
+        XCTAssertTrue(ParakeetModelChoice.recommendedCatalogChoices(
+            for: .norwegian, hasNeuralEngine: false).isEmpty)
+        XCTAssertEqual(ParakeetModelChoice.catalogLanguageOptions(
+            preserving: .norwegian, hasNeuralEngine: false).first, .norwegian)
+        XCTAssertFalse(ParakeetModelChoice.catalogLanguages(hasNeuralEngine: false).contains(.norwegian))
+        XCTAssertEqual(ParakeetModelChoice.recommendedCatalogChoices(
+            for: .english, hasNeuralEngine: true).first, .englishOnly)
+        XCTAssertFalse(ParakeetModelChoice.compatibleCatalogChoices(
+            for: .chinese, hasNeuralEngine: true).contains(.multilingualUltra))
+    }
+
+    func testParakeetLanguageSetOffersMalteseAndRejectsNorwegian() {
+        for model in [ParakeetModelChoice.multilingual, .multilingualUltra] {
+            XCTAssertEqual(Set(model.transcriptionLanguages).count, 25)
+            XCTAssertTrue(model.supportsLanguage(.maltese))
+            XCTAssertFalse(model.supportsLanguage(.norwegian))
+        }
+        XCTAssertFalse(ParakeetModelChoice.senseVoice.supportsLanguage(.maltese))
+        XCTAssertFalse(ParakeetModelChoice.nemotronMultilingual.supportsLanguage(.maltese))
+        XCTAssertTrue(ParakeetModelChoice.nemotronMultilingual.hasLimitedLanguageCoverage(.greek))
+        XCTAssertNotNil(ParakeetModelChoice.nemotronMultilingual.languageSupportNotice(for: .greek))
+        XCTAssertFalse(ParakeetModelChoice.recommendedCatalogChoices(
+            for: .greek, hasNeuralEngine: true).contains(.nemotronMultilingual))
     }
 
     // MARK: - TranscriptionEngineChoice

@@ -417,6 +417,7 @@ enum TranscriptionError: LocalizedError {
     case engineNotReady
     case appleSpeechUnavailable
     case appleSpeechLanguageUnsupported
+    case speechModelLanguageUnsupported(model: String, language: String)
 
     var errorDescription: String? {
         switch self {
@@ -427,6 +428,8 @@ enum TranscriptionError: LocalizedError {
         case .engineNotReady: return "Transcription engine is not ready."
         case .appleSpeechUnavailable: return "Apple Speech requires macOS 26 or later and a supported Mac."
         case .appleSpeechLanguageUnsupported: return "The selected language is not supported by Apple Speech on this Mac."
+        case .speechModelLanguageUnsupported(let model, let language):
+            return "\(model) does not support \(language). Choose another speech model or expected language in Speech Model settings."
         }
     }
 }
@@ -979,6 +982,13 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func startRecording(deviceID: AudioDeviceID?) async throws {
+        // Validate before model loading or microphone startup. A saved language
+        // can remain visible even when its old model choice was mislabeled.
+        let expectedLanguage = Settings.shared.selectedLanguage
+        guard selectedModelChoice.supportsLanguage(expectedLanguage) else {
+            throw TranscriptionError.speechModelLanguageUnsupported(
+                model: selectedModelChoice.displayName, language: expectedLanguage.displayName)
+        }
         let trace = PerfTrace.begin("audio.startup")
         defer { trace.end() }
         firstPartialEmitted = false
