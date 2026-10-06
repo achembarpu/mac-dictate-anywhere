@@ -49,6 +49,51 @@ final class PCMStreamConverterTests: XCTestCase {
         XCTAssertTrue(silence.allSatisfy { $0 == 0 })
     }
 
+    func testFilePullsPreserveSamplesAndRetainedBuffersThroughFinalTail() throws {
+        let samples: [Float] = (0..<160_137).map { index in
+            let phase = 2.0 * Double.pi * 997.0 * Double(index) / 16_000.0
+            return Float(0.25 * sin(phase))
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let source = try makePCMBuffer(from: samples)
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: source.format.settings)
+            try file.write(from: source)
+        }
+        for rate in [16_000.0, 48_000.0] {
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1))
+            let reader = try ConvertedRecoveryAudioReader(url: url, outputFormat: format)
+            var retained: [AVAudioPCMBuffer] = []
+            while let buffer = try reader.nextBuffer() { retained.append(buffer) }
+            XCTAssertNil(try reader.nextBuffer(), "The filter tail is delivered once")
+            // Async analyzer queues retain PCM buffers. Later pulls must never
+            // overwrite samples already handed to those queues.
+            let actual = retained.flatMap {
+                Array(UnsafeBufferPointer(start: $0.floatChannelData![0], count: Int($0.frameLength)))
+            }
+            let reference = try convert(samples, sourceRate: 16_000, targetRate: rate, chunkSize: samples.count)
+            XCTAssertEqual(actual, reference)
+        }
+    }
+
+    func testFormatOnlyConversionFinishesAcrossRepeatedStreams() throws {
+        let source = try makePCMBuffer(from: [Float](repeating: 0.25, count: 137))
+        let target = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatInt16,
+            sampleRate: 16_000, channels: 1, interleaved: false))
+        for _ in 0..<100 {
+            let converter = try PCMStreamConverter(from: source.format, to: target)
+            var output = try converter.convert(source)
+            output.append(contentsOf: try converter.convert(source))
+            output.append(contentsOf: try converter.finish())
+            let values = output.flatMap {
+                Array(UnsafeBufferPointer(start: $0.int16ChannelData![0], count: Int($0.frameLength)))
+            }
+            XCTAssertEqual(values.count, 274, "Format-only conversion has no missing or synthetic tail")
+            XCTAssertTrue(values.allSatisfy { abs(Int($0) - 8_192) <= 1 })
+        }
+    }
+
     private func convert(_ samples: [Float], sourceRate: Double, targetRate: Double, chunkSize: Int) throws -> [Float] {
         let source = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: sourceRate, channels: 1))
         let target = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: targetRate, channels: 1))

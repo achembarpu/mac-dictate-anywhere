@@ -7,6 +7,56 @@ import XCTest
 
 @MainActor
 final class PCMStreamConversionBenchmarkTests: XCTestCase {
+    func testRecoveryPCMFilePullWork() throws {
+        let samples = [Float](repeating: 0.125, count: 60 * 16_000)
+        let source = try makePCMBuffer(from: samples)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: source.format.settings)
+            try file.write(from: source)
+        }
+        let iterations = max(2, min(10, Int(ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))
+        for type in [AVAudioCommonFormat.pcmFormatFloat32, .pcmFormatInt16] {
+            let format = try XCTUnwrap(AVAudioFormat(commonFormat: type, sampleRate: 16_000, channels: 1, interleaved: false))
+            for iteration in -1..<iterations {
+                let order = iteration.isMultiple(of: 2) ? ["legacy-copy", "direct-pcm"] : ["direct-pcm", "legacy-copy"]
+                for mode in order {
+                    let before = try BenchmarkProcessResources.sample()
+                    let start = ContinuousClock.now
+                    var count = 0
+                    if mode == "direct-pcm" {
+                        let reader = try ConvertedRecoveryAudioReader(url: url, outputFormat: format)
+                        while let buffer = try reader.nextBuffer() { count += Int(buffer.frameLength) }
+                    } else {
+                        let reader = try RecoveryAudioReader(url: url)
+                        while let samples = try reader.nextSamples() {
+                            let buffer = try makePCMBuffer(from: samples)
+                            if buffer.format == format { count += Int(buffer.frameLength); continue }
+                            let converter = try XCTUnwrap(AVAudioConverter(from: buffer.format, to: format))
+                            let output = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: buffer.frameLength + 8))
+                            var supplied = false
+                            var error: NSError?
+                            let status = converter.convert(to: output, error: &error) { _, state in
+                                if supplied { state.pointee = .noDataNow; return nil }
+                                supplied = true; state.pointee = .haveData; return buffer
+                            }
+                            XCTAssertNotEqual(status, .error)
+                            if let error { throw error }
+                            count += Int(output.frameLength)
+                        }
+                    }
+                    let elapsed = BenchmarkStatistics.elapsedMilliseconds(from: start)
+                    let after = try BenchmarkProcessResources.sample()
+                    XCTAssertEqual(count, samples.count)
+                    try printRow("PCM_FILE_PULL_RESULT", ["format": type == .pcmFormatFloat32 ? "float32" : "int16",
+                        "mode": mode, "iteration": iteration, "latency_ms": elapsed,
+                        "cpu_ms": after.cpuMilliseconds - before.cpuMilliseconds, "output_samples": count])
+                }
+            }
+        }
+    }
+
     func testCaptureConversionWorkAndSampleContinuity() throws {
         let iterations = max(1, min(10, Int(ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))
         for rate in [16_000.0, 44_100.0, 48_000.0] {

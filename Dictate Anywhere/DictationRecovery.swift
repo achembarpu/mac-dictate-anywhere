@@ -52,6 +52,8 @@ nonisolated final class RecoveryAudioCapture: @unchecked Sendable {
 nonisolated final class RecoveryAudioReader: @unchecked Sendable {
     private let file: AVAudioFile
 
+    var format: AVAudioFormat { file.processingFormat }
+
     init(url: URL) throws {
         file = try AVAudioFile(forReading: url)
         guard file.processingFormat.sampleRate == 16_000,
@@ -59,6 +61,14 @@ nonisolated final class RecoveryAudioReader: @unchecked Sendable {
     }
 
     func nextSamples(maxSamples: Int = 160_000) throws -> [Float]? {
+        guard let buffer = try nextBuffer(maxSamples: maxSamples),
+              let channel = buffer.floatChannelData?[0] else { return nil }
+        return Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+    }
+
+    /// PCM consumers can avoid copying file audio through an intermediate array.
+    /// As with nextSamples, the caller serializes reads.
+    func nextBuffer(maxSamples: Int = 160_000) throws -> AVAudioPCMBuffer? {
         guard file.framePosition < file.length else { return nil }
         guard maxSamples > 0 else { throw TranscriptionError.audioFormatError }
         let count = AVAudioFrameCount(min(Int64(maxSamples), file.length - file.framePosition))
@@ -66,8 +76,41 @@ nonisolated final class RecoveryAudioReader: @unchecked Sendable {
             throw TranscriptionError.audioFormatError
         }
         try file.read(into: buffer, frameCount: count)
-        guard buffer.frameLength > 0, let channel = buffer.floatChannelData?[0] else { return nil }
-        return Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+        return buffer.frameLength > 0 ? buffer : nil
+    }
+}
+
+/// Serialized, bounded file pulls with one conversion stream, including its tail.
+/// Each returned buffer owns its samples; asynchronous consumers may retain it.
+nonisolated final class ConvertedRecoveryAudioReader: @unchecked Sendable {
+    private let lock = NSLock()
+    private let reader: RecoveryAudioReader
+    private let converter: PCMStreamConverter
+    private var pending: [AVAudioPCMBuffer] = []
+    private var nextIndex = 0
+    private var ended = false
+
+    init(url: URL, outputFormat: AVAudioFormat) throws {
+        reader = try RecoveryAudioReader(url: url)
+        converter = try PCMStreamConverter(from: reader.format, to: outputFormat)
+    }
+
+    func nextBuffer() throws -> AVAudioPCMBuffer? {
+        try lock.withLock {
+            while nextIndex == pending.count {
+                pending.removeAll(keepingCapacity: true)
+                nextIndex = 0
+                guard !ended else { return nil }
+                if let source = try reader.nextBuffer() {
+                    pending = try converter.convert(source)
+                } else {
+                    ended = true
+                    pending = try converter.finish()
+                }
+            }
+            defer { nextIndex += 1 }
+            return pending[nextIndex]
+        }
     }
 }
 

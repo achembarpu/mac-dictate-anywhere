@@ -11,6 +11,9 @@ Microphone sample-rate conversion retains one converter for the recording and
 flushes its filter tail before final recognition. Already-compatible PCM bypasses
 conversion. Resets occur between recordings, preserving sample continuity across
 capture blocks without sharing filter history between sessions.
+Apple Speech also retains conversion state for its live input and bounded
+recovery-file stream. Recovery feeds owned PCM buffers directly to the analyzer,
+avoiding intermediate PCM-to-array-to-PCM copies.
 
 | Model | Recording and finalization policy |
 | --- | --- |
