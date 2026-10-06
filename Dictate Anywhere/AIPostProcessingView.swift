@@ -717,7 +717,8 @@ struct AIPostProcessingView: View {
             if supportedFeatures.contains(.customPrompt) {
                 cleanupPromptSection(
                     text: $settings.aiPostProcessingPrompt,
-                    label: "Apple Intelligence prompt"
+                    label: "Apple Intelligence prompt",
+                    defaultPrompt: Settings.recommendedAppleIntelligenceCleanupPrompt
                 )
             }
 

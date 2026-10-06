@@ -84,10 +84,13 @@ conservative UTF-8 byte budgets. Failed cleanup preserves the whole original;
 malformed individual responses retain that chunk's input. These safeguards do
 not establish arbitrary semantic fidelity.
 
-Apple Intelligence cleanup runs with or without captured writing context. An
-empty or whitespace-only custom prompt uses the built-in dictation cleanup
-prompt; preparation and processing use the same effective instructions. Saved
-custom prompts are preserved, and clearing the field restores the default.
+Apple Intelligence cleanup runs with or without captured writing context.
+Apple Intelligence, Ollama, OpenRouter and OpenAI-compatible cleanup show editable
+default prompts. On launch, missing or whitespace-only saved prompts are filled
+with the provider's default and persisted; existing custom prompts are preserved.
+Each editor offers Reset to Default, which also saves the restored prompt.
+Apple's empty-input safeguard uses the same default during preparation and
+processing if the field is cleared while the app is running.
 
 | Provider | Request and preparation policy |
 | --- | --- |

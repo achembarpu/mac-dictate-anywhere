@@ -6,7 +6,7 @@ final class AppleCleanupInstructionsTests: XCTestCase {
     func testEmptyAndWhitespacePromptsUseTheSameDefault() throws {
         guard #available(macOS 26, *) else { throw XCTSkip("Requires Foundation Models") }
         let expected = AIPostProcessingService.instructions(
-            prompt: AIPostProcessingService.defaultPrompt, vocabulary: [], context: nil)
+            prompt: Settings.recommendedAppleIntelligenceCleanupPrompt, vocabulary: [], context: nil)
         for prompt in ["", " \n\t "] {
             XCTAssertEqual(AIPostProcessingService.instructions(prompt: prompt, vocabulary: [], context: nil), expected)
         }
@@ -17,6 +17,6 @@ final class AppleCleanupInstructionsTests: XCTestCase {
         let prompt = "Keep the transcript unchanged."
         let instructions = AIPostProcessingService.instructions(prompt: prompt, vocabulary: [], context: nil)
         XCTAssertTrue(instructions.contains(prompt))
-        XCTAssertFalse(instructions.contains(AIPostProcessingService.defaultPrompt))
+        XCTAssertFalse(instructions.contains(Settings.recommendedAppleIntelligenceCleanupPrompt))
     }
 }
