@@ -85,22 +85,28 @@ struct SettingsView: View {
                         }
                     } else if settings.engineChoice == .parakeet {
                         DSDetailRow(
-                            label: "Transcription language",
-                            caption: parakeetModelChoice.languageSettingsFooter
+                            label: "Expected language",
+                            caption: "Choose the expected language, then a compatible model on the Speech Model page. " + parakeetModelChoice.languageSettingsFooter
                         ) {
-                            if let fixedLabel = parakeetModelChoice.fixedLanguageLabel {
-                                Text(fixedLabel)
-                                    .font(DS.Fonts.ui(13.5))
-                                    .foregroundStyle(DS.Colors.textSecondary)
-                            } else {
-                                DSDropdown(
-                                    selection: $settings.selectedLanguage,
-                                    options: parakeetModelChoice.selectableLanguages
-                                        ?? Array(SupportedLanguage.allCases),
-                                    title: \.displayWithFlag,
-                                    accessibilityName: "Transcription language"
-                                )
-                            }
+                            DSDropdown(
+                                selection: $settings.selectedLanguage,
+                                options: ParakeetModelChoice.catalogLanguageOptions(
+                                    preserving: settings.selectedLanguage,
+                                    hasNeuralEngine: Hardware.canUseAppleNeuralEngine),
+                                title: \.displayWithFlag,
+                                accessibilityName: "Expected speech language",
+                                isEnabled: appState.status == .idle
+                                    && !appState.isPreparingEngine
+                                    && !appState.parakeetEngine.isDownloading
+                            )
+                        }
+                        if let notice = parakeetModelChoice.languageSupportNotice(for: settings.selectedLanguage) {
+                            DSFieldMessage(
+                                text: notice + " Review your selection on the Speech Model page.",
+                                tone: parakeetModelChoice.supportsLanguage(settings.selectedLanguage) ? .warning : .error
+                            )
+                            .padding(.horizontal, DS.Spacing.rowHorizontal)
+                            .padding(.bottom, 10)
                         }
                     }
                 }
