@@ -621,12 +621,26 @@ final class RecoveryASRSmokeTests: XCTestCase {
             }
         }
         await baseline?.cleanup()
-        let parentMean = parentTimes.reduce(0,+) / Double(iterations)
-        let candidateMean = candidateTimes.reduce(0,+) / Double(iterations)
         let parentError = parentErrors.reduce(0,+) / Double(iterations)
         let candidateError = candidateErrors.reduce(0,+) / Double(iterations)
         print("MODEL_POLICY_BENCHMARK model=\(choice.rawValue) fixture=\(inputFixture.id) metric=\(inputFixture.metric.rawValue) iterations=\(iterations) parent_total_ms=\(parentTimes) candidate_total_ms=\(candidateTimes) parent_finish_ms=\(parentFinishTimes) candidate_finish_ms=\(candidateFinishTimes) parent_error=\(parentErrors) candidate_error=\(candidateErrors) candidate_first_visible_audio_ms=\(firstVisibleAudioMilliseconds)")
-        XCTAssertLessThanOrEqual(candidateMean, parentMean, "Total recognition work regressed")
+        for (iteration, text) in candidateTranscripts.enumerated() {
+            XCTAssertFalse(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                "Candidate failed to recognize referenced speech in iteration \(iteration)")
+        }
+        // The old volume gate can reject a quiet fixture without decoding it.
+        // Near-zero work for an empty transcript is not a useful speed baseline.
+        // Retain every quality/timing row, but compare speed only on paired runs
+        // where the parent actually recognized speech.
+        let timedPairs = parentTranscripts.indices.filter {
+            !parentTranscripts[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        print("MODEL_POLICY_LATENCY_GATE timed_pairs=\(timedPairs.count) empty_parent_pairs=\(iterations - timedPairs.count)")
+        if !timedPairs.isEmpty {
+            let parentMean = timedPairs.map { parentTimes[$0] }.reduce(0,+) / Double(timedPairs.count)
+            let candidateMean = timedPairs.map { candidateTimes[$0] }.reduce(0,+) / Double(timedPairs.count)
+            XCTAssertLessThanOrEqual(candidateMean, parentMean, "Total recognition work regressed on recognized speech")
+        }
         XCTAssertLessThanOrEqual(candidateError, parentError, "Paired aggregate fixture quality regressed")
         #endif
     }

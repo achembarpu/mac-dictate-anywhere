@@ -104,6 +104,12 @@ samples. This overlap count applies to v3-family/110M finalization; v2 uses a
 whole-recording batch finalizer. Counts describe scheduled audio work, not CPU
 time or transcript quality.
 
+The paired policy benchmark compares speed only on runs where the parent
+recognized speech. An empty parent transcript caused by its old volume gate is
+still reported and scored for quality; its near-zero decode time cannot serve
+as a useful latency baseline. Candidate output must remain nonempty on every
+referenced speech replay, including these quiet cases.
+
 | Component | Coverage |
 | --- | --- |
 | Offline ASR | Replays the bundled speech fixture through installed Parakeet and available Apple Speech engines. Reports latency, duration, median real-time factor, and beginning/end recognition sentinels. |
