@@ -280,7 +280,17 @@ Select the model/fixture/iterations with the existing benchmark environment.
 
 `asr-vocabulary` checks multilingual Nemotron's genuine names, absent terms,
 cleared state, file recovery and live previews/finalization. It uses the normal
-app cache and records preparation separately from recognition latency.
+app cache and records first preparation separately from recognition latency.
 `PIPELINE_BENCHMARK_NATIVE_VOCAB_WEIGHT` is benchmark-only and enables comparison
-with SDK weights; it does not add a product setting. Uses existing iterations
-and golden audio/reference hashes, WER and process CPU/peak RSS accounting.
+with documented SDK weights; it does not add a product setting.
+
+`tdt-vocabulary` compares the previous similarity floors, short-token taper,
+disabled acoustic rescue, 110M shared-head scoring, and prepared production
+recordings. All variants use the same original token timestamps, references,
+scorer and installed models. The live test changes terms during recording to
+verify that Stop retains the recording's term snapshot. CTC/model downloads
+are explicit; install assets with the existing model-download benchmark first.
+Shared-head scoring reuses encoder weights, not TDT features from a single pass.
+Compare cumulative peak RSS in separate processes; paired latency/CPU rows do
+not establish memory or energy savings. Scripts and native language-name checks
+retain rejected configurations for future SDK evaluations.

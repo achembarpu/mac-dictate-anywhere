@@ -138,13 +138,23 @@ Languages absent from the SDK mapping retain automatic decoding.
 Cyrillic and Greek TDT dictation retains automatic script decoding: the SDK's
 strict filters exclude Latin names. The language benchmark reports preserved
 Latin names alongside WER so this loss cannot hide behind an unchanged score.
+Multilingual Nemotron supports native vocabulary bias in live and final speech;
+its term index and logits path are prepared before capture and reused unchanged.
+Turning the mode off clears the bias. Other native streaming models do not
+advertise unsupported vocabulary processing.
 
-Multilingual Nemotron supports native vocabulary in live previews and final
-speech, using explicit terms from the existing vocabulary mode. The term index
-and logits decoder are prepared before capture and reused unchanged. Reset
-clears partial matches; disabling the mode clears bias before the next session.
-Other native streaming models expose no supported vocabulary path.
+TDT vocabulary uses the SDK short-token taper (pivot 5, exponent 2) with
+similarity floors 0.30/0.50 and acoustic rescue disabled. Constrained acoustic
+scoring remains enabled; severely mangled names outside its similarity gate
+may remain unchanged. The tokenizer/scorer is cached by model and normalized
+term list, prepared before recording, and recording terms remain fixed through
+Stop. The 110M model reuses its fused frontend and auxiliary CTC head instead
+of loading a separate CTC encoder. This saves a second set of encoder weights;
+it still runs a separate inference pass because the SDK exposes no TDT feature
+hook. Other TDT models use the separate CTC encoder.
 
-The per-token bias is 1. SDK research's 3.0/4.5 bonuses over-fired with absent
-terms on spontaneous goldens; the lower weight retained a checked name repair
-without those insertions. Preparation warms the logits path after configuration.
+Native Nemotron uses a per-token bias weight of 1. The SDK's tested 3.0/4.5
+bonuses over-fired on spontaneous speech with absent terms; the lower bonus
+retained a checked name correction without those insertions. Vocabulary bias
+is opt-in through the existing vocabulary mode. Preparation warms the logits
+path; disabling the mode clears the bias before the next recording or recovery.

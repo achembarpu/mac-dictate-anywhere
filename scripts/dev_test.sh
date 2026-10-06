@@ -152,7 +152,7 @@ assert_benchmark_selector_count() {
 /bin/rm -f "$XCODEBUILD_ARGS_LOG"
 "$SCRIPT" benchmark --list > "$TEST_ROOT/benchmark-list.log"
 [[ ! -e "$XCODEBUILD_ARGS_LOG" ]] || { printf 'FAIL: --list invoked Xcode\n' >&2; exit 1; }
-for group in all asr asr-quality asr-vocabulary asr-language asr-file asr-acoustics asr-candidates preview audio overlay transcript insertion cloud-request recovery cleanup s1-context s1-cpu s1-prepare cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
+for group in all asr asr-quality tdt-vocabulary asr-vocabulary asr-language asr-file asr-acoustics asr-candidates preview audio overlay transcript insertion cloud-request recovery cleanup s1-context s1-cpu s1-prepare cleanup-quality apple-speech-quality cleanup-prompts external-asr-quality model-switch; do
   /usr/bin/grep -Eq "^$group +" "$TEST_ROOT/benchmark-list.log" || {
     printf 'FAIL: group %s missing from --list\n' "$group" >&2
     exit 1
@@ -174,7 +174,7 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 42
+assert_benchmark_selector_count 44
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 

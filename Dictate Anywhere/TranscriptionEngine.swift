@@ -464,6 +464,7 @@ final class ParakeetEngine: TranscriptionEngine {
     private var lastBatchPreviewSampleCount = 0
     private var recordingModelChoice: ParakeetModelChoice?
     private var recordingScriptLanguage: Language?
+    private var recordingVocabularyTerms: [String] = []
     #if DEBUG || PIPELINE_BENCHMARK
     var usesScriptFilterForTesting = true
     var scriptLanguageOverrideForTesting: Language?
@@ -485,10 +486,7 @@ final class ParakeetEngine: TranscriptionEngine {
     /// Keep acoustic vocabulary rescue from replacing unrelated dictation
     /// phrases (for example, "the weather is lovely" with "cancellation").
     /// These are FluidAudio's recommended opt-in text-similarity floors.
-    static let vocabularyRescorerConfig = VocabularyRescorer.Config(
-        spotterRescueMinSimilarity: 0.30,
-        spotterRescueMultiWordMinSimilarity: 0.50
-    )
+    static let vocabularyRescorerConfig = VocabularyRescoringPolicy.config
 
     /// SenseVoice's fp16/int8 encoders are correct only on the Neural Engine —
     /// FluidAudio documents them as producing NaN on CPU/GPU paths. The fp32
@@ -904,7 +902,7 @@ final class ParakeetEngine: TranscriptionEngine {
                 // Also clear a previous bias when vocabulary cleanup is disabled.
                 try await asrCoordinator.prepareStreamingVocabulary(terms: activeVocabularyTerms)
             } else if Settings.shared.fluidAudioVocabularyEnabled {
-                try await asrCoordinator.prepareVocabulary()
+                try await asrCoordinator.prepareVocabulary(terms: activeVocabularyTerms)
             } else { return false }
             return true
         } catch {
@@ -946,11 +944,14 @@ final class ParakeetEngine: TranscriptionEngine {
         guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
         if modelChoice == .nemotronMultilingual {
             try await asrCoordinator.prepareStreamingVocabulary(terms: activeVocabularyTerms)
+        } else if modelChoice.supportsFluidAudioVocabulary {
+            await prepareVocabularyIfNeeded()
         }
         let language = scriptLanguage(for: modelChoice)
         try await asrCoordinator.resetSession(for: modelChoice, language: language)
         recordingModelChoice = modelChoice
         recordingScriptLanguage = language
+        recordingVocabularyTerms = activeVocabularyTerms
         lastBatchPreviewSampleCount = 0
 
         if modelChoice == .nemotronMultilingual {
@@ -1021,6 +1022,7 @@ final class ParakeetEngine: TranscriptionEngine {
                 audioCaptureStartupCancellation = nil
                 recordingModelChoice = nil
                 recordingScriptLanguage = nil
+                recordingVocabularyTerms = []
                 await asrCoordinator.cancelBatch()
             }
             throw error
@@ -1101,6 +1103,7 @@ final class ParakeetEngine: TranscriptionEngine {
         firstPartialEmitted = false
         recordingModelChoice = nil
         recordingScriptLanguage = nil
+        recordingVocabularyTerms = []
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: false)
             levelSampleBuffer.reset(keepingCapacity: false)
@@ -1211,10 +1214,12 @@ final class ParakeetEngine: TranscriptionEngine {
     func beginBatchReplayForTesting() async throws {
         let model = selectedModelChoice
         guard !model.usesTrueStreaming else { throw TranscriptionError.engineNotReady }
+        await prepareVocabularyIfNeeded()
         let language = scriptLanguage(for: model)
         try await asrCoordinator.resetSession(for: model, language: language)
         recordingModelChoice = model
         recordingScriptLanguage = language
+        recordingVocabularyTerms = activeVocabularyTerms
         lastBatchPreviewSampleCount = 0
         isRecordingActive = true
         currentTranscript = ""
@@ -1326,7 +1331,6 @@ final class ParakeetEngine: TranscriptionEngine {
             sampleBuffer.removeAll(keepingCapacity: true)
             return samples
         }
-        let settings = Settings.shared
         let recorded = sampleLock.withLock { fullRecordingSamples }
         do {
             try await asrCoordinator.appendBatchAudio(pending)
@@ -1337,11 +1341,11 @@ final class ParakeetEngine: TranscriptionEngine {
                 return ""
             }
             if (recordingModelChoice ?? selectedModelChoice).supportsFluidAudioVocabulary,
-               settings.fluidAudioVocabularyEnabled, !settings.customVocabulary.isEmpty {
+               !recordingVocabularyTerms.isEmpty {
                 // This opt-in full-recording pass already existed. Do not add
                 // an unboosted final-window decode in front of it at Stop.
                 await asrCoordinator.cancelBatch()
-                let result = try await asrCoordinator.transcribeWithCustomVocabulary(recorded, terms: settings.customVocabulary, language: recordingScriptLanguage)
+                let result = try await asrCoordinator.transcribeWithCustomVocabulary(recorded, terms: recordingVocabularyTerms, language: recordingScriptLanguage)
                 return BatchTranscriptionPolicy.finalTranscript(result.text, fallback: liveText)
             }
             let finalText = try await asrCoordinator.finishBatch(recordedSamples: recorded)
@@ -1384,6 +1388,7 @@ final class ParakeetEngine: TranscriptionEngine {
         firstPartialEmitted = false
         recordingModelChoice = nil
         recordingScriptLanguage = nil
+        recordingVocabularyTerms = []
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: false)
             levelSampleBuffer.reset(keepingCapacity: false)
@@ -1546,6 +1551,9 @@ private actor AsrManagerCoordinator {
     private var multilingualManager: StreamingNemotronMultilingualAsrManager?
     private var pendingEndOfUtterance = false
     private var ctcModels: CtcModels?
+    private var preparedVocabulary: PreparedTDTVocabulary?
+    private var preparedVocabularyTerms: [String] = []
+    private var vocabularyPreparation: (id: UUID, terms: [String], task: Task<PreparedTDTVocabulary, Error>)?
     private var modelGeneration = UUID()
     private var multilingualModelDirectory: URL?
     private var preparedStreamingTerms: [String] = []
@@ -1779,28 +1787,58 @@ private actor AsrManagerCoordinator {
         }
     }
 
-    func prepareVocabulary() async throws {
-        guard ctcModels == nil else { return }
-        let loaded = try await loadVocabularyModels()
-        _ = try await PerfTrace.measure("stt.ctcWarmup") {
-            try await CtcKeywordSpotter(models: loaded).spotKeywordsWithLogProbs(
-                audioSamples: Self.warmupAudio, customVocabulary: CustomVocabularyContext(terms: [])
-            )
-        }
-    }
-
-    private func loadVocabularyModels() async throws -> CtcModels {
-        if let ctcModels { return ctcModels }
+    func prepareVocabulary(terms: [String]) async throws {
+        let terms = Array(Set(terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })).sorted()
         let generation = modelGeneration
-        let loaded = try await PerfTrace.measure("stt.ctcModelLoad") {
-            try await CtcModels.downloadAndLoad(variant: .ctc110m)
+        while let pending = vocabularyPreparation {
+            do {
+                let prepared = try await pending.task.value
+                guard generation == modelGeneration else { throw CancellationError() }
+                if vocabularyPreparation?.id == pending.id {
+                    preparedVocabulary = prepared
+                    preparedVocabularyTerms = pending.terms
+                    if case .separate(_, let loaded) = prepared { ctcModels = loaded }
+                    vocabularyPreparation = nil
+                }
+            }
+            catch {
+                if vocabularyPreparation?.id == pending.id { vocabularyPreparation = nil }
+                throw error
+            }
+            if vocabularyPreparation?.id == pending.id { vocabularyPreparation = nil }
+            try Task.checkCancellation()
+            guard generation == modelGeneration else { throw CancellationError() }
         }
-        try Task.checkCancellation()
-        // A settings switch can release this coordinator while loading awaits.
-        // Do not restore weights for a model that is no longer selected.
-        guard generation == modelGeneration else { throw CancellationError() }
-        ctcModels = loaded
-        return loaded
+        guard !terms.isEmpty else {
+            preparedVocabulary = nil
+            preparedVocabularyTerms = []
+            return
+        }
+        if preparedVocabulary != nil, preparedVocabularyTerms == terms { return }
+        guard let models else { throw TranscriptionError.engineNotReady }
+        let cachedCTCModels = ctcModels
+        let id = UUID()
+        let task = Task {
+            try await PerfTrace.measure("stt.vocabularyPrepare") {
+                try await PreparedTDTVocabulary.prepare(models: models, terms: terms, cachedCTCModels: cachedCTCModels)
+            }
+        }
+        vocabularyPreparation = (id, terms, task)
+        do {
+            let prepared = try await task.value
+            try Task.checkCancellation()
+            guard generation == modelGeneration else { throw CancellationError() }
+            if vocabularyPreparation?.id == id {
+                preparedVocabulary = prepared
+                preparedVocabularyTerms = terms
+                if case .separate(_, let loaded) = prepared { ctcModels = loaded }
+                vocabularyPreparation = nil
+            }
+        } catch {
+            if vocabularyPreparation?.id == id { vocabularyPreparation = nil }
+            throw error
+        }
     }
 
     func resetSession(for modelChoice: ParakeetModelChoice, language: Language?) async throws {
@@ -1890,19 +1928,13 @@ private actor AsrManagerCoordinator {
         let terms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         guard !terms.isEmpty else { return original }
         do {
-            // If cleanup was enabled during recording, load lazily without an
-            // extra synthetic warmup on the latency-sensitive Stop path.
-            let ctcModels = try await loadVocabularyModels()
-            let boosting = try await VocabularyBoostingSession(
-                vocabulary: CustomVocabularyContext(terms: terms.map { CustomVocabularyTerm(text: $0) }),
-                ctcModels: ctcModels, config: ParakeetEngine.vocabularyRescorerConfig
-            )
-            let output = await PerfTrace.measure("stt.vocabularyInference") {
-                await boosting.rescore(text: original.text, tokenTimings: original.tokenTimings ?? [], audioSamples: samples)
+            try await prepareVocabulary(terms: terms)
+            guard let preparedVocabulary else { return original }
+            let text = try await PerfTrace.measure("stt.vocabularyInference") {
+                try await preparedVocabulary.rescore(original, samples: samples)
             }
             try Task.checkCancellation()
-            guard let output, output.wasModified else { return original }
-            return ASRResult(text: output.text, confidence: original.confidence,
+            return ASRResult(text: text, confidence: original.confidence,
                              duration: original.duration, processingTime: original.processingTime)
         } catch is CancellationError {
             throw CancellationError()
@@ -1965,6 +1997,12 @@ private actor AsrManagerCoordinator {
 
     func cleanup() async {
         modelGeneration = UUID()
+        let tdtTask = vocabularyPreparation?.task
+        vocabularyPreparation = nil
+        tdtTask?.cancel()
+        _ = try? await tdtTask?.value
+        preparedVocabulary = nil
+        preparedVocabularyTerms = []
         let vocabularyTask = streamingVocabularyPreparation?.task
         streamingVocabularyPreparation = nil
         vocabularyTask?.cancel()
