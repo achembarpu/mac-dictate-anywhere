@@ -1,5 +1,6 @@
 import XCTest
 import CoreAudio
+import FoundationModels
 @testable import Dictate_Anywhere
 
 @MainActor
@@ -266,6 +267,46 @@ final class DictationStartupContextTests: XCTestCase {
         await cancellation.value
         await app.shutdown()
     }
+
+    #if PIPELINE_BENCHMARK
+    func testAppleDefaultCleanupWithoutPromptOrContext() async throws {
+        guard #available(macOS 26, *), case .available = AIPostProcessingService.availability else {
+            throw XCTSkip("Apple Intelligence is unavailable")
+        }
+        let settings = Settings.shared
+        let savedPrompt = settings.aiPostProcessingPrompt
+        let savedVocabulary = settings.customVocabulary
+        defer {
+            settings.aiPostProcessingPrompt = savedPrompt
+            settings.customVocabulary = savedVocabulary
+        }
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .appleIntelligence
+        settings.prewarmEnginesAtStartup = false
+        settings.customVocabulary = []
+        let fixture = try XCTUnwrap(GoldenCleanupFixture.all().first { $0.id == "question-not-answer" })
+        for prompt in ["", " \n\t "] {
+            settings.aiPostProcessingPrompt = prompt
+            let engine = StartupContextEngine()
+            engine.finalTranscript = fixture.input
+            var delivered: [String] = []
+            let app = app(engine: engine, capture: { _ in nil }, delivery: {
+                delivered.append($0)
+                return .copiedOnly
+            })
+            await app.startDictation()
+            await app.stopDictation()
+            await app.shutdown()
+            XCTAssertNil(engine.contextAtFinalization)
+            XCTAssertEqual(delivered.count, 1)
+            let output = try XCTUnwrap(delivered.first)
+            XCTAssertTrue(fixture.violations(in: output).isEmpty,
+                          "Empty Apple prompts must clean up the question without answering it: \(output)")
+            XCTAssertTrue(fixture.lostFacts(in: output).isEmpty)
+            XCTAssertEqual(settings.aiPostProcessingPrompt, prompt, "The fallback must not overwrite saved preferences")
+        }
+    }
+    #endif
 
     func testStartupAppliesInputSourceProfileBeforePrewarmingSpeechModel() async {
         let settings = Settings.shared

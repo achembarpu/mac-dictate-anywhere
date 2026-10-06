@@ -68,6 +68,20 @@ The standalone [native MLX probe](../tools/s1-mlx-probe/README.md) and
 `PIPELINE_BENCHMARK_CLEANUP_RESULTS_PATH` / `--only cleanup-prompts` scorer.
 They do not change the app's runtime or download models implicitly.
 
+For Apple prompt comparisons, set `PIPELINE_BENCHMARK_CLEANUP_PROVIDER=apple`
+and `PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH` to an external JSON array of
+`{"id":"candidate-name","prompt":"cleanup instructions"}` objects, then run
+`scripts/dev.sh benchmark --only cleanup-prompts`. An empty `prompt` exercises
+the app's default. Each candidate uses the production Apple instructions,
+guided result schema, greedy sampling, vocabulary and chunk planner. Candidate
+order rotates across `PIPELINE_BENCHMARK_ITERATIONS`; language and exact fixture
+filters use the existing benchmark settings. `APPLE_PROMPT_RESULT` JSON rows
+include actual output, prompt/manifest hashes, semantic issues, lost facts,
+reference error and latency. Save logs outside the checkout and inspect output
+as well as scores before adopting a candidate. Reevaluation is needed when the
+system model changes. The `cleanup-quality` group also tests recording delivery
+with empty and whitespace-only prompts and no captured writing context.
+
 `--only asr-acoustics` separates quiet Float32 input from PCM16 quantization
 using one installed TDT model. It preserves the golden reference, tests
 peak-capped gains and synthetic silence/noise controls, and records raw outputs,

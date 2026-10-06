@@ -34,7 +34,7 @@ final class AppleCleanupBenchmarkTests: XCTestCase {
             let baselineIssues = fixture.violations(in: baselineOutput)
             baselineMisses += baselineIssues.count
             let warmStart = ContinuousClock.now
-            let prepared = await AIPostProcessingService.prewarm(prompt: prompt, vocabulary: fixture.vocabulary ?? [])
+            let prepared = await AIPostProcessingService.prewarm(prompt: "", vocabulary: fixture.vocabulary ?? [])
             XCTAssertTrue(prepared)
             let preparationMs = BenchmarkStatistics.elapsedMilliseconds(from: warmStart)
             // Apple's documented minimum lead time. Not a product-path delay.
@@ -44,7 +44,7 @@ final class AppleCleanupBenchmarkTests: XCTestCase {
             var fallback = false
             do {
                 output = try await AIPostProcessingService.process(
-                    text: fixture.input, prompt: prompt, vocabulary: fixture.vocabulary ?? []
+                    text: fixture.input, prompt: "", vocabulary: fixture.vocabulary ?? []
                 )
             } catch {
                 fallback = true // Match AppState's whole-original fallback.
@@ -56,6 +56,7 @@ final class AppleCleanupBenchmarkTests: XCTestCase {
             let errorRate = GoldenSpeechFixture.errorRate(reference: fixture.reference, hypothesis: output,
                 metric: fixture.language == "zh" ? .cer : .wer)
             print("CLEANUP_GOLDEN provider=apple fixture=\(fixture.id) prepare_ms=\(preparationMs) latency_ms=\(latencyMs) baseline_ms=\(baselineMs) baseline_issues=\(baselineIssues.count) baseline_fallback=\(baselineFallback) fallback=\(fallback) error_rate=\(errorRate) changed=\(output != fixture.input) issues=\(issues.count) input_chars=\(fixture.input.count) output_chars=\(output.count)")
+            XCTAssertFalse(fallback, "\(fixture.id): default cleanup failed and returned the original")
             XCTAssertTrue(fixture.lostFacts(in: output).isEmpty, "\(fixture.id): cleanup lost factual content")
             ran += 1
         }
@@ -91,9 +92,8 @@ final class AppleCleanupBenchmarkTests: XCTestCase {
             }.joined(separator: "\n\n")
         }
         let text = batches.joined(separator: "\n\n")
-        let prompt = "Correct capitalization and punctuation. Keep all factual content and every paragraph."
         let start = ContinuousClock.now
-        let output = try await AIPostProcessingService.process(text: text, prompt: prompt)
+        let output = try await AIPostProcessingService.process(text: text, prompt: "")
         let elapsed = BenchmarkStatistics.elapsedMilliseconds(from: start)
         XCTAssertNotEqual(output, text, "Do not count returning the original as successful cleanup")
         XCTAssertTrue(fixture.lostFacts(in: output).isEmpty)

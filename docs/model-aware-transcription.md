@@ -84,6 +84,11 @@ conservative UTF-8 byte budgets. Failed cleanup preserves the whole original;
 malformed individual responses retain that chunk's input. These safeguards do
 not establish arbitrary semantic fidelity.
 
+Apple Intelligence cleanup runs with or without captured writing context. An
+empty or whitespace-only custom prompt uses the built-in dictation cleanup
+prompt; preparation and processing use the same effective instructions. Saved
+custom prompts are preserved, and clearing the field restores the default.
+
 | Provider | Request and preparation policy |
 | --- | --- |
 | S1-mini | English-only trained control prompt, empty thinking prefix and greedy sampling. Q4_K_M weights, 4,096-token context and Q8 KV. Tokenizer-aware chunks stay within 1,000 input tokens; output budget is `ceil(inputTokens * 1.3) + 32`. EOS is required; an incomplete response cannot replace the original. |

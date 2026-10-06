@@ -173,7 +173,7 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 34
+assert_benchmark_selector_count 36
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
 
@@ -204,7 +204,8 @@ for invalid in unknown '' ',overlay' 'overlay,' 'overlay,,audio'; do
 done
 
 "$SCRIPT" benchmark --only cleanup-quality,apple-speech-quality >/dev/null
-assert_benchmark_selector_count 4
+assert_benchmark_selector_count 5
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/DictationStartupContextTests/testAppleDefaultCleanupWithoutPromptOrContext'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AppleCleanupBenchmarkTests/testLongInputAcrossContextWindows'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ProviderCleanupBenchmarkTests/testGoldenCleanupWithSelectedProvider'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AppleSpeechBenchmarkTests/testInstalledLocalesGoldenSpeechAndFreshSessionPreparation'
@@ -238,7 +239,8 @@ PIPELINE_BENCHMARK_CLEANUP_MODEL=candidate \
   PIPELINE_BENCHMARK_ASR_URL=http://127.0.0.1:8010/v1 PIPELINE_BENCHMARK_LANGUAGES=en,de \
   PIPELINE_BENCHMARK_ASR_RESULTS_PATH='/fixture/speech outputs.json' \
   "$SCRIPT" benchmark --only cleanup-prompts,external-asr-quality >/dev/null
-assert_benchmark_selector_count 4
+assert_benchmark_selector_count 5
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/AppleCleanupPromptBenchmarkTests/testCandidatePromptsAgainstGoldenReferences'
 expected_research_environment=$'candidate\n/fixture/prompt with spaces.md\n512\n1\n/fixture/outputs.json\nhttp://127.0.0.1:8010/v1\nen,de\n/fixture/speech outputs.json'
 if [[ "$(<"$XCODEBUILD_RESEARCH_ENV_LOG")" != "$expected_research_environment" ]]; then
   printf 'FAIL: candidate benchmark settings were not forwarded exactly\n' >&2

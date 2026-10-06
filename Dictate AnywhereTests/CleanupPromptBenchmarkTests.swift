@@ -37,6 +37,9 @@ final class CleanupPromptBenchmarkTests: XCTestCase {
         throw XCTSkip("Use scripts/dev.sh benchmark --only cleanup-prompts")
         #else
         let env = ProcessInfo.processInfo.environment
+        if env["PIPELINE_BENCHMARK_CLEANUP_PROVIDER"] == "apple" {
+            throw XCTSkip("Apple candidates use the production Apple cleanup harness")
+        }
         guard let path = env["PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH"] else { throw XCTSkip("Select an external prompt file") }
         let source = try String(contentsOfFile: path, encoding: .utf8)
         let fenced = source.components(separatedBy: "```")

@@ -1591,26 +1591,21 @@ final class AppState {
             }
         case .appleIntelligence:
             let context = postProcessingContext(for: .appleIntelligence)
-            if !settings.aiPostProcessingPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || context != nil {
-                if #available(macOS 26, *) {
-                    if case .available = AIPostProcessingService.availability {
-                        do {
-                            processedText = try await AIPostProcessingService.process(
-                                text: finalText,
-                                prompt: settings.aiPostProcessingPrompt,
-                                vocabulary: settings.customVocabulary,
-                                context: context
-                            )
-                        } catch {
-                            logger.error("postProcessing: Apple Intelligence failed: \(error.localizedDescription, privacy: .public)")
-                        }
-                    } else {
-                        logger.warning("postProcessing: Apple Intelligence is not available")
+            if #available(macOS 26, *) {
+                if case .available = AIPostProcessingService.availability {
+                    do {
+                        processedText = try await AIPostProcessingService.process(
+                            text: finalText,
+                            prompt: settings.aiPostProcessingPrompt,
+                            vocabulary: settings.customVocabulary,
+                            context: context
+                        )
+                    } catch {
+                        logger.error("postProcessing: Apple Intelligence failed: \(error.localizedDescription, privacy: .public)")
                     }
+                } else {
+                    logger.warning("postProcessing: Apple Intelligence is not available")
                 }
-            } else {
-                logger.info("postProcessing: Apple Intelligence skipped because prompt is empty")
             }
         case .s1Mini:
             let activeLanguage = settings.engineChoice == .appleSpeech
