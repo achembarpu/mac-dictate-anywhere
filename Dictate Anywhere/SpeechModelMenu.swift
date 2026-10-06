@@ -38,19 +38,24 @@ struct SpeechModelMenu: View {
         .disabled(!isEnabled || (recommended.isEmpty && alternatives.isEmpty))
         .opacity(isEnabled ? 1 : 0.5)
         .accessibilityLabel("Speech model")
-        .accessibilityValue("\(selection.displayName), \(selection.recommendationTitle)")
+        .accessibilityValue("\(selection.displayName), \(purpose(selection)), \(selection.sizeSummary)")
     }
 
     private func option(_ model: ParakeetModelChoice) -> some View {
         Button {
             selection = model.selectionPreservingPreset(selection)
         } label: {
-            let title = "\(model.displayName) — \(model.recommendationTitle)"
+            let title = "\(model.displayName) — \(purpose(model)) · \(model.sizeSummary)"
             if selection.catalogChoice == model {
                 Label(title, systemImage: "checkmark")
             } else {
                 Text(title)
             }
         }
+    }
+
+    private func purpose(_ model: ParakeetModelChoice) -> String {
+        model.hasLimitedLanguageCoverage(language)
+            ? "Limited coverage for \(language.displayName)" : model.recommendationTitle
     }
 }

@@ -3,8 +3,9 @@
 On **Speech Model**, choose your expected language first. The model menu shows
 compatible choices for that language and this Mac, grouped into recommendations
 and alternatives. Names identify the actual checkpoint; the purpose beside each
-name describes when to try it. Selecting a language does not select or download
-a model for you.
+name describes when to try it. Download sizes and limited coverage are visible
+before choosing a model. Selecting a language does not select or download a
+model for you.
 
 | Speech choice | Underlying model | When to choose it |
 | --- | --- | --- |
