@@ -61,19 +61,18 @@ struct AIPostProcessingView: View {
 
             DSSection(overline: "Cleanup Method") {
                 DSDetailRow(
-                    label: "Transcript processing",
-                    caption: "The sections that follow set up the method you choose. Local filler-word removal at the bottom of the page runs before all of them."
+                    label: "Method",
+                    caption: "Choose a built-in model, vocabulary correction only, or a custom model provider. Local filler-word removal below runs before the selected method."
                 ) {
-                    DSDropdown(
+                    CleanupMethodMenu(
                         selection: $settings.transcriptPostProcessingMode,
-                        options: TranscriptPostProcessingMode.allCases.filter { mode in
-                            mode != .fluidAudioVocabulary
-                                || settings.engineChoice != .parakeet
-                                || settings.parakeetModelChoice.supportsFluidAudioVocabulary
-                        },
-                        title: \.displayName,
-                        accessibilityName: "Transcript processing method"
+                        offersVocabulary: settings.engineChoice != .parakeet
+                            || settings.parakeetModelChoice.supportsFluidAudioVocabulary
                     )
+                }
+                if let model = cleanupModelIdentity(settings: settings) {
+                    DSDivider()
+                    DSInfoRow(label: "Model", value: model)
                 }
             }
 
@@ -152,6 +151,21 @@ struct AIPostProcessingView: View {
         } message: {
             Text("This removes the local model and its downloaded license file. You can download them again later.")
         }
+    }
+
+
+    private func cleanupModelIdentity(settings: Settings) -> String? {
+        let customID: String
+        switch settings.transcriptPostProcessingMode {
+        case .none, .fluidAudioVocabulary: return nil
+        case .appleIntelligence: return "Apple Foundation Models — managed by macOS"
+        case .s1Mini: return "Superwhisper S1-mini — Qwen3 0.6B fine-tune"
+        case .ollama: customID = settings.ollamaModel
+        case .openRouter: customID = settings.openRouterModel
+        case .openAICompatible: customID = settings.openAICompatibleModel
+        }
+        let model = customID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.isEmpty ? "Choose a model ID below" : model
     }
 
     // MARK: - Selected method
@@ -785,6 +799,8 @@ struct AIPostProcessingView: View {
         let manager = appState.s1MiniModelManager
 
         DSSection(overline: "S1-mini by Superwhisper") {
+            DSInfoRow(label: "Language", value: "English cleanup")
+            DSDivider()
             DSInfoRow(label: "Model", value: "462 MB · English · Local transcript normalizer")
             DSDivider()
             DSModelReadinessRow(
@@ -808,7 +824,7 @@ struct AIPostProcessingView: View {
                     Button(manager.isDeleting ? "Deleting…" : "Delete Model…") {
                         isConfirmingS1MiniDeletion = true
                     }
-.buttonStyle(.dsDestructive)
+                    .buttonStyle(.dsDestructive)
                     .disabled(manager.isBusy || appState.isPreparingCleanupEngine)
                 }
             }
@@ -933,7 +949,7 @@ struct AIPostProcessingView: View {
                 )
             }
             DSDivider()
-            fieldRow(label: "Model") {
+            fieldRow(label: "Model ID") {
                 DSTextField(
                     placeholder: "Enter an installed model name",
                     text: Binding(
@@ -983,7 +999,7 @@ struct AIPostProcessingView: View {
                 }
             }
             DSDivider()
-            DSCardCaption(text: "Runs transcript cleanup through your local Ollama server. Use the server base URL and an installed model name. Larger models are noticeably better at following cleanup instructions and vocabulary normalization.")
+            DSCardCaption(text: "Ollama is the provider; the Model ID above selects the cleanup model. Use an installed model trained to preserve names, numbers and meaning. The server URL determines where processing runs.")
         }
 
         if !OllamaPostProcessingService.suggestedModels.isEmpty {
@@ -1065,7 +1081,7 @@ struct AIPostProcessingView: View {
                 )
             }
             DSDivider()
-            fieldRow(label: "Model") {
+            fieldRow(label: "Model ID") {
                 DSTextField(
                     placeholder: "openai/gpt-5-mini",
                     text: Binding(
@@ -1164,7 +1180,7 @@ struct AIPostProcessingView: View {
                     .padding(.bottom, 10)
             }
             DSDivider()
-            fieldRow(label: "Model") {
+            fieldRow(label: "Model ID") {
                 DSTextField(
                     placeholder: "local-model",
                     text: Binding(
@@ -1267,7 +1283,7 @@ struct AIPostProcessingView: View {
                 .buttonStyle(.dsPrimary)
             }
 
-            Text("Install Ollama to clean up transcripts with a local language model and pull recommended models from this app. You can also leave it uninstalled and point the server URL below at a remote Ollama server.")
+            Text("Install Ollama to run your own cleanup model. Choose an installed model by its exact ID. You can also leave it uninstalled and point the server URL below at a remote Ollama server.")
                 .font(DS.Fonts.ui(12.5))
                 .lineSpacing(12.5 * 0.5 - 3)
                 .foregroundStyle(DS.Colors.textSecondary)
