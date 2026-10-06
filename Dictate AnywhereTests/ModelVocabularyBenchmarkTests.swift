@@ -70,8 +70,8 @@ final class ModelVocabularyBenchmarkTests: XCTestCase {
                             "fixture": fixture.id, "language": fixture.language,
                             "filtered": filtered, "iteration": iteration,
                             "shipped_hint": BatchTranscriptionPolicy.scriptLanguage(for: model, selected: settings.selectedLanguage) != nil,
-                            "latin_names": latinNames(in: try fixture.referenceText),
-                            "preserved_latin_names": latinNames(in: try fixture.referenceText).filter { output.localizedCaseInsensitiveContains($0) },
+                            "latin_names": latinNames(in: try fixture.referenceText, language: fixture.language),
+                            "preserved_latin_names": latinNames(in: try fixture.referenceText, language: fixture.language).filter { output.localizedCaseInsensitiveContains($0) },
                             "path": live ? "production_live" : "production_file",
                             "latency_ms": elapsed, "cpu_ms": after.cpuMilliseconds - before.cpuMilliseconds,
                             "process_peak_rss_bytes": after.peakResidentBytes,
@@ -92,8 +92,9 @@ final class ModelVocabularyBenchmarkTests: XCTestCase {
     }
 
     #if PIPELINE_BENCHMARK
-    private func latinNames(in reference: String) -> [String] {
-        reference.split(whereSeparator: { !$0.isLetter }).map(String.init).filter {
+    private func latinNames(in reference: String, language: String) -> [String] {
+        guard ["ru", "el"].contains(language) else { return [] }
+        return reference.split(whereSeparator: { !$0.isLetter }).map(String.init).filter {
             $0.count >= 3 && $0.unicodeScalars.allSatisfy { $0.isASCII } && reference.contains(where: { !$0.isASCII && $0.isLetter })
         }
     }

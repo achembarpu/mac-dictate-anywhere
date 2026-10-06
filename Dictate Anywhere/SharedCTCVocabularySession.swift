@@ -13,6 +13,8 @@ nonisolated struct SharedCTCVocabularySession: Sendable {
     private let thresholds: ContextBiasingConstants.VocabSizeConfig
     private static let windowSamples = 240_000
     private static let overlapSamples = 32_000
+    // Whole encoder frames keep every window on the original TDT clock.
+    private static let strideFrames = (windowSamples - overlapSamples) / ASRConstants.samplesPerEncoderFrame
 
     static func prepare(models: AsrModels, terms: [String], config: VocabularyRescorer.Config) async throws -> Self {
         guard models.version == .tdtCtc110m, let head = models.ctcHead else {
@@ -63,9 +65,9 @@ nonisolated struct SharedCTCVocabularySession: Sendable {
         _ = try await logProbabilities(samples: [Float](repeating: 0, count: 16_000))
     }
 
-    /// Mirrors the SDK's 15-second windows, two-second overlap and probability
-    /// averaging. The fixed model grid, rather than a partial tail's length,
-    /// supplies timestamps used by the constrained scorer.
+    /// Use 15-second windows with at least two seconds of overlap, aligned to
+    /// the TDT encoder's 80 ms grid. Partial padding never changes frame time.
+    /// Merge overlapping probabilities on that same original-audio clock.
     func logProbabilities(samples: [Float]) async throws -> (frames: [[Float]], frameDuration: Double) {
         var combined: [[Float]] = []
         var frameDuration: Double = 0
@@ -94,20 +96,28 @@ nonisolated struct SharedCTCVocabularySession: Sendable {
             }
             let totalFrames = logits.shape[1].intValue
             guard totalFrames > 0 else { throw ASRError.processingFailed("110M CTC head returned no frames") }
-            frameDuration = Double(Self.windowSamples) / 16_000 / Double(totalFrames)
-            let validFrames = min(totalFrames, Int(ceil(Double(end - start) / Double(Self.windowSamples) * Double(totalFrames))))
+            frameDuration = ASRConstants.secondsPerEncoderFrame
+            guard let validFrames = encoded.featureValue(for: "encoder_length")?.multiArrayValue?[0].intValue,
+                  validFrames > 0, validFrames <= totalFrames else {
+                throw ASRError.processingFailed("110M frontend returned an invalid encoder length")
+            }
             let frameStride = logits.strides[1].intValue, tokenStride = logits.strides[2].intValue
             guard logits.dataType == .float32 else { throw ASRError.processingFailed("110M CTC logits must be Float32") }
-            let values = logits.dataPointer.bindMemory(to: Float.self, capacity: logits.count)
+            let storageSpan = (totalFrames - 1) * frameStride + 1024 * tokenStride + 1
+            let values = logits.dataPointer.bindMemory(to: Float.self, capacity: storageSpan)
             let raw = (0..<validFrames).map { frame in
                 (0..<1025).map { token in values[frame * frameStride + token * tokenStride] }
+            }
+            guard raw.allSatisfy({ row in row.contains(where: { $0.isFinite }) && row.allSatisfy { $0.isFinite || $0 == -.infinity } }) else {
+                throw ASRError.processingFailed("110M CTC head returned invalid probabilities")
             }
             // The exported head emits log probabilities; log-softmax is
             // idempotent here and retains SDK temperature/blank-bias handling.
             let frames = CtcKeywordSpotter.applyLogSoftmax(rawLogits: raw, blankId: 1024)
             if combined.isEmpty { combined = frames }
             else {
-                let overlap = min(Int(Double(Self.overlapSamples) / 16_000 / frameDuration), combined.count, frames.count)
+                let startFrame = start / ASRConstants.samplesPerEncoderFrame
+                let overlap = min(max(0, combined.count - startFrame), frames.count)
                 for i in 0..<overlap {
                     let index = combined.count - overlap + i
                     combined[index] = zip(combined[index], frames[i]).map { a, b in
@@ -118,7 +128,7 @@ nonisolated struct SharedCTCVocabularySession: Sendable {
                 combined.append(contentsOf: frames.dropFirst(overlap))
             }
             if end == samples.count { break }
-            start += Self.windowSamples - Self.overlapSamples
+            start += Self.strideFrames * ASRConstants.samplesPerEncoderFrame
         }
         return (combined, frameDuration)
     }

@@ -485,7 +485,7 @@ final class ParakeetEngine: TranscriptionEngine {
     nonisolated private static let recoveryReadBlockSamples = BatchTranscriptionPolicy.sampleRate * 20
     /// Keep acoustic vocabulary rescue from replacing unrelated dictation
     /// phrases (for example, "the weather is lovely" with "cancellation").
-    /// These are FluidAudio's recommended opt-in text-similarity floors.
+    /// The policy also tapers short-token bonuses and disables acoustic rescue.
     static let vocabularyRescorerConfig = VocabularyRescoringPolicy.config
 
     /// SenseVoice's fp16/int8 encoders are correct only on the Neural Engine —
@@ -925,6 +925,9 @@ final class ParakeetEngine: TranscriptionEngine {
         let recoveryCapture = self.recoveryCapture
         logger.info("startRecording: entry, thread=\(Thread.current.description, privacy: .public), deviceID=\(deviceID.map { String($0) } ?? "nil", privacy: .public)")
         let modelChoice = selectedModelChoice
+        let vocabularyTerms = activeVocabularyTerms
+        let language = scriptLanguage(for: modelChoice)
+        let nativeLanguageCode = Settings.shared.selectedLanguage.nemotronLanguageCode
         if !(await asrCoordinator.isInitialized(for: modelChoice)) {
             guard !isDownloading else {
                 logger.error("startRecording: selected model is still downloading")
@@ -943,19 +946,19 @@ final class ParakeetEngine: TranscriptionEngine {
         }
         guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
         if modelChoice == .nemotronMultilingual {
-            try await asrCoordinator.prepareStreamingVocabulary(terms: activeVocabularyTerms)
+            try await asrCoordinator.prepareStreamingVocabulary(terms: vocabularyTerms)
         } else if modelChoice.supportsFluidAudioVocabulary {
-            await prepareVocabularyIfNeeded()
+            do { try await asrCoordinator.prepareVocabulary(terms: vocabularyTerms) }
+            catch { logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)") }
         }
-        let language = scriptLanguage(for: modelChoice)
         try await asrCoordinator.resetSession(for: modelChoice, language: language)
         recordingModelChoice = modelChoice
         recordingScriptLanguage = language
-        recordingVocabularyTerms = activeVocabularyTerms
+        recordingVocabularyTerms = vocabularyTerms
         lastBatchPreviewSampleCount = 0
 
         if modelChoice == .nemotronMultilingual {
-            await asrCoordinator.setStreamingLanguage(Settings.shared.selectedLanguage.nemotronLanguageCode)
+            await asrCoordinator.setStreamingLanguage(nativeLanguageCode)
         }
 
         // Ensure a previous engine is fully torn down before starting a new one.
@@ -1214,12 +1217,13 @@ final class ParakeetEngine: TranscriptionEngine {
     func beginBatchReplayForTesting() async throws {
         let model = selectedModelChoice
         guard !model.usesTrueStreaming else { throw TranscriptionError.engineNotReady }
-        await prepareVocabularyIfNeeded()
+        let vocabularyTerms = activeVocabularyTerms
+        if model.supportsFluidAudioVocabulary { try await asrCoordinator.prepareVocabulary(terms: vocabularyTerms) }
         let language = scriptLanguage(for: model)
         try await asrCoordinator.resetSession(for: model, language: language)
         recordingModelChoice = model
         recordingScriptLanguage = language
-        recordingVocabularyTerms = activeVocabularyTerms
+        recordingVocabularyTerms = vocabularyTerms
         lastBatchPreviewSampleCount = 0
         isRecordingActive = true
         currentTranscript = ""
@@ -1842,6 +1846,7 @@ private actor AsrManagerCoordinator {
     }
 
     func resetSession(for modelChoice: ParakeetModelChoice, language: Language?) async throws {
+        guard isInitialized(for: modelChoice) else { throw TranscriptionError.engineNotReady }
         if !modelChoice.usesTrueStreaming {
             await cancelBatch()
             if modelChoice == .senseVoice {

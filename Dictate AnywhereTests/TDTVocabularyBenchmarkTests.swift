@@ -86,6 +86,18 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
             let models = try await AsrModels.loadFromCache(version: version)
             let manager = AsrManager(config: BatchTranscriptionPolicy.asrConfig)
             try await manager.loadModels(models)
+            if choice == .compactEnglish {
+                let shared = try await SharedCTCVocabularySession.prepare(models: models, terms: ["Quilter"], config: VocabularyRescoringPolicy.config)
+                // The centered frontend includes the frame at the endpoint
+                // when the sample count is an exact multiple of 80 ms.
+                // Exercise both that boundary and overlapping window joins.
+                for count in [1_279, 1_280, 1_281, 239_999, 240_000, 240_001, 414_720, 414_721] {
+                    let grid = try await shared.logProbabilities(samples: [Float](repeating: 0, count: count))
+                    XCTAssertEqual(grid.frameDuration, ASRConstants.secondsPerEncoderFrame)
+                    XCTAssertEqual(grid.frames.count, count / ASRConstants.samplesPerEncoderFrame + 1,
+                                   "Centered encoder grid for \(count) samples")
+                }
+            }
             for fixture in fixtures {
                 let reader = try RecoveryAudioReader(url: fixture.audioURL)
                 var samples: [Float] = []
@@ -118,6 +130,10 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
                     if choice == .compactEnglish {
                         let shared = try await SharedCTCVocabularySession.prepare(models: models, terms: terms, config: VocabularyRescoringPolicy.config)
                         try await shared.warm()
+                        let grid = try await shared.logProbabilities(samples: samples)
+                        XCTAssertEqual(grid.frameDuration, ASRConstants.secondsPerEncoderFrame)
+                        XCTAssertEqual(grid.frames.count, samples.count / ASRConstants.samplesPerEncoderFrame + 1,
+                                       "The shared CTC clock must cover the complete recording")
                         for iteration in 0..<iterations {
                             let before = try BenchmarkProcessResources.sample()
                             let start = ContinuousClock.now
@@ -145,10 +161,14 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
         let row: [String: Any] = ["experiment": "tdt_vocabulary", "model": model.rawValue, "fixture": fixture.id,
             "list": list, "terms": terms, "variant": variant, "iteration": iteration,
             "latency_ms": elapsed, "cpu_ms": cpu, "process_peak_rss_bytes": peak,
-            "original": original, "output": output, "error_rate": error,
-            "original_error_rate": try fixture.errorRate(hypothesis: original),
+            "stage": variant == "prepared_live" ? "stop_to_final" : "rescore",
+            "output": output, "error_rate": error,
             "audio_sha256": fixture.audioSHA256, "reference_sha256": fixture.referenceSHA256]
         var result = row
+        if !original.isEmpty {
+            result["original"] = original
+            result["original_error_rate"] = try fixture.errorRate(hypothesis: original)
+        }
         if let preparation { result["preparation_ms"] = preparation }
         print("MODEL_VOCABULARY_RESULT " + String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
     }

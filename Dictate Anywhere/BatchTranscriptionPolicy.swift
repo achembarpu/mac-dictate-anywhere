@@ -23,8 +23,10 @@ nonisolated enum BatchTranscriptionPolicy {
         // SDK Cyrillic/Greek filters reject Latin names. Russian goldens lose
         // "NextGen" even when aggregate WER is unchanged. Keep automatic
         // decoding for these scripts until the SDK can allow foreign names.
-        guard selected != .russian, selected != .greek else { return nil }
-        return Language(rawValue: selected.rawValue)
+        switch selected {
+        case .bulgarian, .ukrainian, .russian, .greek: return nil
+        default: return Language(rawValue: selected.rawValue)
+        }
     }
 
     static func shouldPreview(totalSamples: Int, lastPreviewSamples: Int, hasVisibleText: Bool) -> Bool {

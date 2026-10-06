@@ -35,6 +35,28 @@ recording once, then applies the SDK's matching session to the corresponding
 timings/audio. The unboosted overlap session is cancelled before that pass.
 Native streaming finalization does not use this CTC vocabulary path.
 
+Multilingual v3/Ultra recordings capture the selected script hint at start and
+use it for previews, final windows and vocabulary decoding. Recovery uses one
+requested language for the whole file. Unsupported mappings and Cyrillic/Greek
+languages retain automatic decoding to preserve Latin names. Script hints
+constrain alphabets rather than vocabulary within an alphabet.
+
+TDT vocabulary uses a short-token taper (pivot 5, exponent 2), similarity floors
+0.30/0.50 and disabled acoustic rescue. Constrained acoustic scoring still
+recovers supported names; severely mangled names outside its similarity gate
+can remain unchanged. Terms are fixed for the recording; edits apply next time.
+The 110M model uses its resident fused frontend and auxiliary CTC head, sharing
+encoder weights instead of loading another encoder. It still performs a second
+inference pass because the SDK exposes no TDT feature hook. Its windows and
+scores use the TDT encoder clock. Other TDT models use a separate CTC encoder.
+
+Multilingual Nemotron supports vocabulary through its native decoder, including
+live previews and final speech, with a conservative per-token bonus of 1.
+Vocabulary is opt-in through the existing mode; other native streaming models
+do not advertise unsupported vocabulary processing. Reset clears partial
+matches, while disabling the mode clears the bias before the next session.
+
+
 ## Architecture and preparation
 
 Architecture checks describe the running process slice. An x86_64 process under
@@ -56,10 +78,12 @@ execution. The app exposes no processor calibration or decoder tuning workflow.
 **Prepare models ahead of time** controls automatic loading and first inference.
 Batch preparation decodes synthetic silence and warms VAD; native English
 streaming managers process/finish silence and reset. Vocabulary preparation also
-warms its CTC models. Synthetic output is discarded. Repeated preparation reuses
+warms the CTC or native logits path and caches the tokenizer/scorer by model
+and normalized term list. Synthetic output is discarded. Repeated preparation reuses
 resident weights, and each real recording starts with fresh decoder/VAD state.
-A vocabulary option enabled during recording can load lazily for finalization
-without adding synthetic warmup at Stop.
+Vocabulary options and terms are captured before preparation and recording.
+Preparation failures preserve the unmodified TDT result; changes apply to the
+next recording.
 
 Startup prepares the selected speech and eligible cleanup models. Model,
 language, download and preparation-setting changes request preparation while
@@ -124,37 +148,8 @@ checks. Golden references, hashes and licenses remain with the test fixtures.
 Policy sources: [FluidAudio overlap configuration](https://github.com/FluidInference/FluidAudio/tree/v0.17.5/Sources/FluidAudio/ASR/Parakeet/SlidingWindow),
 [SenseVoice](https://github.com/FluidInference/FluidAudio/blob/v0.17.5/Documentation/ASR/SenseVoice.md),
 [multilingual Nemotron](https://github.com/FluidInference/FluidAudio/blob/v0.17.5/Documentation/ASR/NemotronMultilingual.md),
+[vocabulary controls](https://github.com/FluidInference/FluidAudio/blob/v0.17.5/Documentation/ASR/CustomVocabulary.md),
 [S1 author recipe](https://huggingface.co/superwhisper/s1-mini).
 
 S1 preserves the original when cleanup removes a numeric minus sign, including
 repeated occurrences, or when literal chat markers could become prompt controls.
-
-Multilingual v3/Ultra sessions capture the selected language at recording start
-and pass the SDK script hint through previews, final windows and vocabulary
-decoding. Recovery files use the requested language for the whole file. This
-filters alphabet confusion; it does not constrain vocabulary within a script.
-Languages absent from the SDK mapping retain automatic decoding.
-
-Cyrillic and Greek TDT dictation retains automatic script decoding: the SDK's
-strict filters exclude Latin names. The language benchmark reports preserved
-Latin names alongside WER so this loss cannot hide behind an unchanged score.
-Multilingual Nemotron supports native vocabulary bias in live and final speech;
-its term index and logits path are prepared before capture and reused unchanged.
-Turning the mode off clears the bias. Other native streaming models do not
-advertise unsupported vocabulary processing.
-
-TDT vocabulary uses the SDK short-token taper (pivot 5, exponent 2) with
-similarity floors 0.30/0.50 and acoustic rescue disabled. Constrained acoustic
-scoring remains enabled; severely mangled names outside its similarity gate
-may remain unchanged. The tokenizer/scorer is cached by model and normalized
-term list, prepared before recording, and recording terms remain fixed through
-Stop. The 110M model reuses its fused frontend and auxiliary CTC head instead
-of loading a separate CTC encoder. This saves a second set of encoder weights;
-it still runs a separate inference pass because the SDK exposes no TDT feature
-hook. Other TDT models use the separate CTC encoder.
-
-Native Nemotron uses a per-token bias weight of 1. The SDK's tested 3.0/4.5
-bonuses over-fired on spontaneous speech with absent terms; the lower bonus
-retained a checked name correction without those insertions. Vocabulary bias
-is opt-in through the existing vocabulary mode. Preparation warms the logits
-path; disabling the mode clears the bias before the next recording or recovery.

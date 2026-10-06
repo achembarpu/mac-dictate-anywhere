@@ -33,45 +33,45 @@ final class NativeVocabularyBenchmarkTests: XCTestCase {
             let fixture = try XCTUnwrap(fixtures.first { $0.id == id })
             settings.selectedLanguage = .english
             for iteration in 0..<iterations {
-            var errors: [String: Double] = [:]
-            for (variant, terms) in [("baseline", [String]()), ("genuine", genuineTerms),
-                                     ("distractors", ["CRAN", "ran", "NVIDIA", "cancellation"]),
-                                     ("short_cran", ["CRAN"]), ("short_ran", ["ran"]),
-                                     ("nvidia", ["NVIDIA"]), ("cancellation", ["cancellation"]),
-                                     ("cleared", [String]())] {
-                settings.transcriptPostProcessingMode = terms.isEmpty ? .none : .fluidAudioVocabulary
-                settings.customVocabulary = terms
-                let preparation = ContinuousClock.now
-                try await engine.prepare()
-                let preparationMs = BenchmarkStatistics.elapsedMilliseconds(from: preparation)
-                let before = try BenchmarkProcessResources.sample()
-                let start = ContinuousClock.now
-                let output: String
-                if live {
-                    try await engine.beginStreamingReplayForTesting()
-                    let reader = try RecoveryAudioReader(url: fixture.audioURL)
-                    while let chunk = try reader.nextSamples(maxSamples: 16_000) {
-                        try await engine.replayStreamingAudioForTesting(chunk)
-                    }
-                    output = await engine.stopRecording()
-                } else { output = try await engine.transcribeRecording(at: fixture.audioURL) }
-                let elapsed = BenchmarkStatistics.elapsedMilliseconds(from: start)
-                let after = try BenchmarkProcessResources.sample()
-                let error = try fixture.errorRate(hypothesis: output)
-                errors[variant] = error
-                try emit(["experiment": "native_vocabulary", "model": "nemotronMultilingual",
-                    "fixture": id, "variant": variant, "terms": terms, "iteration": iteration,
-                    "path": live ? "production_live" : "production_file", "preparation_ms": preparationMs,
-                    "native_weight": ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_NATIVE_VOCAB_WEIGHT"] ?? "1",
-                    "latency_ms": elapsed, "cpu_ms": after.cpuMilliseconds - before.cpuMilliseconds,
-                    "process_peak_rss_bytes": after.peakResidentBytes, "error_rate": error, "output": output,
-                    "audio_sha256": fixture.audioSHA256, "reference_sha256": fixture.referenceSHA256])
-                XCTAssertFalse(output.isEmpty)
-            }
-            for variant in ["genuine", "distractors", "short_cran", "short_ran", "nvidia", "cancellation", "cleared"] {
-                XCTAssertLessThanOrEqual(try XCTUnwrap(errors[variant]), try XCTUnwrap(errors["baseline"]),
-                                         "Vocabulary regression: \(id)/\(variant)")
-            }
+                var errors: [String: Double] = [:]
+                for (variant, terms) in [("baseline", [String]()), ("genuine", genuineTerms),
+                                         ("distractors", ["CRAN", "ran", "NVIDIA", "cancellation"]),
+                                         ("short_cran", ["CRAN"]), ("short_ran", ["ran"]),
+                                         ("nvidia", ["NVIDIA"]), ("cancellation", ["cancellation"]),
+                                         ("cleared", [String]())] {
+                    settings.transcriptPostProcessingMode = terms.isEmpty ? .none : .fluidAudioVocabulary
+                    settings.customVocabulary = terms
+                    let preparation = ContinuousClock.now
+                    try await engine.prepare()
+                    let preparationMs = BenchmarkStatistics.elapsedMilliseconds(from: preparation)
+                    let before = try BenchmarkProcessResources.sample()
+                    let start = ContinuousClock.now
+                    let output: String
+                    if live {
+                        try await engine.beginStreamingReplayForTesting()
+                        let reader = try RecoveryAudioReader(url: fixture.audioURL)
+                        while let chunk = try reader.nextSamples(maxSamples: 16_000) {
+                            try await engine.replayStreamingAudioForTesting(chunk)
+                        }
+                        output = await engine.stopRecording()
+                    } else { output = try await engine.transcribeRecording(at: fixture.audioURL) }
+                    let elapsed = BenchmarkStatistics.elapsedMilliseconds(from: start)
+                    let after = try BenchmarkProcessResources.sample()
+                    let error = try fixture.errorRate(hypothesis: output)
+                    errors[variant] = error
+                    try emit(["experiment": "native_vocabulary", "model": "nemotronMultilingual",
+                        "fixture": id, "variant": variant, "terms": terms, "iteration": iteration,
+                        "path": live ? "production_live" : "production_file", "preparation_ms": preparationMs,
+                        "native_weight": ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_NATIVE_VOCAB_WEIGHT"] ?? "1",
+                        "latency_ms": elapsed, "cpu_ms": after.cpuMilliseconds - before.cpuMilliseconds,
+                        "process_peak_rss_bytes": after.peakResidentBytes, "error_rate": error, "output": output,
+                        "audio_sha256": fixture.audioSHA256, "reference_sha256": fixture.referenceSHA256])
+                    XCTAssertFalse(output.isEmpty)
+                }
+                for variant in ["genuine", "distractors", "short_cran", "short_ran", "nvidia", "cancellation", "cleared"] {
+                    XCTAssertLessThanOrEqual(try XCTUnwrap(errors[variant]), try XCTUnwrap(errors["baseline"]),
+                                             "Vocabulary regression: \(id)/\(variant)")
+                }
             }
         }
         await engine.cancel()
