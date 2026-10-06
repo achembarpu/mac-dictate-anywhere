@@ -215,12 +215,6 @@ references, installed TDT models and shared WER. Select one model/fixture; no
 product audio/default changes. `PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS` narrows
 the selected transforms without changing the golden reference.
 
-The local Whistle collector is `scripts/evaluate_whistle.py`; its `--help`
-output describes the required local model assets and fixture filters.
-It skips files beyond the documented 30-second native API limit; it never scores a
-truncated prefix against a complete reference. Saved outputs use the existing
-`external-asr-quality` scorer, now emitting `ASR_SAVED_RESULT` JSON rows.
-
 `asr-file` also records CPU time across all process threads and cumulative process
 peak RSS. These include the XCTest/app harness; they are not isolated model memory
 or energy. Use separate model runs for memory comparisons. Start with a small

@@ -86,18 +86,6 @@ only; transforms are outside decode timers and product audio is unchanged.
 `PIPELINE_BENCHMARK_ACOUSTIC_VARIANTS=reference-pcm16,reference-gain4` selects only
 those variants, avoiding unnecessary gain sweeps on follow-up clips.
 
-`--only asr-candidates` screens the pinned SDK's Core ML Phonon-2 default against
-v3/Ultra using English goldens and the same shared scorer. Explicit downloads
-use the normal app cache; cached-only runs stay local. This group accepts a
-comma-separated `PIPELINE_BENCHMARK_FIXTURE` list to bound new-clip comparisons.
-Use `scripts/dev.sh benchmark --list` to discover the current candidate selector.
-
-`scripts/evaluate_qwen_asr.py` collects pinned local Qwen3-ASR 0.6B 4-bit/8-bit
-outputs for `external-asr-quality`, with asset/reference hashes, completion
-budget flags and CPU/MLX/RSS counters. It requires an isolated research runtime
-and performs no downloads. Use the pinned asset-integrity inputs described below
-and the collector's `--help` output for its required local runtime and options.
-
 The pending-audio workload shares the production preview predicate and 15-second
 preview bound. Its 60-second speech simulation requests 60 previews, including
 the initial 500 ms guess; it counts SDK overlap windows and the final flush too.
@@ -234,14 +222,7 @@ measurement iterations ([Apple documentation](https://developer.apple.com/docume
 XCTest memory metrics measure memory change during the block, not the app's
 high-water mark ([Apple documentation](https://developer.apple.com/documentation/xctest/xctmemorymetric)).
 
-## Bounded Whistle screens and process resources
-
-The local Whistle collector uses the existing `asr-file` and
-`external-asr-quality` groups with the shared golden inventory.
-`scripts/evaluate_whistle.py` selects local pinned assets and accepts repeated
-`--fixture ID` filters; it never starts a server or downloads weights. Skip
-unsupported languages and audio beyond the native 30-second limit explicitly.
-Use a single pass to screen candidates; repeat only useful finalists.
+## Process resources
 
 `ASR_FILE_RESULT` now includes per-request process CPU milliseconds and cumulative
 process peak RSS bytes. CPU time sums threads and can exceed wall time; it
@@ -260,14 +241,6 @@ directory outside the repo. Collector `--output` paths must follow the same rule
 Commit reusable collectors, independent golden references, licenses and input
 hashes, not generated measurements. Record revisions and configuration alongside
 local results. Project guides describe the current runtime and commands.
-
-Qwen and Moonshine collectors require explicit asset-integrity inputs. Supply
-`--model-metadata scripts/fixtures/qwen-asr-4bit-metadata.json` (or the 8-bit
-variant) to `scripts/evaluate_qwen_asr.py`, and
-`--model-catalog scripts/fixtures/moonshine-small-catalog.json` to
-`scripts/evaluate_moonshine.py`. These pinned upstream manifests are inputs,
-not benchmark output. Use each collector's `--help` for the required local model,
-fixture and output options; collectors do not download weights automatically.
 
 `--only s1-cpu` compares GGUF CPU KV precision. `--only s1-prepare`
 compares unloaded and prepared first requests using the installed GGUF model.
