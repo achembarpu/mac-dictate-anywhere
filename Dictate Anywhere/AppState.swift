@@ -370,6 +370,12 @@ final class AppState {
         rearmResolvedBlockingAttentionIssues()
     }
 
+    func updateAssemblyAIAPIKey(_ apiKey: String) {
+        settings.assemblyAIAPIKey = apiKey
+        // Entry and Clear may happen before the next view update or readiness check.
+        rearmResolvedBlockingAttentionIssues()
+    }
+
     private func rearmResolvedBlockingAttentionIssues() {
         if permissions.micGranted { presentedBlockingAttentionIssues.remove(.microphone) }
         if permissions.accessibilityGranted { presentedBlockingAttentionIssues.remove(.accessibility) }

@@ -186,12 +186,15 @@ struct ModelsView: View {
                 HStack(spacing: 8) {
                     DSTextField(
                         placeholder: "Paste AssemblyAI API key",
-                        text: $settings.assemblyAIAPIKey,
+                        text: Binding(
+                            get: { settings.assemblyAIAPIKey },
+                            set: { appState.updateAssemblyAIAPIKey($0) }
+                        ),
                         isSecure: true
                     )
                     .frame(width: 280)
                     if !settings.assemblyAIAPIKey.isEmpty {
-                        Button("Clear") { settings.assemblyAIAPIKey = "" }
+                        Button("Clear") { appState.updateAssemblyAIAPIKey("") }
                             .buttonStyle(.dsSecondary)
                     }
                 }

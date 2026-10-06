@@ -158,6 +158,57 @@ final class PermissionLifecycleTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testAssemblyAIKeyEditsRearmSetupWithoutPreparationOrActivation() async throws {
+        try XCTSkipUnless(
+            (ProcessInfo.processInfo.environment["ASSEMBLYAI_API_KEY"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            "Requires missing-key readiness without an environment override"
+        )
+        let settings = Settings.shared
+        let savedAPIKey = settings.assemblyAIAPIKey
+        defer { settings.assemblyAIAPIKey = savedAPIKey }
+        settings.assemblyAIAPIKey = ""
+        let permissions = Permissions(statusProvider: { (true, false) })
+        permissions.micGranted = true
+        let app = AppState(
+            permissions: permissions,
+            recoveryStore: DictationRecoveryStore(directory: directory),
+            contextCapture: { _ in nil }
+        )
+        let requests = MainWindowRequestCounter()
+        let observer = NotificationCenter.default.addObserver(
+            forName: .requestShowMainWindow, object: nil, queue: nil
+        ) { _ in
+            MainActor.assumeIsolated { requests.count += 1 }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        XCTAssertFalse(app.activeEngine.isReady)
+        await app.startDictation()
+        await app.startDictation()
+        XCTAssertEqual(requests.count, 1)
+
+        app.updateAssemblyAIAPIKey(" \n ")
+        XCTAssertFalse(app.activeEngine.isReady)
+        await app.startDictation()
+        XCTAssertEqual(requests.count, 1, "Whitespace must not rearm unresolved setup")
+
+        // Entry and Clear can occur consecutively, without preparation,
+        // activation, dictation, or a view update while the key is present.
+        app.updateAssemblyAIAPIKey("permission-lifecycle-test-key")
+        XCTAssertTrue(app.activeEngine.isReady)
+        XCTAssertFalse(app.attentionIssues.contains { $0.id == .speechSetup })
+        app.updateAssemblyAIAPIKey("")
+        XCTAssertFalse(app.activeEngine.isReady)
+        XCTAssertTrue(app.attentionIssues.contains { $0.id == .speechSetup })
+
+        await app.startDictation()
+        await app.startDictation()
+        XCTAssertEqual(requests.count, 2, "Cleared setup should request the window again")
+        XCTAssertEqual(app.status, .idle)
+        await app.shutdown()
+    }
+
     func testGrantedFirstPermissionDoesNotStartRecordingAfterHoldRelease() async {
         let permissionRequested = expectation(description: "microphone permission requested")
         let permissionResponse = SuspendedPermissionResponse {
