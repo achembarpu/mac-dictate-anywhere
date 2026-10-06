@@ -25,7 +25,7 @@ Commands:
           Build the Debug app with automatic signing
   launch  Build and launch the canonical Debug app
   test [OPTIONS]
-          Build and run the project tests
+          Build and run the Debug suite, then the disabled-tracing regression
   benchmark [OPTIONS]
           Run selected benchmarks and integration workloads
           Accepts --configuration Debug|Release and --release
@@ -262,14 +262,29 @@ run_tests() {
   [[ "${RUN_AUDIO_CAPTURE_SMOKE:-0}" != 1 ]] || \
     fail "Microphone checks require RUN_AUDIO_CAPTURE_SMOKE=1 scripts/dev.sh benchmark --only audio-hardware"
   printf 'Testing %s (%s)\n' "$SCHEME" "$CONFIGURATION"
-  rm -rf "$RESULT_BUNDLE_PATH"
-  set +e
-  xcodebuild "${xcodebuild_args[@]}" \
-    -resultBundlePath "$RESULT_BUNDLE_PATH" test
-  local test_status=$?
-  set -e
+  local disabled_trace_test='Dictate AnywhereTests/PerfTraceTests/testDisabledIntervalSkipsCountsAndMetadataAndNeverEnds'
+  local disabled_trace_result_bundle_path="${RESULT_BUNDLE_PATH%.xcresult}-PerfTraceDisabled.xcresult"
+  rm -rf "$RESULT_BUNDLE_PATH" "$disabled_trace_result_bundle_path"
+  # The tracing switch is cached at launch. Use separate test hosts to cover
+  # both paths without changing production tracing or rebuilding the tests.
+  run_test_pass 1 "$RESULT_BUNDLE_PATH" test "-skip-testing:$disabled_trace_test"
+  printf 'Testing disabled performance tracing\n'
+  run_test_pass 0 "$disabled_trace_result_bundle_path" test-without-building "-only-testing:$disabled_trace_test"
+}
+
+run_test_pass() {
+  local tracing_enabled="$1" result_bundle_path="$2" action="$3"
+  shift 3
+  local test_status=0
+  if TEST_RUNNER_DICTATE_ANYWHERE_PERF_TRACE="$tracing_enabled" \
+    xcodebuild "${xcodebuild_args[@]}" "$@" \
+      -resultBundlePath "$result_bundle_path" "$action"; then
+    :
+  else
+    test_status=$?
+  fi
   local report_status=0
-  if report_test_results; then
+  if report_test_results "$result_bundle_path"; then
     :
   else
     report_status=$?
@@ -337,14 +352,15 @@ run_benchmark() {
 }
 
 report_test_results() {
+  local result_bundle_path="$1"
   local summary
   local total passed skipped failed
-  [[ -d "$RESULT_BUNDLE_PATH" ]] || return 0
+  [[ -d "$result_bundle_path" ]] || return 0
   if ! command -v jq >/dev/null 2>&1; then
     printf 'Warning: jq is unavailable; skipping custom test result summary.\n' >&2
     return 0
   fi
-  if ! summary="$(xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE_PATH" --format json)"; then
+  if ! summary="$(xcrun xcresulttool get test-results summary --path "$result_bundle_path" --format json)"; then
     printf 'Warning: xcresulttool test-results summary is unavailable; skipping custom test result summary.\n' >&2
     return 0
   fi
@@ -352,7 +368,7 @@ report_test_results() {
      ! passed="$(jq -r '.passedTests // 0' <<<"$summary")" || \
      ! skipped="$(jq -r '.skippedTests // 0' <<<"$summary")" || \
      ! failed="$(jq -r '.failedTests // 0' <<<"$summary")"; then
-    printf 'Warning: could not parse test results from %s.\n' "$RESULT_BUNDLE_PATH" >&2
+    printf 'Warning: could not parse test results from %s.\n' "$result_bundle_path" >&2
     return 1
   fi
   printf 'Tests: total=%s passed=%s skipped=%s failed=%s\n' \

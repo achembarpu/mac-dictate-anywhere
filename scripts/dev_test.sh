@@ -41,6 +41,34 @@ printf '%s\n' "${TEST_RUNNER_PIPELINE_BENCHMARK_CLEANUP_MODEL:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_URL:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_LANGUAGES:-}" \
   "${TEST_RUNNER_PIPELINE_BENCHMARK_ASR_RESULTS_PATH:-}" > "$XCODEBUILD_RESEARCH_ENV_LOG"
+case "${!#}" in
+  test|test-without-building)
+    if [[ -n "${XCODEBUILD_TEST_HISTORY_DIR:-}" ]]; then
+      tracing="${TEST_RUNNER_DICTATE_ANYWHERE_PERF_TRACE:-unset}"
+      printf '%s|%s\n' "$tracing" "${!#}" >> "$XCODEBUILD_TEST_HISTORY_DIR/calls"
+      /bin/cp "$XCODEBUILD_ARGS_LOG" "$XCODEBUILD_TEST_HISTORY_DIR/$tracing.args"
+      previous=''
+      for argument in "$@"; do
+        [[ "$previous" != -resultBundlePath ]] || mkdir -p "$argument"
+        previous="$argument"
+      done
+    fi
+    if [[ "${!#}" == test-without-building ]]; then
+      exit "${MOCK_DISABLED_TEST_STATUS:-0}"
+    fi
+    exit "${MOCK_SUITE_TEST_STATUS:-0}"
+    ;;
+esac
+EOF
+cat > "$MOCK_BIN/xcrun" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${MOCK_INVALID_TEST_SUMMARY:-0}" == 1 ]]; then
+  printf 'invalid JSON\n'
+elif [[ "$*" == *DictateAnywhere-PerfTraceDisabled.xcresult* ]]; then
+  printf '{"passedTests":1,"skippedTests":0,"failedTests":0}\n'
+else
+  printf '{"passedTests":2,"skippedTests":0,"failedTests":0}\n'
+fi
 EOF
 cat > "$MOCK_BIN/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -62,7 +90,7 @@ cat > "$MOCK_BIN/open" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod +x "$MOCK_BIN/pgrep" "$MOCK_BIN/rm" "$MOCK_BIN/xcodebuild" "$MOCK_BIN/uname" "$MOCK_BIN/sysctl" "$MOCK_BIN/open"
+chmod +x "$MOCK_BIN/pgrep" "$MOCK_BIN/rm" "$MOCK_BIN/xcodebuild" "$MOCK_BIN/xcrun" "$MOCK_BIN/uname" "$MOCK_BIN/sysctl" "$MOCK_BIN/open"
 
 PATH="$MOCK_BIN:$PATH"
 export HOME="$TEST_HOME" PATH RM_LOG XCODEBUILD_ARGS_LOG="$TEST_ROOT/xcodebuild-args.log"
@@ -328,8 +356,61 @@ if [[ "$(<"$XCODEBUILD_ACOUSTIC_ENV_LOG")" != 'reference-pcm16,reference-gain4' 
   exit 1
 fi
 
+export XCODEBUILD_TEST_HISTORY_DIR="$TEST_ROOT/test-passes"
+mkdir -p "$XCODEBUILD_TEST_HISTORY_DIR"
+# An inherited tracing override must not disable either half of the coverage.
+TEST_RUNNER_DICTATE_ANYWHERE_PERF_TRACE=0 "$SCRIPT" test > "$TEST_ROOT/test-output.log" 2>&1
+if [[ "$(<"$XCODEBUILD_TEST_HISTORY_DIR/calls")" != $'1|test\n0|test-without-building' ]]; then
+  printf 'FAIL: tests did not run once per tracing mode using the built products\n' >&2
+  exit 1
+fi
+disabled_test='Dictate AnywhereTests/PerfTraceTests/testDisabledIntervalSkipsCountsAndMetadataAndNeverEnds'
+if ! /usr/bin/grep -Fxq -- "-skip-testing:$disabled_test" "$XCODEBUILD_TEST_HISTORY_DIR/1.args" || \
+   /usr/bin/grep -q '^-only-testing:' "$XCODEBUILD_TEST_HISTORY_DIR/1.args" || \
+   ! /usr/bin/grep -Fxq -- "-only-testing:$disabled_test" "$XCODEBUILD_TEST_HISTORY_DIR/0.args" || \
+   [[ "$(/usr/bin/grep -c '^-only-testing:' "$XCODEBUILD_TEST_HISTORY_DIR/0.args")" != 1 ]] || \
+   ! /usr/bin/grep -Fxq "${disabled_test#Dictate AnywhereTests/}" "$TEST_ROOT/test-inventory"; then
+  printf 'FAIL: the tracing passes omitted or duplicated regression coverage\n' >&2
+  exit 1
+fi
+if ! /usr/bin/grep -Fxq "$default_path/Logs/Test/DictateAnywhere.xcresult" "$XCODEBUILD_TEST_HISTORY_DIR/1.args" || \
+   ! /usr/bin/grep -Fxq "$default_path/Logs/Test/DictateAnywhere-PerfTraceDisabled.xcresult" "$XCODEBUILD_TEST_HISTORY_DIR/0.args"; then
+  printf 'FAIL: tracing passes did not retain separate results\n' >&2
+  exit 1
+fi
+if command -v jq >/dev/null 2>&1; then
+  if ! /usr/bin/grep -Fxq 'Tests: total=2 passed=2 skipped=0 failed=0' "$TEST_ROOT/test-output.log" || \
+     ! /usr/bin/grep -Fxq 'Tests: total=1 passed=1 skipped=0 failed=0' "$TEST_ROOT/test-output.log"; then
+    printf 'FAIL: tracing passes did not report separate summaries\n' >&2
+    exit 1
+  fi
+elif ! /usr/bin/grep -q 'jq is unavailable' "$TEST_ROOT/test-output.log"; then
+  printf 'FAIL: test reporting did not tolerate the missing optional jq tool\n' >&2
+  exit 1
+fi
+
+for scenario in suite-failure disabled-failure reporting-failure; do
+  /bin/rm -f "$XCODEBUILD_TEST_HISTORY_DIR/calls"
+  suite_status=0; disabled_status=0; invalid_summary=0; expected_status=0
+  expected_calls=$'1|test\n0|test-without-building'
+  case "$scenario" in
+    suite-failure) suite_status=65; invalid_summary=1; expected_status=65; expected_calls='1|test' ;;
+    disabled-failure) disabled_status=66; invalid_summary=1; expected_status=66 ;;
+    reporting-failure) invalid_summary=1 ;;
+  esac
+  actual_status=0
+  MOCK_SUITE_TEST_STATUS="$suite_status" MOCK_DISABLED_TEST_STATUS="$disabled_status" \
+    MOCK_INVALID_TEST_SUMMARY="$invalid_summary" "$SCRIPT" test > "$TEST_ROOT/$scenario.log" 2>&1 || actual_status=$?
+  if [[ "$actual_status" != "$expected_status" || \
+        "$(<"$XCODEBUILD_TEST_HISTORY_DIR/calls")" != "$expected_calls" ]]; then
+    printf 'FAIL: %s lost the Xcode status or ran an invalid follow-up pass\n' "$scenario" >&2
+    exit 1
+  fi
+done
+
 printf 'Development script clean safety tests passed.\n'
 printf 'Benchmark discovery, focused/combined/explicit-all selection, signing and invalid-input tests passed.\n'
 printf 'Golden speech benchmark forwarding tests passed.\n'
 printf 'Candidate benchmark forwarding tests passed.\n'
 printf 'Optional browser/provider/microphone selection and forwarding tests passed.\n'
+printf 'Tracing mode coverage, separate results and failure propagation tests passed.\n'

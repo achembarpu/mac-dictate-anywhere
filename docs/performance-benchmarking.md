@@ -31,6 +31,14 @@ After configuring ignored Team ID signing, run `scripts/dev.sh build` and
 command selection, signing and environment forwarding without invoking Xcode;
 the Python collector checks live in `scripts/tests/`.
 
+The test command explicitly enables performance tracing for the ordinary suite,
+excluding the disabled-only regression. After that suite passes, it runs the
+disabled regression in a second test host with tracing off, reusing the built
+tests. Both modes are covered without environment-dependent skips. Each pass
+prints its own summary; results are saved in `DictateAnywhere.xcresult` and
+`DictateAnywhere-PerfTraceDisabled.xcresult`. A failure in either pass fails the
+command.
+
 Keep regression tests that detect a distinct user-visible failure or external
 contract violation. Assert consumer outcomes with independent references; avoid
 copied implementation formulas, constant/enum assertions and screenshots without
