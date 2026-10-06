@@ -341,7 +341,10 @@ final class AppState {
     func resolveAttentionIssue(_ id: AttentionIssue.ID) {
         switch id {
         case .microphone:
-            Task { await permissions.resolve(.microphone) }
+            Task {
+                await permissions.resolve(.microphone)
+                rearmResolvedBlockingAttentionIssues()
+            }
         case .accessibility:
             Task { await permissions.resolve(.accessibility) }
         case .speechSetup:
@@ -364,7 +367,15 @@ final class AppState {
 
     func refreshPermissionsAfterActivation() async {
         await permissions.refresh()
-        presentedBlockingAttentionIssues.formIntersection(attentionIssues.map(\.id))
+        rearmResolvedBlockingAttentionIssues()
+    }
+
+    private func rearmResolvedBlockingAttentionIssues() {
+        if permissions.micGranted { presentedBlockingAttentionIssues.remove(.microphone) }
+        if permissions.accessibilityGranted { presentedBlockingAttentionIssues.remove(.accessibility) }
+        // Preparation temporarily hides setup warnings. Only actual readiness
+        // resolves the blocker; a failed retry must not request another window.
+        if activeEngine.isReady { presentedBlockingAttentionIssues.remove(.speechSetup) }
     }
 
     private func presentBlockingAttentionIssueOnce(_ id: AttentionIssue.ID) {
@@ -542,6 +553,7 @@ final class AppState {
     }
 
     private func handleAccessibilityPermissionChanged(_ granted: Bool) {
+        rearmResolvedBlockingAttentionIssues()
         updateAccessibilityIntegration(granted: granted, promptIfNeeded: false)
     }
 
@@ -564,6 +576,7 @@ final class AppState {
     // MARK: - Engine Lifecycle
 
     func prepareActiveEngine(prewarmModel: Bool = true) async {
+        defer { rearmResolvedBlockingAttentionIssues() }
         while let inFlight = enginePreparation {
             await inFlight.task.value
             if enginePreparation?.id == inFlight.id {
@@ -1012,6 +1025,7 @@ final class AppState {
             guard !isShuttingDown, status == .idle, !isTransitioning else { return }
             if mode == .holdToRecord && !isHoldToRecordKeyDown { return }
         }
+        rearmResolvedBlockingAttentionIssues()
         if !permissions.micGranted {
             let granted: Bool
             if let microphonePermissionRequester {
@@ -1026,6 +1040,7 @@ final class AppState {
             }
 
             permissions.micGranted = true
+            rearmResolvedBlockingAttentionIssues()
             return // The permission gesture must never become a recording gesture.
         }
         guard !isShuttingDown else { return }
@@ -1228,6 +1243,7 @@ final class AppState {
         guard !isShuttingDown else { return }
         guard didStart else {
             await permissions.refreshForDictation()
+            guard !isShuttingDown, activeRecordingStartupID == recordingStartupID else { return }
             if !permissions.micGranted {
                 presentBlockingAttentionIssueOnce(.microphone)
             }
@@ -1785,6 +1801,7 @@ final class AppState {
             await permissions.refreshForDictation()
             guard !isShuttingDown, status == .idle, !isTransitioning else { return }
         }
+        rearmResolvedBlockingAttentionIssues()
         let trace = PerfTrace.begin("recovery.continue")
         defer { trace.end() }
         isTransitioning = true
@@ -1794,6 +1811,7 @@ final class AppState {
             if let microphonePermissionRequester { granted = await microphonePermissionRequester() }
             else { granted = await permissions.requestMic() }
             permissions.micGranted = granted
+            rearmResolvedBlockingAttentionIssues()
             recoveryStore.errorMessage = granted
                 ? "Microphone access is ready. Click Continue to resume your saved session."
                 : "Microphone access is required to continue. Your saved session is still available."
