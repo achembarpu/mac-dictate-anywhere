@@ -34,7 +34,7 @@ struct GoldenSpeechFixture: Decodable {
 
     func supports(_ model: ParakeetModelChoice) -> Bool {
         switch model {
-        case .multilingual, .multilingualUltra: return ["en", "nl", "de"].contains(language)
+        case .multilingual, .multilingualUltra: return ["en", "nl", "de", "el", "ru"].contains(language)
         case .nemotronMultilingual: return true
         case .senseVoice: return ["en", "zh", "zh-en"].contains(language)
         case .englishOnly, .compactEnglish, .parakeetEou320, .nemotron560, .nemotron1120, .nemotron2240:

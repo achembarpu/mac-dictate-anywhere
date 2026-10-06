@@ -8,7 +8,7 @@ final class GoldenSpeechFixtureTests: XCTestCase {
         let fixtures = try GoldenSpeechFixture.all()
         XCTAssertGreaterThanOrEqual(fixtures.count, 14)
         XCTAssertEqual(Set(fixtures.map(\.id)).count, fixtures.count)
-        XCTAssertEqual(Set(fixtures.map(\.language)), ["en", "zh", "nl", "de", "zh-en"])
+        XCTAssertEqual(Set(fixtures.map(\.language)), ["en", "zh", "nl", "de", "zh-en", "el", "ru"])
         for fixture in fixtures {
             let audio = try fixture.audioURL
             let reference = try GoldenSpeechFixture.resource(fixture.reference)

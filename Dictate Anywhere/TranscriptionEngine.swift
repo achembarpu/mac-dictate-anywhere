@@ -466,6 +466,7 @@ final class ParakeetEngine: TranscriptionEngine {
     private var recordingScriptLanguage: Language?
     #if DEBUG || PIPELINE_BENCHMARK
     var usesScriptFilterForTesting = true
+    var scriptLanguageOverrideForTesting: Language?
     #endif
     private var isTranscribing = false
     private var isRecordingActive = false
@@ -883,6 +884,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
     private func scriptLanguage(for model: ParakeetModelChoice) -> Language? {
         #if DEBUG || PIPELINE_BENCHMARK
+        if let scriptLanguageOverrideForTesting { return scriptLanguageOverrideForTesting }
         guard usesScriptFilterForTesting else { return nil }
         #endif
         return BatchTranscriptionPolicy.scriptLanguage(for: model, selected: Settings.shared.selectedLanguage)

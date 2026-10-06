@@ -10,8 +10,8 @@ final class BatchTranscriptionPolicyTests: XCTestCase {
                 XCTAssertEqual(language, .polish)
             } else { XCTAssertNil(language, model.rawValue) }
         }
-        XCTAssertEqual(BatchTranscriptionPolicy.scriptLanguage(for: .multilingual, selected: .greek), .greek)
-        XCTAssertEqual(BatchTranscriptionPolicy.scriptLanguage(for: .multilingualUltra, selected: .russian), .russian)
+        XCTAssertNil(BatchTranscriptionPolicy.scriptLanguage(for: .multilingual, selected: .greek))
+        XCTAssertNil(BatchTranscriptionPolicy.scriptLanguage(for: .multilingualUltra, selected: .russian))
         XCTAssertNil(BatchTranscriptionPolicy.scriptLanguage(for: .multilingual, selected: .norwegian))
         XCTAssertNil(BatchTranscriptionPolicy.scriptLanguage(for: .multilingual, selected: .chinese))
     }

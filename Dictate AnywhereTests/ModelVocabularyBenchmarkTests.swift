@@ -51,6 +51,7 @@ final class ModelVocabularyBenchmarkTests: XCTestCase {
                     var errors: [Bool: Double] = [:]
                     for filtered in iteration.isMultiple(of: 2) ? [false, true] : [true, false] {
                         engine.usesScriptFilterForTesting = filtered
+                        engine.scriptLanguageOverrideForTesting = filtered ? Language(rawValue: fixture.language) : nil
                         let before = try BenchmarkProcessResources.sample()
                         let start = ContinuousClock.now
                         let output: String
@@ -68,6 +69,9 @@ final class ModelVocabularyBenchmarkTests: XCTestCase {
                         try emit(["experiment": "script", "model": model.rawValue,
                             "fixture": fixture.id, "language": fixture.language,
                             "filtered": filtered, "iteration": iteration,
+                            "shipped_hint": BatchTranscriptionPolicy.scriptLanguage(for: model, selected: settings.selectedLanguage) != nil,
+                            "latin_names": latinNames(in: try fixture.referenceText),
+                            "preserved_latin_names": latinNames(in: try fixture.referenceText).filter { output.localizedCaseInsensitiveContains($0) },
                             "path": live ? "production_live" : "production_file",
                             "latency_ms": elapsed, "cpu_ms": after.cpuMilliseconds - before.cpuMilliseconds,
                             "process_peak_rss_bytes": after.peakResidentBytes,
@@ -76,8 +80,10 @@ final class ModelVocabularyBenchmarkTests: XCTestCase {
                         XCTAssertFalse(output.isEmpty)
                         ran += 1
                     }
-                    XCTAssertLessThanOrEqual(try XCTUnwrap(errors[true]), try XCTUnwrap(errors[false]),
-                                             "Script hint regressed \(model.rawValue)/\(fixture.id)")
+                    if BatchTranscriptionPolicy.scriptLanguage(for: model, selected: settings.selectedLanguage) != nil {
+                        XCTAssertLessThanOrEqual(try XCTUnwrap(errors[true]), try XCTUnwrap(errors[false]),
+                                                 "Shipped script hint regressed \(model.rawValue)/\(fixture.id)")
+                    }
                 }
             }
         }
@@ -86,10 +92,16 @@ final class ModelVocabularyBenchmarkTests: XCTestCase {
     }
 
     #if PIPELINE_BENCHMARK
+    private func latinNames(in reference: String) -> [String] {
+        reference.split(whereSeparator: { !$0.isLetter }).map(String.init).filter {
+            $0.count >= 3 && $0.unicodeScalars.allSatisfy { $0.isASCII } && reference.contains(where: { !$0.isASCII && $0.isLetter })
+        }
+    }
+
     private func selectedFixtures() throws -> [GoldenSpeechFixture] {
         let all = try GoldenSpeechFixture.all()
         guard let selection = ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_FIXTURE"] else {
-            return all.filter { !$0.tags.contains("derived-control") && ["en", "nl", "de"].contains($0.language) }
+            return all.filter { !$0.tags.contains("derived-control") && ["en", "nl", "de", "el", "ru"].contains($0.language) }
         }
         let ids = selection.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
         guard Set(ids).count == ids.count else { throw NSError(domain: "BenchmarkFixture", code: 1) }

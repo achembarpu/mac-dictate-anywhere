@@ -134,3 +134,7 @@ and pass the SDK script hint through previews, final windows and vocabulary
 decoding. Recovery files use the requested language for the whole file. This
 filters alphabet confusion; it does not constrain vocabulary within a script.
 Languages absent from the SDK mapping retain automatic decoding.
+
+Cyrillic and Greek TDT dictation retains automatic script decoding: the SDK's
+strict filters exclude Latin names. The language benchmark reports preserved
+Latin names alongside WER so this loss cannot hide behind an unchanged score.

@@ -20,6 +20,10 @@ nonisolated enum BatchTranscriptionPolicy {
     /// The selected language constrains script, not vocabulary or language detection.
     static func scriptLanguage(for model: ParakeetModelChoice, selected: SupportedLanguage) -> Language? {
         guard model == .multilingual || model == .multilingualUltra else { return nil }
+        // SDK Cyrillic/Greek filters reject Latin names. Russian goldens lose
+        // "NextGen" even when aggregate WER is unchanged. Keep automatic
+        // decoding for these scripts until the SDK can allow foreign names.
+        guard selected != .russian, selected != .greek else { return nil }
         return Language(rawValue: selected.rawValue)
     }
 

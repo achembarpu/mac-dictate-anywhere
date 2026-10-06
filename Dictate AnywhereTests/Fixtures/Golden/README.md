@@ -1,6 +1,6 @@
 # Human speech golden references
 
-These 23 audio/reference pairs are test resources, also available to
+These 27 audio/reference pairs are test resources, also available to
 `scripts/dev.sh benchmark`. No speech model generated or corrected the references.
 The manifest records language, metric, sample count, pinned source, source IDs,
 transformations, and SHA-256 hashes. Ordinary tests validate every pair without
@@ -226,3 +226,5 @@ peak RSS. These include the XCTest/app harness; they are not isolated model memo
 or energy. Use separate model runs for memory comparisons. Start with a small
 fixture/model screen and advance only useful candidates. Store outputs and evaluations outside the repo; do not rerun a rejected
 configuration without a new question to resolve.
+
+Four Greek/Russian FLEURS test recordings cover native scripts and Latin proper names. `scripts/extract_fleurs_script_goldens.py` preserves the original PCM and human references; the pinned source revision and archive/TSV hashes are in `fleurs-script-source-provenance.json`. FLEURS is CC BY 4.0 (see the existing FLEURS license).

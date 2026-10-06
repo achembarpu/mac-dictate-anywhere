@@ -435,5 +435,77 @@
     ],
     "audioSHA256": "4ecaafb47f2e77be241a0a779df832d359097f22d165515d230ea3ad0c5b7af3",
     "referenceSHA256": "aaab52106fa7f63ab4e29230646c99b4c03a01406138d33ab65000ace80ae297"
+  },
+  {
+    "id": "golden-ru-fleurs-1",
+    "language": "ru",
+    "metric": "wer",
+    "audio": "golden-ru-fleurs-1.wav",
+    "reference": "golden-ru-fleurs-1.txt",
+    "sampleCount": 113280,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+    "sourceId": "ru_ru/test/1799/13632175593719991398.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "script-filter",
+      "native-script"
+    ],
+    "audioSHA256": "c7c32932e2e718aca0a81aacf731072314079bf3109c3727462c8054ef6ffa69",
+    "referenceSHA256": "8843d9a36766ee55e0c86b4be3d0d345273fdc38d28cf6b2ddeea1784989be3c"
+  },
+  {
+    "id": "golden-ru-fleurs-2",
+    "language": "ru",
+    "metric": "wer",
+    "audio": "golden-ru-fleurs-2.wav",
+    "reference": "golden-ru-fleurs-2.txt",
+    "sampleCount": 252480,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+    "sourceId": "ru_ru/test/1862/9567027620605262154.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "script-filter",
+      "latin-name"
+    ],
+    "audioSHA256": "9763dc4600d4552752ccf604298245e55fcb812ffb7b3c696e777438f72ae9e2",
+    "referenceSHA256": "c346e0e4d4fa84e0a1b2e973c6baac7ed33065658e290105723dadd31b8d5f77"
+  },
+  {
+    "id": "golden-el-fleurs-1",
+    "language": "el",
+    "metric": "wer",
+    "audio": "golden-el-fleurs-1.wav",
+    "reference": "golden-el-fleurs-1.txt",
+    "sampleCount": 206400,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+    "sourceId": "el_gr/test/2000/11461912508659872190.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "script-filter",
+      "native-script"
+    ],
+    "audioSHA256": "702d005121d36849dad1524470aa358eb8822f68a8168881ac929a0736bb0a87",
+    "referenceSHA256": "fd111e40802ef11a882f84ecc756ae88bb3f9bf22bcfc045a21f62c66463468f"
+  },
+  {
+    "id": "golden-el-fleurs-2",
+    "language": "el",
+    "metric": "wer",
+    "audio": "golden-el-fleurs-2.wav",
+    "reference": "golden-el-fleurs-2.txt",
+    "sampleCount": 126720,
+    "source": "https://huggingface.co/datasets/google/fleurs/tree/70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+    "sourceId": "el_gr/test/1897/11442026067900733565.wav",
+    "tags": [
+      "human",
+      "read-speech",
+      "script-filter",
+      "latin-name"
+    ],
+    "audioSHA256": "864ab0670a2a63a3ef615d8f269be6e31f405d75334f8f56a43cf56f80d406c2",
+    "referenceSHA256": "7e00806271d0aacc47268f1651dbc77b0aff9d7a628167c563f2f63b269301af"
   }
 ]
