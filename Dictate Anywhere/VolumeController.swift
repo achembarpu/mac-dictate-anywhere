@@ -14,6 +14,31 @@ final class VolumeController {
     private var savedOutputMuteState: OutputMuteState?
     private var savedInputVolume: InputVolumeState?
 
+    var hasOutputStateToRestore: Bool {
+        savedOutputMuteState != nil
+    }
+
+    /// Wait only when recording actually changed output mute state. A route
+    /// that was bypassed or already muted needs no playback settle delay.
+    func restoreAfterRecordingWithSettle() async {
+        if savedOutputMuteState?.didMuteForRecording == true {
+            let trace = PerfTrace.begin("audio.restoreSettle")
+            try? await Task.sleep(for: .milliseconds(200))
+            trace.end(outcome: Task.isCancelled ? "cancelled" : "completed")
+        }
+        restoreAfterRecording()
+    }
+
+    #if DEBUG
+    func installOutputMuteStateForTesting(didMuteForRecording: Bool) {
+        // Device 0 is invalid, so restoration tests never alter host audio.
+        savedOutputMuteState = OutputMuteState(
+            deviceID: 0, deviceUID: nil, element: kAudioObjectPropertyElementMain,
+            wasMuted: !didMuteForRecording, didMuteForRecording: didMuteForRecording
+        )
+    }
+    #endif
+
     deinit {
         restoreMicrophoneVolume()
         restoreAfterRecording()

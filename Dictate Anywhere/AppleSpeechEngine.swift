@@ -67,7 +67,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
         stateLock.withLock { transcript }
     }
     var audioSamples: [Float] {
-        stateLock.withLock { levelSampleBuffer }
+        stateLock.withLock { levelSampleBuffer.samples }
     }
 
     private let stateLock = NSLock()
@@ -75,7 +75,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
     /// One-shot guard for the `stt.firstPartial` trace event. Guarded by
     /// `stateLock` because live transcript callbacks arrive off the main actor.
     private var firstPartialEmitted = false
-    private var levelSampleBuffer: [Float] = []
+    private var levelSampleBuffer = AudioLevelSampleBuffer()
     private var audioCaptureController: AudioCaptureController?
     var recoveryCapture: RecoveryAudioCapture?
     private var preparedSession: (any AppleSpeechSessionProtocol)?
@@ -83,7 +83,6 @@ final class AppleSpeechEngine: TranscriptionEngine {
     private var preparedLanguage: SupportedLanguage?
     private var preparedVocabulary: [String] = []
     private var sessionContextualVocabulary: [String] = []
-    private let levelSampleCap = 160_000
     private let audioCaptureStartupTimeout: TimeInterval = 5
     private let audioCaptureSetupQueue = DispatchQueue(
         label: "com.dictate-anywhere.apple-speech-audio-startup",
@@ -98,7 +97,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
 
     func levelSamples(count: Int) -> [Float] {
         stateLock.withLock {
-            Array(levelSampleBuffer.suffix(max(0, count)))
+            levelSampleBuffer.latest(count: count)
         }
     }
 
@@ -187,7 +186,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
         stateLock.withLock {
             transcript = ""
             firstPartialEmitted = false
-            levelSampleBuffer.removeAll(keepingCapacity: true)
+            levelSampleBuffer.reset(keepingCapacity: true)
         }
         let usesExplicitMicrophoneSelection = Settings.shared.selectedMicrophoneUID != nil
 
@@ -277,7 +276,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
         setTranscript("")
         stateLock.withLock {
             firstPartialEmitted = false
-            levelSampleBuffer.removeAll(keepingCapacity: false)
+            levelSampleBuffer.reset(keepingCapacity: false)
         }
     }
 
@@ -352,10 +351,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
 
     private func appendLevelSamples(_ samples: [Float]) {
         stateLock.withLock {
-            levelSampleBuffer.append(contentsOf: samples)
-            if levelSampleBuffer.count > levelSampleCap {
-                levelSampleBuffer.removeFirst(levelSampleBuffer.count - levelSampleCap)
-            }
+            levelSampleBuffer.append(samples)
         }
     }
 

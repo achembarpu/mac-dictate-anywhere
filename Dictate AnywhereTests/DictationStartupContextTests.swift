@@ -149,7 +149,8 @@ final class DictationStartupContextTests: XCTestCase {
             recoveryStore: DictationRecoveryStore(directory: directory),
             engine: engine,
             inputSourceID: { "startup-profile-test" },
-            profileModelAvailable: { _ in true }
+            profileModelAvailable: { _ in true },
+            appleSpeechAssetSnapshot: { ([], []) }
         )
 
         app.start()
@@ -269,7 +270,87 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testSameLengthLiveCorrectionReachesDisplayedTranscript() async {
+        let engine = StartupContextEngine()
+        let app = app(engine: engine, capture: { _ in nil })
+        await app.startDictation()
+        engine.currentTranscript = "cats"
+        await waitForTranscript("cats", in: app)
+        engine.currentTranscript = "dogs"
+        await waitForTranscript("dogs", in: app)
+        XCTAssertEqual(app.currentTranscript, "dogs")
+        await app.cancelDictation()
+        await app.shutdown()
+    }
+
+    private func waitForTranscript(_ text: String, in app: AppState) async {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while app.currentTranscript != text, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(app.currentTranscript, text)
+    }
+
     #if DEBUG
+    func testEveryFinishPathRestoresSavedOutputRegardlessOfCurrentSetting() async throws {
+        try XCTSkipUnless(PerfTrace.isEnabled, "Requires enabled trace emission")
+        for flow in ["success", "empty", "failure", "cancel"] {
+            for didMute in [false, true] {
+                let events = TraceCompletions()
+                PerfTrace.onIntervalCompleted = { name, _, metadata in
+                    events.record(name: name, metadata: metadata)
+                }
+                let engine = StartupContextEngine()
+                engine.finalTranscript = flow == "empty" ? "" : "Recorded words."
+                engine.lastTranscriptionError = flow == "failure" ? "Recognition failed" : nil
+                let app = app(engine: engine, capture: { _ in nil })
+                Settings.shared.muteSystemAudioDuringRecordingEnabled = false
+                await app.startDictation()
+                app.volumeController.installOutputMuteStateForTesting(didMuteForRecording: didMute)
+                if flow == "cancel" {
+                    await app.cancelDictation()
+                } else {
+                    await app.stopDictation()
+                }
+                XCTAssertEqual(app.status, .idle, flow)
+                XCTAssertFalse(app.volumeController.hasOutputStateToRestore, flow)
+                XCTAssertEqual(
+                    events.names.filter { $0 == "audio.restoreSettle" }.count,
+                    didMute ? 1 : 0, flow
+                )
+                XCTAssertEqual(events.names.filter { $0 == "audio.systemRestore" }.count, 1, flow)
+                await app.shutdown()
+                PerfTrace.onIntervalCompleted = nil
+            }
+        }
+    }
+
+    func testEveryFinishPathSkipsSettleWhenNoOutputStateWasSaved() async throws {
+        try XCTSkipUnless(PerfTrace.isEnabled, "Requires enabled trace emission")
+        for flow in ["success", "empty", "failure", "cancel"] {
+            let events = TraceCompletions()
+            PerfTrace.onIntervalCompleted = { name, _, metadata in
+                events.record(name: name, metadata: metadata)
+            }
+            let engine = StartupContextEngine()
+            engine.finalTranscript = flow == "empty" ? "" : "Recorded words."
+            engine.lastTranscriptionError = flow == "failure" ? "Recognition failed" : nil
+            let app = app(engine: engine, capture: { _ in nil })
+            Settings.shared.muteSystemAudioDuringRecordingEnabled = false
+            await app.startDictation()
+            Settings.shared.muteSystemAudioDuringRecordingEnabled = true
+            if flow == "cancel" {
+                await app.cancelDictation()
+            } else {
+                await app.stopDictation()
+            }
+            XCTAssertEqual(app.status, .idle, flow)
+            XCTAssertFalse(events.names.contains("audio.restoreSettle"), flow)
+            await app.shutdown()
+            PerfTrace.onIntervalCompleted = nil
+        }
+    }
+
     func testAssemblyAISessionUsesCloudLanguageWhenLocalLanguageDiffers() async throws {
         try XCTSkipUnless(PerfTrace.isEnabled, "Requires enabled trace emission")
         let events = TraceCompletions()
@@ -427,6 +508,7 @@ private final class StartupContextEngine: TranscriptionEngine {
     var onPrepare: (() -> Void)?
     var onPrepareAsync: (() async -> Void)?
     var finalTranscript = "Recorded words."
+    var lastTranscriptionError: String?
     var onCaptureStopped: (() -> Void)?
 
     func levelSamples(count: Int) -> [Float] { [] }

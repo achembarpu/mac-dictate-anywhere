@@ -86,7 +86,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
     var recoveryCapture: RecoveryAudioCapture?
     var isReady: Bool { !Settings.shared.resolvedAssemblyAIAPIKey.isEmpty }
     var currentTranscript: String { stateLock.withLock { transcript } }
-    var audioSamples: [Float] { stateLock.withLock { levelSampleBuffer } }
+    var audioSamples: [Float] { stateLock.withLock { levelSampleBuffer.samples } }
     private(set) var lastTranscriptionError: String?
     private(set) var lastInsertionPlan: ModelInsertionPlan?
     private(set) var lastResultWasPolished = false
@@ -98,7 +98,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
     /// `stateLock` because live preview callbacks arrive off the main actor.
     private var firstPartialEmitted = false
     private var fullRecordingSamples: [Float] = []
-    private var levelSampleBuffer: [Float] = []
+    private var levelSampleBuffer = AudioLevelSampleBuffer()
     private var recordingExceededLimit = false
     private var audioCaptureController: AudioCaptureController?
     private var audioCaptureStartupCancellation: AudioCaptureStartupCancellation?
@@ -117,7 +117,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
     )
 
     func levelSamples(count: Int) -> [Float] {
-        stateLock.withLock { Array(levelSampleBuffer.suffix(max(0, count))) }
+        stateLock.withLock { levelSampleBuffer.latest(count: count) }
     }
 
     func setSessionContextualVocabulary(_ terms: [String]) {
@@ -158,7 +158,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
             transcript = ""
             firstPartialEmitted = false
             fullRecordingSamples.removeAll(keepingCapacity: true)
-            levelSampleBuffer.removeAll(keepingCapacity: true)
+            levelSampleBuffer.reset(keepingCapacity: true)
             recordingExceededLimit = false
         }
 
@@ -211,12 +211,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
                     recoveryCapture?.append(samples)
                     previewSession?.append(samples: samples)
                     self.stateLock.withLock {
-                        self.levelSampleBuffer.append(contentsOf: samples)
-                        if self.levelSampleBuffer.count > Self.sampleRate * 10 {
-                            self.levelSampleBuffer.removeFirst(
-                                self.levelSampleBuffer.count - Self.sampleRate * 10
-                            )
-                        }
+                        self.levelSampleBuffer.append(samples)
                         let remaining = Self.maximumSamples - self.fullRecordingSamples.count
                         if remaining > 0 {
                             self.fullRecordingSamples.append(contentsOf: samples.prefix(remaining))
@@ -309,7 +304,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
         stateLock.withLock {
             transcript = ""
             fullRecordingSamples.removeAll(keepingCapacity: false)
-            levelSampleBuffer.removeAll(keepingCapacity: false)
+            levelSampleBuffer.reset(keepingCapacity: false)
             recordingExceededLimit = false
         }
     }

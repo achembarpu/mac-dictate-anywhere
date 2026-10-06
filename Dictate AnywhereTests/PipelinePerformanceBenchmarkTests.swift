@@ -35,19 +35,10 @@ final class PipelinePerformanceBenchmarkTests: XCTestCase {
         let startedAt = ContinuousClock.now
 
         for _ in 0..<updateCount {
-            #if PIPELINE_CHILD_BENCHMARK
             monitor.update(samples: sampleWindow[...])
-            #else
-            monitor.update(samples: sampleWindow)
-            #endif
-            #if PIPELINE_CHILD_BENCHMARK
             let shouldDisplay = AudioMonitor.hasMeaningfulLevelChange(
                 from: lastDisplayedLevel, to: monitor.smoothedLevel
             )
-            #else
-            let shouldDisplay = lastDisplayedLevel == nil
-                || abs(monitor.smoothedLevel - (lastDisplayedLevel ?? 0)) >= 0.01
-            #endif
             if shouldDisplay {
                 meaningfulUpdateCount += 1
                 lastDisplayedLevel = monitor.smoothedLevel

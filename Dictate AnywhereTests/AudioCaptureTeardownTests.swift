@@ -3,6 +3,56 @@ import XCTest
 
 #if DEBUG
 final class AudioCaptureTeardownTests: XCTestCase {
+    func testUnusedAndExpiredRestartGatesDoNotDelayCapture() {
+        let gate = AudioCaptureRestartGate()
+        let stoppedAt = ContinuousClock.now
+        XCTAssertEqual(gate.remaining(at: stoppedAt), .zero)
+        gate.recordStop(at: stoppedAt)
+        XCTAssertEqual(gate.remaining(at: stoppedAt + .seconds(1)), .zero)
+    }
+
+    func testLaterStopExtendsRestartDeadlineAndEarlierReportsCannotShortenIt() {
+        let gate = AudioCaptureRestartGate()
+        let firstStop = ContinuousClock.now
+        let secondStop = firstStop + .milliseconds(70)
+        gate.recordStop(at: firstStop)
+        gate.recordStop(at: secondStop)
+        gate.recordStop(at: firstStop)
+        XCTAssertEqual(gate.remaining(at: firstStop + .milliseconds(120)), .milliseconds(70))
+    }
+
+    func testAudioRestartSettleWaitsOnlyForRemainingGap() {
+        let stoppedAt = ContinuousClock.now
+        let gate = AudioCaptureRestartGate()
+        gate.recordStop(at: stoppedAt)
+        XCTAssertEqual(gate.remaining(at: stoppedAt), .milliseconds(120))
+        XCTAssertEqual(
+            gate.remaining(at: stoppedAt + .milliseconds(70)),
+            .milliseconds(50)
+        )
+        XCTAssertEqual(
+            gate.remaining(at: stoppedAt + .milliseconds(120)),
+            .zero
+        )
+    }
+
+    func testParakeetCaptureStopDoesNotWaitForNextStart() async {
+        let settleDurations = TeardownDurations()
+        PerfTrace.onIntervalCompleted = { name, milliseconds, _ in
+            if name == "audio.settle" { settleDurations.append(milliseconds) }
+        }
+        defer { PerfTrace.onIntervalCompleted = nil }
+
+        let engine = ParakeetEngine()
+        let controller = DelayedStopController()
+        engine.installAudioCaptureControllerForTesting(controller)
+        await engine.stopAudioCapture()
+
+        XCTAssertEqual(controller.stopCount, 1)
+        XCTAssertTrue(settleDurations.values.isEmpty)
+        await engine.cancel()
+    }
+
     func testParakeetFirstCaptureStopIncludesControllerShutdown() async {
         await assertFirstStopIncludesShutdown { controller in
             let engine = ParakeetEngine()

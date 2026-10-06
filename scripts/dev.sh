@@ -230,7 +230,8 @@ run_tests() {
   printf 'Testing %s (%s)\n' "$SCHEME" "$CONFIGURATION"
   rm -rf "$RESULT_BUNDLE_PATH"
   set +e
-  xcodebuild "${xcodebuild_args[@]}" \
+  env TEST_RUNNER_RUN_AUDIO_CAPTURE_SMOKE="${RUN_AUDIO_CAPTURE_SMOKE:-0}" \
+    xcodebuild "${xcodebuild_args[@]}" \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK_OPTIMIZED" \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
   local test_status=$?

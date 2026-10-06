@@ -1,5 +1,16 @@
 # Performance benchmarking
 
+## Audio capture hardware check
+
+After configuring local Team ID signing, run `RUN_AUDIO_CAPTURE_SMOKE=1 scripts/dev.sh test`
+to include three rapid microphone stop/restart cycles. This check uses real
+capture controllers and different setup queues through the shared restart gate.
+It counts callbacks and discards audio samples. It requires microphone permission
+already granted to the Debug app and skips without prompting when permission is
+unavailable. Normal test runs skip this hardware check. Full dictation checks on
+speaker and Bluetooth/headphone routes remain useful for output restoration and
+recognizer-level engine switching.
+
 Run the repeatable benchmark suite from the repository root:
 
 ```sh
@@ -21,6 +32,12 @@ harness with `-O`. Synthetic test-loop timings still exclude full app rendering
 and are not production absolute timings.
 
 The command runs the following deterministic or opt-in scenarios:
+
+The pending-audio workload shares the production preview interval, delta
+predicate, commit threshold, and chunk size. Its 60-second continuous-speech
+fixture requests 120 previews and processes 31,840,000 pending samples for
+960,000 captured samples (33.17x). These counts describe the current policy's
+repeated buffer work; they do not measure inference time or transcript quality.
 
 Use registered groups to run focused benchmarks:
 

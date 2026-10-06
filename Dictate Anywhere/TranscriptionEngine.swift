@@ -12,16 +12,16 @@ import Accelerate
 import FluidAudio
 import os
 
-private let audioLogger = Logger(
+nonisolated private let audioLogger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
     category: "AudioPipeline"
 )
 
-protocol AudioCaptureController: AnyObject, Sendable {
+nonisolated protocol AudioCaptureController: AnyObject, Sendable {
     func stop()
 }
 
-private final class AVAudioEngineCaptureController: @unchecked Sendable, AudioCaptureController {
+nonisolated private final class AVAudioEngineCaptureController: @unchecked Sendable, AudioCaptureController {
     let engine: AVAudioEngine
 
     init(engine: AVAudioEngine) {
@@ -45,7 +45,7 @@ private final class SendableAudioEngineRef: @unchecked Sendable {
     }
 }
 
-private final class AVCaptureDeviceCaptureController: NSObject, @unchecked Sendable, AudioCaptureController, AVCaptureAudioDataOutputSampleBufferDelegate {
+nonisolated private final class AVCaptureDeviceCaptureController: NSObject, @unchecked Sendable, AudioCaptureController, AVCaptureAudioDataOutputSampleBufferDelegate {
     private let session = AVCaptureSession()
     private let output = AVCaptureAudioDataOutput()
     private let sampleQueue = DispatchQueue(label: "com.dictate-anywhere.capture-session-samples", qos: .userInitiated)
@@ -460,7 +460,7 @@ final class ParakeetEngine: TranscriptionEngine {
     var recoveryCapture: RecoveryAudioCapture?
     private var audioCaptureStartupCancellation: AudioCaptureStartupCancellation?
     private var sampleBuffer: [Float] = []
-    private var levelSampleBuffer: [Float] = []
+    private var levelSampleBuffer = AudioLevelSampleBuffer()
     private var fullRecordingSamples: [Float] = []
     private var totalSampleCount: Int = 0
     private var droppedPendingSamples: Int = 0
@@ -477,14 +477,18 @@ final class ParakeetEngine: TranscriptionEngine {
     private let minAudioEnergy: Float = 0.005
     private let minimumSpeechPeak: Float = 0.02
     private let minimumSpeechSampleRatio: Float = 0.015
-    private let transcriptionIntervalMs: UInt64 = 500
     private let sampleRate: Int = ParakeetEngine.transcriptionSampleRate
-    private let minTranscriptionDeltaSamples: Int = 4_800
-    private let audioLevelWindowSamples: Int = 1_600
     private let speechCheckWindowSamples: Int = 8_000
 
     static let transcriptionSampleRate = 16_000
     static let chunkTranscriptionSeconds = 20
+    static let batchPreviewIntervalMilliseconds: UInt64 = 500
+    static let batchPreviewMinimumDeltaSamples = 4_800
+    static let batchCommitThresholdSamples = transcriptionSampleRate * 30
+
+    static func hasEnoughNewSamplesForBatchPreview(_ sampleCount: Int) -> Bool {
+        sampleCount > batchPreviewMinimumDeltaSamples
+    }
 
     /// Keep acoustic vocabulary rescue from replacing unrelated dictation
     /// phrases (for example, "the weather is lovely" with "cancellation").
@@ -518,7 +522,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
     /// Keeps pending Parakeet context bounded for long recordings.
     private var chunkTranscriptionSamples: Int { Self.chunkTranscriptionSampleCount }
-    private var maxPendingSamplesBeforeCommit: Int { sampleRate * 30 }
+    private var maxPendingSamplesBeforeCommit: Int { Self.batchCommitThresholdSamples }
     private var hardPendingSampleCap: Int { sampleRate * 120 }
 
     /// Serial queue for audio engine lifecycle
@@ -800,7 +804,7 @@ final class ParakeetEngine: TranscriptionEngine {
     // MARK: - TranscriptionEngine
 
     func levelSamples(count: Int) -> [Float] {
-        sampleLock.withLock { Array(levelSampleBuffer.suffix(count)) }
+        sampleLock.withLock { levelSampleBuffer.latest(count: count) }
     }
 
     func prepare() async throws {
@@ -936,7 +940,7 @@ final class ParakeetEngine: TranscriptionEngine {
         guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: true)
-            levelSampleBuffer.removeAll(keepingCapacity: true)
+            levelSampleBuffer.reset(keepingCapacity: true)
             fullRecordingSamples.removeAll(keepingCapacity: true)
             totalSampleCount = 0
             droppedPendingSamples = 0
@@ -953,7 +957,8 @@ final class ParakeetEngine: TranscriptionEngine {
         // Start audio engine (async to avoid deadlock — the tap callback dispatches to main)
         logger.info("startRecording: dispatching to engineQueue for audio engine setup")
         let captureController = try await startAudioCaptureOffMainActor(
-            timeout: 5, queue: engineQueue, cancellation: startupCancellation
+            timeout: 5, queue: engineQueue, cancellation: startupCancellation,
+            onLateControllerStopped: { AudioCaptureRestartGate.shared.recordStop() }
         ) { [self] in
             try makeAudioCaptureController(
                 deviceID: deviceID,
@@ -975,11 +980,7 @@ final class ParakeetEngine: TranscriptionEngine {
                         }
                     }
                     self.sampleBuffer.append(contentsOf: samples)
-                    self.levelSampleBuffer.append(contentsOf: samples)
-                    let levelCap = self.sampleRate * 10
-                    if self.levelSampleBuffer.count > levelCap {
-                        self.levelSampleBuffer.removeFirst(self.levelSampleBuffer.count - levelCap)
-                    }
+                    self.levelSampleBuffer.append(samples)
                     self.fullRecordingSamples.append(contentsOf: samples)
                     self.totalSampleCount += samples.count
                 }
@@ -991,6 +992,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
         guard audioCaptureStartupCancellation === startupCancellation else {
             captureController.stop()
+            AudioCaptureRestartGate.shared.recordStop()
             throw CancellationError()
         }
         audioCaptureStartupCancellation = nil
@@ -1033,7 +1035,6 @@ final class ParakeetEngine: TranscriptionEngine {
             ["captured_samples": totalSampleCount, "dropped_pending_samples": droppedPendingSamples]
         }
         PerfTrace.event("audio.captureSummary", counts: audioCounts)
-
         // Stop transcription loop
         isTranscribing = false
         if let task = transcriptionTask {
@@ -1063,7 +1064,7 @@ final class ParakeetEngine: TranscriptionEngine {
         firstPartialEmitted = false
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: false)
-            levelSampleBuffer.removeAll(keepingCapacity: false)
+            levelSampleBuffer.reset(keepingCapacity: false)
             fullRecordingSamples.removeAll(keepingCapacity: false)
             totalSampleCount = 0
         }
@@ -1131,7 +1132,7 @@ final class ParakeetEngine: TranscriptionEngine {
         var loopIteration = 0
 
         while isTranscribing && !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(transcriptionIntervalMs))
+            try? await Task.sleep(for: .milliseconds(Self.batchPreviewIntervalMilliseconds))
             guard isTranscribing else { break }
 
             await commitBufferedChunksIfNeeded(force: false)
@@ -1153,7 +1154,7 @@ final class ParakeetEngine: TranscriptionEngine {
             }
 
             let newSampleCount = totalSamples - lastObservedSampleCount
-            guard newSampleCount > minTranscriptionDeltaSamples else {
+            guard Self.hasEnoughNewSamplesForBatchPreview(newSampleCount) else {
                 continue
             }
 
@@ -1349,7 +1350,7 @@ final class ParakeetEngine: TranscriptionEngine {
         firstPartialEmitted = false
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: false)
-            levelSampleBuffer.removeAll(keepingCapacity: false)
+            levelSampleBuffer.reset(keepingCapacity: false)
             fullRecordingSamples.removeAll(keepingCapacity: false)
             totalSampleCount = 0
         }
@@ -1517,6 +1518,7 @@ final class ParakeetEngine: TranscriptionEngine {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             engineQueue.async { [weak self] in
                 captureController.stop()
+                AudioCaptureRestartGate.shared.recordStop()
 
                 guard let self else {
                     continuation.resume()
@@ -1542,11 +1544,6 @@ final class ParakeetEngine: TranscriptionEngine {
                 continuation.resume()
             }
         }
-
-        // Small settle delay reduces HAL start races on rapid re-trigger.
-        let settleTrace = PerfTrace.begin("audio.settle")
-        try? await Task.sleep(for: .milliseconds(120))
-        settleTrace.end()
     }
 }
 

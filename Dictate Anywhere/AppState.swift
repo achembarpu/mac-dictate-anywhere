@@ -83,6 +83,7 @@ final class AppState {
     private let transcriptDeliveryOverride: ((String) async -> TextInsertionResult)?
     private let inputSourceIDOverride: (() -> String?)?
     private let profileModelAvailableOverride: ((ParakeetModelChoice) -> Bool)?
+    private let appleSpeechAssetSnapshot: (() async -> (supported: [SupportedLanguage], installed: [SupportedLanguage]))?
 
     var canCancelDictation: Bool {
         (status == .recording || status == .processing)
@@ -183,7 +184,8 @@ final class AppState {
         transcriptDelivery: ((String) async -> TextInsertionResult)? = nil,
         contextCapture: (@Sendable (pid_t?) async -> DictationContext?)? = nil,
         inputSourceID: (() -> String?)? = nil,
-        profileModelAvailable: ((ParakeetModelChoice) -> Bool)? = nil
+        profileModelAvailable: ((ParakeetModelChoice) -> Bool)? = nil,
+        appleSpeechAssetSnapshot: (() async -> (supported: [SupportedLanguage], installed: [SupportedLanguage]))? = nil
     ) {
         self.permissions = permissions ?? Permissions()
         self.microphonePermissionRequester = microphonePermissionRequester
@@ -193,6 +195,7 @@ final class AppState {
         self.contextCaptureOverride = contextCapture
         self.inputSourceIDOverride = inputSourceID
         self.profileModelAvailableOverride = profileModelAvailable
+        self.appleSpeechAssetSnapshot = appleSpeechAssetSnapshot
         setupHotkeyCallbacks()
         setupPermissionCallbacks()
         setupInputSourceCallbacks()
@@ -596,6 +599,12 @@ final class AppState {
     /// sets. Installed state drives the input-source mapping UI, so it must be
     /// fresh even while FluidAudio is the active engine.
     func refreshAppleSpeechAssetState() async {
+        if let appleSpeechAssetSnapshot {
+            let snapshot = await appleSpeechAssetSnapshot()
+            appleSpeechSupportedLanguages = snapshot.supported
+            appleSpeechInstalledLanguages = snapshot.installed
+            return
+        }
         appleSpeechSupportedLanguages = await AppleSpeechEngine.supportedLanguages()
         appleSpeechInstalledLanguages = await AppleSpeechEngine.installedLanguages()
     }
@@ -1226,10 +1235,7 @@ final class AppState {
             currentTranscript = ""
             volumeController.restoreMicrophoneVolume()
             // Restore recording audio state (brief pause lets BT audio routing settle)
-            if settings.muteSystemAudioDuringRecordingEnabled {
-                try? await Task.sleep(for: .milliseconds(200))
-                volumeController.restoreAfterRecording()
-            }
+            await volumeController.restoreAfterRecordingWithSettle()
             guard !Task.isCancelled else { return }
             isDeliveringTranscript = true
             updateCancellationAvailability()
@@ -1425,10 +1431,7 @@ final class AppState {
         // gives Bluetooth audio routing time to settle back to playback mode.
         let teardownTrace = PerfTrace.begin("dictation.teardown")
         volumeController.restoreMicrophoneVolume()
-        if settings.muteSystemAudioDuringRecordingEnabled {
-            try? await Task.sleep(for: .milliseconds(200))
-            volumeController.restoreAfterRecording()
-        }
+        await volumeController.restoreAfterRecordingWithSettle()
 
         switch result {
         case .success:
@@ -1481,10 +1484,7 @@ final class AppState {
         currentTranscript = ""
 
         volumeController.restoreMicrophoneVolume()
-        if settings.muteSystemAudioDuringRecordingEnabled {
-            try? await Task.sleep(for: .milliseconds(200))
-            volumeController.restoreAfterRecording()
-        }
+        await volumeController.restoreAfterRecordingWithSettle()
         overlay.hide(afterDelay: 0)
         recoveryStore.errorMessage = recoveryStore.errorMessage ?? presentedMessage
         status = .idle
@@ -1544,10 +1544,7 @@ final class AppState {
         sessionHotkeyMode = nil
 
         volumeController.restoreMicrophoneVolume()
-        if settings.muteSystemAudioDuringRecordingEnabled {
-            try? await Task.sleep(for: .milliseconds(200))
-            volumeController.restoreAfterRecording()
-        }
+        await volumeController.restoreAfterRecordingWithSettle()
 
         currentTranscript = ""
         overlay.hide(afterDelay: 0)
@@ -1868,7 +1865,8 @@ final class AppState {
             var displayTranscript = self?.transcriptPrefix ?? ""
             var transcriptPollTick = 0
             var levelPollCount = 0
-            var lastTranscriptLength = 0
+            var lastTranscript = ""
+            var lastDisplayedLevel: Float?
             while !Task.isCancelled {
                 guard let self, self.status == .recording else { break }
 
@@ -1877,23 +1875,28 @@ final class AppState {
                     ? PerfTrace.begin("audio.levelPoll") : nil
 
                 // Pull level samples from the lock-protected buffer (thread-safe)
-                let samples = engine.levelSamples(count: 1600)
-                self.audioMonitor.update(samples: samples)
+                let samples = engine.levelSamples(count: AudioMonitor.windowSampleCount)
+                self.audioMonitor.update(samples: samples[...])
                 let level = self.audioMonitor.smoothedLevel
                 transcriptPollTick += 1
+                var transcriptChanged = false
 
                 // Only copy transcript when it has actually changed
                 if transcriptPollTick >= 6 {
                     transcriptPollTick = 0
                     let transcript = engine.currentTranscript
-                    if transcript.count != lastTranscriptLength {
-                        lastTranscriptLength = transcript.count
+                    if transcript != lastTranscript {
+                        lastTranscript = transcript
                         displayTranscript = CancelledDictation.joining(self.transcriptPrefix, transcript)
                         self.currentTranscript = displayTranscript
+                        transcriptChanged = true
                     }
                 }
 
-                self.overlay.showListening(level: level, transcript: displayTranscript)
+                if transcriptChanged || AudioMonitor.hasMeaningfulLevelChange(from: lastDisplayedLevel, to: level) {
+                    self.overlay.showListening(level: level, transcript: displayTranscript)
+                    lastDisplayedLevel = level
+                }
                 levelPollTrace?.end()
                 try? await Task.sleep(for: .milliseconds(33))
             }
