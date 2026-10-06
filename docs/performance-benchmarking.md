@@ -294,3 +294,9 @@ Shared-head scoring reuses encoder weights, not TDT features from a single pass.
 Compare cumulative peak RSS in separate processes; paired latency/CPU rows do
 not establish memory or energy savings. Scripts and native language-name checks
 retain rejected configurations for future SDK evaluations.
+
+The `tdt-vocabulary` group also contains a separately opted-in auxiliary-head
+installation check. Set `PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1` to validate the
+application cache, cold targeted download, offline reuse and repair of a corrupt
+local head. Temporary repair copies are discarded; the normal application cache
+retains the installed head. No separate encoder is downloaded by this path.

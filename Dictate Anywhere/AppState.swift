@@ -173,6 +173,7 @@ final class AppState {
     private var cleanupPreparation: CleanupPreparation?
     private var preparedCleanupKey: CleanupPreparationKey?
     var isPreparingCleanupEngine = false
+    private var cleanupPreparationFailure: (key: CleanupPreparationKey, message: String)?
     private let cleanupModelPreparation: ((TranscriptPostProcessingMode) async -> Bool)?
     private var hasStarted = false
     private var isShuttingDown = false
@@ -598,41 +599,96 @@ final class AppState {
 
     var isCleanupEnginePrepared: Bool {
         guard let prepared = preparedCleanupKey else { return false }
-        let current = cleanupPreparationKey
+        return cleanupConfigurationMatches(prepared, cleanupPreparationKey)
+    }
+
+    private func cleanupConfigurationMatches(_ prepared: CleanupPreparationKey, _ current: CleanupPreparationKey) -> Bool {
         // Becoming busy does not evict resident models. Scheduling eligibility
         // is part of the task ID, but must not make Ready flicker during use.
         return prepared.engine == current.engine && prepared.model == current.model
             && prepared.mode == current.mode && prepared.language == current.language
-            && prepared.enabled == current.enabled && prepared.installed == current.installed
+            && prepared.installed == current.installed
             && prepared.prompt == current.prompt && prepared.vocabulary == current.vocabulary
             && prepared.providerURL == current.providerURL && prepared.providerModel == current.providerModel
+    }
+
+    var cleanupReadiness: ModelReadiness {
+        let mode = settings.transcriptPostProcessingMode
+        if mode == .fluidAudioVocabulary {
+            guard settings.engineChoice == .parakeet else { return .unavailable("Requires a supported Parakeet speech model.") }
+            return parakeetEngine.vocabularyReadiness
+        }
+        if mode == .openRouter, !OpenRouterPostProcessingService.apiKeyStatus(apiKey: settings.openRouterAPIKey,
+            apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable).isConfigured { return .needsSetup }
+        if isPreparingCleanupEngine { return .preparing }
+        if isCleanupEnginePrepared { return .ready }
+        if let failure = cleanupPreparationFailure, cleanupConfigurationMatches(failure.key, cleanupPreparationKey) {
+            return .failed(failure.message)
+        }
+        switch mode {
+        case .s1Mini:
+            if settings.selectedLanguage != .english { return .unavailable("S1-mini supports English cleanup.") }
+            if s1MiniModelManager.isDownloading { return .downloading(s1MiniModelManager.downloadProgress) }
+            if s1MiniModelManager.isVerifying { return .verifying }
+            if s1MiniModelManager.isDeleting { return .deleting }
+            return s1MiniModelManager.isModelDownloaded ? .downloaded : .notDownloaded
+        case .appleIntelligence:
+            guard #available(macOS 26, *) else { return .unavailable("Requires macOS 26 or later.") }
+            return AIPostProcessingService.availability == .available ? .available
+                : .unavailable("Enable Apple Intelligence and finish its model download in System Settings.")
+        case .ollama, .openRouter, .openAICompatible:
+            return cleanupPreparationKey.providerModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .needsSetup : .configured
+        default: return .available
+        }
+    }
+
+    var canPrepareCleanupEngine: Bool {
+        guard status == .idle, !isPreparingCleanupEngine, !isShuttingDown,
+              settings.engineChoice != .assemblyAI else { return false }
+        switch cleanupReadiness {
+        case .notDownloaded, .needsSetup, .unavailable, .ready, .downloading, .verifying, .deleting: return false
+        default: return true
+        }
+    }
+
+    private func recordCleanupPreparation(_ ready: Bool, key: CleanupPreparationKey) {
+        guard !isShuttingDown else { return }
+        if ready {
+            preparedCleanupKey = key
+            cleanupPreparationFailure = nil
+        } else {
+            cleanupPreparationFailure = (key, "Could not prepare \(key.mode.displayName). Check its setup and try again.")
+        }
     }
 
     /// Also called after settings/download changes. Join a matching request;
     /// if preferences changed during loading, prepare the new choice afterward.
     /// Failure retains lazy first-use loading. Tests inject a bounded operation.
-    func prepareCleanupEngineIfNeeded() async {
+    func prepareCleanupEngineIfNeeded(force: Bool = false) async {
         guard !AppDelegate.isRunningTests || cleanupModelPreparation != nil else { return }
         while let inFlight = cleanupPreparation {
             let ready = await inFlight.task.value
             if cleanupPreparation?.id == inFlight.id {
                 cleanupPreparation = nil
                 isPreparingCleanupEngine = false
-                if ready, !isShuttingDown {
-                    preparedCleanupKey = inFlight.key
-                }
+                recordCleanupPreparation(ready, key: inFlight.key)
             }
             if inFlight.key == cleanupPreparationKey { return }
         }
+        if force, settings.transcriptPostProcessingMode == .fluidAudioVocabulary,
+           settings.engineChoice == .parakeet, !parakeetEngine.isReady {
+            await prepareActiveEngine()
+        }
         let key = cleanupPreparationKey
-        if #available(macOS 26, *), !key.enabled || key.mode != .appleIntelligence {
+        if #available(macOS 26, *), (!key.enabled && !force && !isCleanupEnginePrepared) || key.mode != .appleIntelligence {
             await AIPostProcessingService.discardPreparedSession()
         }
-        guard !isShuttingDown, key.enabled, key.idle, key.engine != .assemblyAI else { return }
+        guard !isShuttingDown, key.enabled || force, key.idle, key.engine != .assemblyAI else { return }
         switch key.mode {
         case .s1Mini:
             guard S1MiniPrewarmPolicy.shouldPrewarm(
-                mode: key.mode, language: key.language, prewarmEnabled: key.enabled
+                mode: key.mode, language: key.language, prewarmEnabled: key.enabled || force
             ),
                   key.installed || cleanupModelPreparation != nil else { return }
         case .fluidAudioVocabulary:
@@ -647,6 +703,7 @@ final class AppState {
         }
         let id = UUID()
         preparedCleanupKey = nil
+        cleanupPreparationFailure = nil
         isPreparingCleanupEngine = true
         let task = Task(priority: .utility) { [weak self] in
             guard let self, !self.isShuttingDown else { return false }
@@ -676,7 +733,7 @@ final class AppState {
         if cleanupPreparation?.id == id {
             cleanupPreparation = nil
             isPreparingCleanupEngine = false
-            if ready, !isShuttingDown { preparedCleanupKey = key }
+            recordCleanupPreparation(ready, key: key)
         }
     }
 

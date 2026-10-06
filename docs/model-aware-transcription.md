@@ -49,13 +49,16 @@ The 110M model uses its resident fused frontend and auxiliary CTC head, sharing
 encoder weights instead of loading another encoder. It still performs a second
 inference pass because the SDK exposes no TDT feature hook. Its windows and
 scores use the TDT encoder clock. Other TDT models use a separate CTC encoder.
+The 110M path explicitly installs and loads a missing auxiliary head, downloading
+only that component into the
+application cache. Failed preparation is visible and retryable; Stop preserves
+the original result instead of downloading models or choosing a slower scorer.
 
 Multilingual Nemotron supports vocabulary through its native decoder, including
 live previews and final speech, with a conservative per-token bonus of 1.
 Vocabulary is opt-in through the existing mode; other native streaming models
 do not advertise unsupported vocabulary processing. Reset clears partial
 matches, while disabling the mode clears the bias before the next session.
-
 
 ## Architecture and preparation
 
@@ -94,7 +97,13 @@ is overlapped with speech. Shutdown joins preparation before unloading.
 Disabling automatic preparation defers loading until use; it does not unload
 already resident models.
 
-Settings distinguish **Downloaded**, **Preparing for first use…** and **Ready**.
+Speech and cleanup settings share **Downloaded**, **Preparing for first use…**
+and **Ready** states, with download progress, preparation failures and a manual
+Prepare action. Remote services use **Configured** before their connection/model
+preparation succeeds. Vocabulary readiness includes its tokenizer, scorer and
+actual CTC/native decoder warmup; edited terms invalidate it. Manual preparation
+works even when automatic preparation is disabled.
+
 Downloaded files alone do not establish readiness. Preparation moves loading and
 initial inference out of first use; it does not remove microphone setup, actual
 recognition or new dynamic-shape compilation.

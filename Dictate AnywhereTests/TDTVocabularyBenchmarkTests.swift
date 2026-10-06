@@ -5,6 +5,51 @@ import XCTest
 
 @MainActor
 final class TDTVocabularyBenchmarkTests: XCTestCase {
+    func testAuxiliaryHeadInstallationAndRepair() async throws {
+        #if !PIPELINE_BENCHMARK
+        throw XCTSkip("Use tdt-vocabulary with explicit model downloads")
+        #else
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_DOWNLOAD_MODELS"] == "1",
+                          "Set PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1 to exercise downloads")
+        let models = try await CompactSpeechModelLoader.load(download: false)
+        // First ensure the head is usable in the actual application cache.
+        let appHead = try await VocabularyHeadLoader.load(configuration: models.configuration)
+        let appSession = try await SharedCTCVocabularySession.prepare(models: models, terms: ["Quilter"],
+            config: VocabularyRescoringPolicy.config, cachedHead: appHead)
+        try await appSession.warm()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("vocabulary-head-\(UUID())")
+        let cold = root.appendingPathComponent("cold")
+        let repair = root.appendingPathComponent("repair")
+        let files = FileManager.default
+        let offline = ModelHub.offlineMode
+        defer { ModelHub.offlineMode = offline; try? files.removeItem(at: root) }
+        let name = ModelNames.ASR.ctcHeadFile
+        let head = try await VocabularyHeadLoader.load(configuration: models.configuration, directory: cold)
+        let session = try await SharedCTCVocabularySession.prepare(models: models, terms: ["Quilter"],
+            config: VocabularyRescoringPolicy.config, cachedHead: head)
+        try await session.warm()
+        XCTAssertFalse(files.fileExists(atPath: cold.appendingPathComponent("AudioEncoder.mlmodelc").path))
+        let original = try Data(contentsOf: cold.appendingPathComponent(name).appendingPathComponent("coremldata.bin"))
+        ModelHub.offlineMode = true
+        _ = try await VocabularyHeadLoader.load(configuration: models.configuration, directory: cold)
+        do {
+            _ = try await VocabularyHeadLoader.load(configuration: models.configuration, directory: root.appendingPathComponent("missing"))
+            XCTFail("Missing assets must not report successful preparation offline")
+        } catch { XCTAssertTrue(ModelHub.offlineMode) }
+        ModelHub.offlineMode = false
+        try files.createDirectory(at: repair, withIntermediateDirectories: true)
+        try files.copyItem(at: cold.appendingPathComponent(name), to: repair.appendingPathComponent(name))
+        try Data("invalid Core ML model".utf8).write(to: repair.appendingPathComponent(name).appendingPathComponent("coremldata.bin"))
+        let repaired = try await VocabularyHeadLoader.load(configuration: models.configuration, directory: repair)
+        XCTAssertEqual(try Data(contentsOf: repair.appendingPathComponent(name).appendingPathComponent("coremldata.bin")), original)
+        let repairedSession = try await SharedCTCVocabularySession.prepare(models: models, terms: ["Quilter"],
+            config: VocabularyRescoringPolicy.config, cachedHead: repaired)
+        try await repairedSession.warm()
+        XCTAssertFalse(files.fileExists(atPath: repair.appendingPathComponent("AudioEncoder.mlmodelc").path))
+        print("VOCABULARY_HEAD_INSTALLATION_RESULT app_cache_ready=true cold_download=true offline_reuse=true corrupt_load_repaired=true extra_encoder=false")
+        #endif
+    }
+
     func testPreparedVocabularyProductionSessions() async throws {
         #if !PIPELINE_BENCHMARK
         throw XCTSkip("Use --only tdt-vocabulary for prepared production sessions")
@@ -27,12 +72,14 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
             let preparation = ContinuousClock.now
             let ready = await engine.prepareVocabularyIfNeeded()
             XCTAssertTrue(ready)
+            XCTAssertEqual(engine.vocabularyReadiness, .ready)
             let preparationMs = BenchmarkStatistics.elapsedMilliseconds(from: preparation)
             try await engine.beginBatchReplayForTesting()
             let reader = try RecoveryAudioReader(url: fixture.audioURL)
             while let chunk = try reader.nextSamples(maxSamples: 16_000) { try await engine.replayBatchAudioForTesting(chunk) }
             // An edit during capture applies to the next recording only.
             settings.customVocabulary = ["cancellation"]
+            XCTAssertFalse(engine.vocabularyReadiness.isReady, "New terms must not inherit old readiness")
             let before = try BenchmarkProcessResources.sample()
             let start = ContinuousClock.now
             let output = await engine.stopRecording()
@@ -45,6 +92,13 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
                 peak: try BenchmarkProcessResources.sample().peakResidentBytes,
                 original: "", output: output, error: fixture.errorRate(hypothesis: output), preparation: preparationMs)
         }
+        settings.parakeetModelChoice = .senseVoice
+        await engine.handleSelectedModelChange()
+        settings.parakeetModelChoice = .compactEnglish
+        await engine.handleSelectedModelChange()
+        XCTAssertFalse(engine.vocabularyReadiness.isReady, "Unloaded components must be prepared again")
+        settings.transcriptPostProcessingMode = .none
+        XCTAssertEqual(engine.vocabularyReadiness, .needsSetup)
         await engine.cancel()
         #endif
     }
@@ -104,6 +158,19 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
                 while let chunk = try reader.nextSamples(maxSamples: 16_000 * 20) { samples += chunk }
                 var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
                 let original = try await manager.transcribe(samples, decoderState: &state)
+                if choice == .compactEnglish, fixture.id == "golden-en-fleurs-2" {
+                    let withoutHead = AsrModels(encoder: models.encoder, preprocessor: models.preprocessor,
+                        decoder: models.decoder, joint: models.joint, configuration: models.configuration,
+                        vocabulary: models.vocabulary, version: models.version)
+                    let fallback = try await PreparedTDTVocabulary.prepare(models: withoutHead,
+                        terms: ["Chandra Shekhar Solanki"], cachedCTCModels: ctcModels)
+                    guard case .shared = fallback else {
+                        XCTFail("Missing SDK head must be loaded explicitly for the fast vocabulary path"); return
+                    }
+                    let output = try await fallback.rescore(original, samples: samples)
+                    XCTAssertTrue(output.localizedCaseInsensitiveContains("Chandra Shekhar Solanki"), output)
+                    XCTAssertLessThanOrEqual(try fixture.errorRate(hypothesis: output), try fixture.errorRate(hypothesis: original.text))
+                }
                 for (list, terms) in [("genuine", genuine[fixture.id] ?? ["Quilter"]),
                                       ("distractors", ["CRAN", "ran", "NVIDIA", "cancellation"])] {
                     var errors: [String: Double] = [:]

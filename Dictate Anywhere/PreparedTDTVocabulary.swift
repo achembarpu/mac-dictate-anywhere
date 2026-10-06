@@ -1,14 +1,16 @@
 import FluidAudio
+@preconcurrency import CoreML
 
 /// Prepared tokenizer/scorer and resident weights, scoped to one model and term list.
 nonisolated enum PreparedTDTVocabulary: Sendable {
     case shared(SharedCTCVocabularySession)
     case separate(VocabularyBoostingSession, CtcModels)
 
-    static func prepare(models: AsrModels, terms: [String], cachedCTCModels: CtcModels?) async throws -> Self {
+    static func prepare(models: AsrModels, terms: [String], cachedCTCModels: CtcModels?,
+                        cachedHead: MLModel? = nil, progressHandler: ProgressHandler? = nil) async throws -> Self {
         if models.version == .tdtCtc110m {
             let session = try await SharedCTCVocabularySession.prepare(models: models, terms: terms,
-                                                                       config: VocabularyRescoringPolicy.config)
+                config: VocabularyRescoringPolicy.config, cachedHead: cachedHead, progressHandler: progressHandler)
             try await session.warm()
             return .shared(session)
         }

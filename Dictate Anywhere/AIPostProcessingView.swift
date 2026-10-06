@@ -80,9 +80,16 @@ struct AIPostProcessingView: View {
             // Setup for the selected method sits directly under the picker, so
             // its status and any blocking action stay in the same viewport.
             selectedMethodContent(settings: settings)
-            if settings.transcriptPostProcessingMode == .fluidAudioVocabulary,
-               appState.isPreparingCleanupEngine {
-                DSHint(text: "Preparing vocabulary cleanup for first use…")
+            if settings.transcriptPostProcessingMode != .none, settings.engineChoice != .assemblyAI {
+                DSSection(overline: "Preparation") {
+                    DSModelReadinessRow(readiness: appState.cleanupReadiness,
+                        label: settings.transcriptPostProcessingMode == .fluidAudioVocabulary ? "Vocabulary recognition" : "Cleanup model",
+                        actionTitle: appState.canPrepareCleanupEngine ? (appState.cleanupReadiness.detail == nil ? "Prepare" : "Retry") : nil,
+                        action: { Task { await appState.prepareCleanupEngineIfNeeded(force: true) } })
+                        .disabled(appState.status != .idle)
+                    DSDivider()
+                    DSCardCaption(text: "Ready means the selected setup has been prepared. Preparing downloads missing local support files before first use. For remote services, it checks the connection and model configuration.")
+                }
             }
 
             let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
@@ -875,9 +882,7 @@ struct AIPostProcessingView: View {
         if manager.isDownloading { return .downloading(s1MiniVisibleDownloadProgress(manager: manager)) }
         if manager.isDeleting { return .deleting }
         if manager.isVerifying { return .verifying }
-        if appState.isPreparingCleanupEngine { return .preparing }
-        if appState.isCleanupEnginePrepared { return .ready }
-        return manager.isModelDownloaded ? .downloaded : .notDownloaded
+        return appState.cleanupReadiness
     }
 
     private func s1MiniVisibleDownloadProgress(manager: S1MiniModelManager) -> Double {

@@ -172,6 +172,34 @@ final class DictationStartupContextTests: XCTestCase {
         XCTAssertFalse(app.isCleanupEnginePrepared)
     }
 
+    func testManualCleanupPreparationReportsFailureAndCanRetryWithAutomaticPreparationDisabled() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.selectedLanguage = .english
+        settings.prewarmEnginesAtStartup = false
+        var succeeds = false
+        var calls = 0
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: { _ in
+            calls += 1
+            return succeeds
+        })
+        await app.prepareCleanupEngineIfNeeded()
+        XCTAssertEqual(calls, 0)
+        await app.prepareCleanupEngineIfNeeded(force: true)
+        guard case .failed = app.cleanupReadiness else { return XCTFail("Preparation failure must be visible") }
+        succeeds = true
+        await app.prepareCleanupEngineIfNeeded(force: true)
+        XCTAssertEqual(app.cleanupReadiness, .ready)
+        XCTAssertEqual(calls, 2)
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        settings.prewarmEnginesAtStartup = true
+        XCTAssertEqual(app.cleanupReadiness, .ready, "Scheduling preference does not evict a prepared model")
+        settings.prewarmEnginesAtStartup = false
+        XCTAssertEqual(app.cleanupReadiness, .ready)
+        await app.shutdown()
+    }
+
     func testCleanupChoiceChangedDuringPreparationIsPreparedAfterTheOldLoad() async {
         let settings = Settings.shared
         settings.engineChoice = .parakeet

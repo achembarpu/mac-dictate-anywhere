@@ -465,6 +465,27 @@ final class ParakeetEngine: TranscriptionEngine {
     private var recordingModelChoice: ParakeetModelChoice?
     private var recordingScriptLanguage: Language?
     private var recordingVocabularyTerms: [String] = []
+    private var vocabularyPreparationIdentity: (model: ParakeetModelChoice, terms: [String])?
+    private var vocabularyPreparationTaskID: UUID?
+    private var vocabularyPreparationStatus: ModelReadiness = .available
+
+    var vocabularyReadiness: ModelReadiness {
+        guard selectedModelChoice.supportsFluidAudioVocabulary else {
+            return .unavailable("This speech model does not support vocabulary recognition.")
+        }
+        let terms = Self.normalizedVocabulary(activeVocabularyTerms)
+        guard !terms.isEmpty else { return .needsSetup }
+        guard vocabularyPreparationIdentity?.model == selectedModelChoice,
+              vocabularyPreparationIdentity?.terms == terms else {
+            return isReady ? .available : (isModelDownloaded ? .downloaded : .notDownloaded)
+        }
+        if vocabularyPreparationStatus.isReady, !isReady { return isModelDownloaded ? .downloaded : .notDownloaded }
+        return vocabularyPreparationStatus
+    }
+
+    nonisolated private static func normalizedVocabulary(_ terms: [String]) -> [String] {
+        Array(Set(terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
+    }
     #if DEBUG || PIPELINE_BENCHMARK
     var usesScriptFilterForTesting = true
     var scriptLanguageOverrideForTesting: Language?
@@ -595,6 +616,7 @@ final class ParakeetEngine: TranscriptionEngine {
             await MainActor.run {
                 self.isReady = false
             }
+            invalidateVocabularyReadiness()
             await asrCoordinator.cleanup()
             loadedModels = nil
         }
@@ -719,7 +741,9 @@ final class ParakeetEngine: TranscriptionEngine {
                 try await asrCoordinator.initializeStreaming(modelChoice: modelChoice)
                 loadedModels = nil
             } else if let modelVersion = modelChoice.tdtModelVersion {
-                let models = try await AsrModels.downloadAndLoad(version: modelVersion)
+                let models = modelVersion == .tdtCtc110m
+                    ? try await CompactSpeechModelLoader.load(download: true)
+                    : try await AsrModels.downloadAndLoad(version: modelVersion)
                 let config = BatchTranscriptionPolicy.asrConfig
                 try await asrCoordinator.initialize(models: models, config: config)
                 self.loadedModels = models
@@ -739,6 +763,7 @@ final class ParakeetEngine: TranscriptionEngine {
             }
         } catch {
             progressTask.cancel()
+            invalidateVocabularyReadiness()
             await asrCoordinator.cleanup()
             self.loadedModels = nil
             await MainActor.run {
@@ -767,7 +792,7 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         if await asrCoordinator.isInitialized(for: modelChoice) {
-            await prepareVocabularyIfNeeded()
+            invalidateVocabularyReadiness()
             await asrCoordinator.cleanup()
             loadedModels = nil
         }
@@ -815,6 +840,7 @@ final class ParakeetEngine: TranscriptionEngine {
             do {
                 try await asrCoordinator.initializeSenseVoice()
             } catch {
+                invalidateVocabularyReadiness()
                 await asrCoordinator.cleanup()
                 loadedModels = nil
                 await MainActor.run { self.isReady = false }
@@ -833,6 +859,7 @@ final class ParakeetEngine: TranscriptionEngine {
             do {
                 try await asrCoordinator.initializeStreaming(modelChoice: modelChoice)
             } catch {
+                invalidateVocabularyReadiness()
                 await asrCoordinator.cleanup()
                 loadedModels = nil
                 await MainActor.run { self.isReady = false }
@@ -859,13 +886,16 @@ final class ParakeetEngine: TranscriptionEngine {
         if let cachedModels = loadedModels, cachedModels.version == modelVersion {
             models = cachedModels
         } else {
-            models = try await AsrModels.loadFromCache(version: modelVersion)
+            models = modelVersion == .tdtCtc110m
+                ? try await CompactSpeechModelLoader.load(download: false)
+                : try await AsrModels.loadFromCache(version: modelVersion)
         }
 
         let config = BatchTranscriptionPolicy.asrConfig
         do {
             try await asrCoordinator.initialize(models: models, config: config)
         } catch {
+            invalidateVocabularyReadiness()
             await asrCoordinator.cleanup()
             loadedModels = nil
             await MainActor.run { self.isReady = false }
@@ -898,17 +928,50 @@ final class ParakeetEngine: TranscriptionEngine {
         guard model.supportsFluidAudioVocabulary,
               await asrCoordinator.isInitialized(for: model) else { return false }
         do {
-            if model == .nemotronMultilingual {
-                // Also clear a previous bias when vocabulary cleanup is disabled.
-                try await asrCoordinator.prepareStreamingVocabulary(terms: activeVocabularyTerms)
-            } else if Settings.shared.fluidAudioVocabularyEnabled {
-                try await asrCoordinator.prepareVocabulary(terms: activeVocabularyTerms)
-            } else { return false }
+            try await prepareVocabulary(terms: activeVocabularyTerms, model: model)
             return true
         } catch {
             logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)")
             return false
         }
+    }
+
+    private func prepareVocabulary(terms: [String], model: ParakeetModelChoice) async throws {
+        let id = UUID()
+        vocabularyPreparationTaskID = id
+        vocabularyPreparationIdentity = (model, Self.normalizedVocabulary(terms))
+        vocabularyPreparationStatus = .preparing
+        defer { if vocabularyPreparationTaskID == id { vocabularyPreparationTaskID = nil } }
+        do {
+            if model == .nemotronMultilingual {
+                try await asrCoordinator.prepareStreamingVocabulary(terms: terms)
+            } else {
+                let progress: ProgressHandler = { [weak self] value in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.vocabularyPreparationTaskID == id else { return }
+                        switch value.phase {
+                        case .compiling: self.vocabularyPreparationStatus = .preparing
+                        case .listing, .downloading: self.vocabularyPreparationStatus = .downloading(value.fractionCompleted)
+                        }
+                    }
+                }
+                try await asrCoordinator.prepareVocabulary(terms: terms, progressHandler: progress)
+            }
+            if vocabularyPreparationTaskID == id {
+                vocabularyPreparationStatus = terms.isEmpty ? .available : .ready
+            }
+        } catch {
+            if vocabularyPreparationTaskID == id {
+                vocabularyPreparationStatus = .failed("Vocabulary recognition could not be prepared. Check your connection and try again.")
+            }
+            throw error
+        }
+    }
+
+    private func invalidateVocabularyReadiness() {
+        vocabularyPreparationTaskID = nil
+        vocabularyPreparationIdentity = nil
+        vocabularyPreparationStatus = .available
     }
 
     private var activeVocabularyTerms: [String] {
@@ -946,9 +1009,9 @@ final class ParakeetEngine: TranscriptionEngine {
         }
         guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
         if modelChoice == .nemotronMultilingual {
-            try await asrCoordinator.prepareStreamingVocabulary(terms: vocabularyTerms)
+            try await prepareVocabulary(terms: vocabularyTerms, model: modelChoice)
         } else if modelChoice.supportsFluidAudioVocabulary {
-            do { try await asrCoordinator.prepareVocabulary(terms: vocabularyTerms) }
+            do { try await prepareVocabulary(terms: vocabularyTerms, model: modelChoice) }
             catch { logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)") }
         }
         try await asrCoordinator.resetSession(for: modelChoice, language: language)
@@ -1218,7 +1281,7 @@ final class ParakeetEngine: TranscriptionEngine {
         let model = selectedModelChoice
         guard !model.usesTrueStreaming else { throw TranscriptionError.engineNotReady }
         let vocabularyTerms = activeVocabularyTerms
-        if model.supportsFluidAudioVocabulary { try await asrCoordinator.prepareVocabulary(terms: vocabularyTerms) }
+        if model.supportsFluidAudioVocabulary { try await prepareVocabulary(terms: vocabularyTerms, model: model) }
         let language = scriptLanguage(for: model)
         try await asrCoordinator.resetSession(for: model, language: language)
         recordingModelChoice = model
@@ -1555,6 +1618,7 @@ private actor AsrManagerCoordinator {
     private var multilingualManager: StreamingNemotronMultilingualAsrManager?
     private var pendingEndOfUtterance = false
     private var ctcModels: CtcModels?
+    private var cachedVocabularyHead: MLModel?
     private var preparedVocabulary: PreparedTDTVocabulary?
     private var preparedVocabularyTerms: [String] = []
     private var vocabularyPreparation: (id: UUID, terms: [String], task: Task<PreparedTDTVocabulary, Error>)?
@@ -1791,7 +1855,7 @@ private actor AsrManagerCoordinator {
         }
     }
 
-    func prepareVocabulary(terms: [String]) async throws {
+    func prepareVocabulary(terms: [String], progressHandler: ProgressHandler? = nil) async throws {
         let terms = Array(Set(terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty })).sorted()
         let generation = modelGeneration
@@ -1802,7 +1866,10 @@ private actor AsrManagerCoordinator {
                 if vocabularyPreparation?.id == pending.id {
                     preparedVocabulary = prepared
                     preparedVocabularyTerms = pending.terms
-                    if case .separate(_, let loaded) = prepared { ctcModels = loaded }
+                    switch prepared {
+                    case .separate(_, let loaded): ctcModels = loaded
+                    case .shared(let session): cachedVocabularyHead = session.head
+                    }
                     vocabularyPreparation = nil
                 }
             }
@@ -1822,10 +1889,12 @@ private actor AsrManagerCoordinator {
         if preparedVocabulary != nil, preparedVocabularyTerms == terms { return }
         guard let models else { throw TranscriptionError.engineNotReady }
         let cachedCTCModels = ctcModels
+        let cachedHead = cachedVocabularyHead
         let id = UUID()
         let task = Task {
             try await PerfTrace.measure("stt.vocabularyPrepare") {
-                try await PreparedTDTVocabulary.prepare(models: models, terms: terms, cachedCTCModels: cachedCTCModels)
+                try await PreparedTDTVocabulary.prepare(models: models, terms: terms, cachedCTCModels: cachedCTCModels,
+                    cachedHead: cachedHead, progressHandler: progressHandler)
             }
         }
         vocabularyPreparation = (id, terms, task)
@@ -1836,7 +1905,10 @@ private actor AsrManagerCoordinator {
             if vocabularyPreparation?.id == id {
                 preparedVocabulary = prepared
                 preparedVocabularyTerms = terms
-                if case .separate(_, let loaded) = prepared { ctcModels = loaded }
+                switch prepared {
+                case .separate(_, let loaded): ctcModels = loaded
+                case .shared(let session): cachedVocabularyHead = session.head
+                }
                 vocabularyPreparation = nil
             }
         } catch {
@@ -1930,11 +2002,11 @@ private actor AsrManagerCoordinator {
         // Decode once with the same model-aware batch path used for recovery.
         // Reconstructing a second live-overlap stream loses clear v2 seam words.
         let original = try await transcribe(samples, language: language)
-        let terms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let terms = Array(Set(terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
         guard !terms.isEmpty else { return original }
         do {
-            try await prepareVocabulary(terms: terms)
-            guard let preparedVocabulary else { return original }
+            // Preparation belongs before capture, never a download at Stop.
+            guard preparedVocabularyTerms == terms, let preparedVocabulary else { return original }
             let text = try await PerfTrace.measure("stt.vocabularyInference") {
                 try await preparedVocabulary.rescore(original, samples: samples)
             }
@@ -2008,6 +2080,7 @@ private actor AsrManagerCoordinator {
         _ = try? await tdtTask?.value
         preparedVocabulary = nil
         preparedVocabularyTerms = []
+        cachedVocabularyHead = nil
         let vocabularyTask = streamingVocabularyPreparation?.task
         streamingVocabularyPreparation = nil
         vocabularyTask?.cancel()

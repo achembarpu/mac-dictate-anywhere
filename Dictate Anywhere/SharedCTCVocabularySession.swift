@@ -7,7 +7,7 @@ import Foundation
 /// expose that pass's features. Other models use VocabularyBoostingSession.
 nonisolated struct SharedCTCVocabularySession: Sendable {
     private let frontend: MLModel
-    private let head: MLModel
+    let head: MLModel
     private let vocabulary: CustomVocabularyContext
     private let rescorer: VocabularyRescorer
     private let thresholds: ContextBiasingConstants.VocabSizeConfig
@@ -16,10 +16,14 @@ nonisolated struct SharedCTCVocabularySession: Sendable {
     // Whole encoder frames keep every window on the original TDT clock.
     private static let strideFrames = (windowSamples - overlapSamples) / ASRConstants.samplesPerEncoderFrame
 
-    static func prepare(models: AsrModels, terms: [String], config: VocabularyRescorer.Config) async throws -> Self {
-        guard models.version == .tdtCtc110m, let head = models.ctcHead else {
+    static func prepare(models: AsrModels, terms: [String], config: VocabularyRescorer.Config,
+                        cachedHead: MLModel? = nil, progressHandler: ProgressHandler? = nil) async throws -> Self {
+        guard models.version == .tdtCtc110m else {
             throw ASRError.processingFailed("110M vocabulary requires the auxiliary CTC head")
         }
+        let head: MLModel
+        if let resident = cachedHead ?? models.ctcHead { head = resident }
+        else { head = try await VocabularyHeadLoader.load(configuration: models.configuration, progressHandler: progressHandler) }
         let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
         let tokenizerURL = directory.appendingPathComponent("tokenizer.json")
         if !FileManager.default.fileExists(atPath: tokenizerURL.path) {
