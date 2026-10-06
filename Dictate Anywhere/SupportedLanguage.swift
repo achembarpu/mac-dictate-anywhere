@@ -51,7 +51,7 @@ enum SupportedLanguage: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
 
     /// The English display name for this language.
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .english: return "English"
         case .german: return "German"
