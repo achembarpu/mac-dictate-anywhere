@@ -30,6 +30,11 @@ then one second. TDT preview input is capped at 15 seconds. Timestamp-based
 splicing preserves the earlier provisional prefix and repeated words; it never
 determines final text. Capture awaits inference serially so stale previews do not
 form a queue.
+Recent volume windows are copied only for eligible previews; volume tests use
+array slices and stop after the RMS threshold qualifies speech. Native streaming
+retains bounded pending/level audio and the independent recovery file, without
+an unused second in-memory recording. Batch models retain original audio for
+authoritative final decoding and vocabulary matching.
 
 Each batch recording has independent Silero state. The volume gate qualifies
 normal speech; VAD can additionally qualify quiet speech. Recent eligibility

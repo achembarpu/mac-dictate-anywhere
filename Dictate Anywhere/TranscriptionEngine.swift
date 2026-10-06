@@ -1088,26 +1088,7 @@ final class ParakeetEngine: TranscriptionEngine {
                 ) { [weak self] samples in
                     recoveryCapture?.append(samples)
                     guard let self else { return }
-                    var droppedCount = 0
-                    self.sampleLock.withLock {
-                        // Trim before appending to avoid memory spike
-                        let projectedCount = self.sampleBuffer.count + samples.count
-                        if projectedCount > self.hardPendingSampleCap {
-                            droppedCount = projectedCount - self.hardPendingSampleCap
-                            self.droppedPendingSamples += droppedCount
-                            let toRemove = min(droppedCount, self.sampleBuffer.count)
-                            if toRemove > 0 {
-                                self.sampleBuffer.removeFirst(toRemove)
-                            }
-                        }
-                        self.sampleBuffer.append(contentsOf: samples)
-                        self.levelSampleBuffer.append(samples)
-                        self.fullRecordingSamples.append(contentsOf: samples)
-                        self.totalSampleCount += samples.count
-                    }
-                    if droppedCount > 0 {
-                        self.logger.warning("Dropped \(droppedCount, privacy: .public) buffered samples to avoid memory pressure.")
-                    }
+                    self.appendCapturedSamples(samples, model: modelChoice)
                 }
             }
         } catch {
@@ -1284,13 +1265,18 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     private func processBatchAudio() async throws {
-        let (pending, total, recent) = sampleLock.withLock {
+        let (pending, total, recent, shouldPreview) = sampleLock.withLock {
             let pending = sampleBuffer
             sampleBuffer.removeAll(keepingCapacity: true)
-            return (pending, totalSampleCount, Array(fullRecordingSamples.suffix(speechCheckWindowSamples)))
+            let total = totalSampleCount
+            let shouldPreview = BatchTranscriptionPolicy.shouldPreview(
+                totalSamples: total, lastPreviewSamples: lastBatchPreviewSampleCount,
+                hasVisibleText: !currentTranscript.isEmpty)
+            let recent = shouldPreview ? Array(fullRecordingSamples.suffix(speechCheckWindowSamples)) : []
+            return (pending, total, recent, shouldPreview)
         }
         try await asrCoordinator.appendBatchAudio(pending)
-        guard BatchTranscriptionPolicy.shouldPreview(totalSamples: total, lastPreviewSamples: lastBatchPreviewSampleCount, hasVisibleText: !currentTranscript.isEmpty) else { return }
+        guard shouldPreview else { return }
         if !hasSignificantAudio(recent) {
             guard await asrCoordinator.hasRecentBatchSpeech() else { return }
         }
@@ -1359,6 +1345,14 @@ final class ParakeetEngine: TranscriptionEngine {
 
     func batchReplayContainsSignificantAudioForTesting(_ samples: [Float]) -> Bool {
         containsSignificantAudio(samples)
+    }
+
+    func captureSamplesForTesting(_ samples: [Float], model: ParakeetModelChoice) {
+        appendCapturedSamples(samples, model: model)
+    }
+
+    var capturedSampleCountsForTesting: (pending: Int, retained: Int, total: Int) {
+        sampleLock.withLock { (sampleBuffer.count, fullRecordingSamples.count, totalSampleCount) }
     }
     #endif
 
@@ -1499,22 +1493,20 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     private func hasSignificantAudio(_ samples: [Float]) -> Bool {
-        guard !samples.isEmpty else { return false }
-        let recent = Array(samples.suffix(speechCheckWindowSamples))
-        return audioLooksNonEmpty(recent)
+        audioLooksNonEmpty(samples.suffix(speechCheckWindowSamples))
     }
 
     private func containsSignificantAudio(_ samples: [Float]) -> Bool {
         guard !samples.isEmpty else { return false }
         guard samples.count > speechCheckWindowSamples else {
-            return audioLooksNonEmpty(samples)
+            return audioLooksNonEmpty(samples[...])
         }
 
         let hopSize = max(1, speechCheckWindowSamples / 2)
         var startIndex = 0
         while startIndex < samples.count {
             let endIndex = min(startIndex + speechCheckWindowSamples, samples.count)
-            if audioLooksNonEmpty(Array(samples[startIndex..<endIndex])) {
+            if audioLooksNonEmpty(samples[startIndex..<endIndex]) {
                 return true
             }
             if endIndex == samples.count {
@@ -1526,30 +1518,41 @@ final class ParakeetEngine: TranscriptionEngine {
         return false
     }
 
-    private func audioLooksNonEmpty(_ samples: [Float]) -> Bool {
-        audioMetrics(for: samples).looksNonEmpty
-    }
-
-    private func audioMetrics(for samples: [Float]) -> (looksNonEmpty: Bool, voicedSamples: Int) {
-        guard !samples.isEmpty else { return (false, 0) }
-
+    private func audioLooksNonEmpty(_ samples: ArraySlice<Float>) -> Bool {
+        guard !samples.isEmpty else { return false }
         var rms: Float = 0
-        vDSP_rmsqv(samples, 1, &rms, vDSP_Length(samples.count))
+        samples.withUnsafeBufferPointer { vDSP_rmsqv($0.baseAddress!, 1, &rms, vDSP_Length($0.count)) }
+        if rms > minAudioEnergy { return true }
+
+        var peak: Float = 0
+        samples.withUnsafeBufferPointer { vDSP_maxmgv($0.baseAddress!, 1, &peak, vDSP_Length($0.count)) }
+        guard peak >= minimumSpeechPeak else { return false }
         let voicedSamples = samples.reduce(into: 0) { count, sample in
             if abs(sample) >= minimumSpeechPeak {
                 count += 1
             }
         }
 
-        if rms > minAudioEnergy {
-            return (true, voicedSamples)
-        }
-
-        var peak: Float = 0
-        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(samples.count))
-        guard peak >= minimumSpeechPeak else { return (false, 0) }
         let voicedRatio = Float(voicedSamples) / Float(samples.count)
-        return (voicedRatio >= minimumSpeechSampleRatio, voicedSamples)
+        return voicedRatio >= minimumSpeechSampleRatio
+    }
+
+    private func appendCapturedSamples(_ samples: [Float], model: ParakeetModelChoice) {
+        let droppedCount = sampleLock.withLock { () -> Int in
+            let dropped = max(0, sampleBuffer.count + samples.count - hardPendingSampleCap)
+            droppedPendingSamples += dropped
+            if dropped > 0 { sampleBuffer.removeFirst(min(dropped, sampleBuffer.count)) }
+            sampleBuffer.append(contentsOf: samples.suffix(hardPendingSampleCap))
+            levelSampleBuffer.append(samples)
+            // Native streaming already owns recognition history. Recovery is
+            // persisted independently, so a second unbounded PCM array is unused.
+            if !model.usesTrueStreaming { fullRecordingSamples.append(contentsOf: samples) }
+            totalSampleCount += samples.count
+            return dropped
+        }
+        if droppedCount > 0 {
+            logger.warning("Dropped \(droppedCount, privacy: .public) buffered samples to avoid memory pressure.")
+        }
     }
 
     /// Concatenates disjoint SenseVoice speech segments. Repeated words are
