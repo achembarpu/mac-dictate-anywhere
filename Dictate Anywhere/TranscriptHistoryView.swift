@@ -62,10 +62,12 @@ struct TranscriptHistoryView: View {
 
             if !cancelledEntries.isEmpty {
                 DSSection(overline: "Cancelled sessions") {
-                    DSPanel(
+                    DSHint(
                         text: "Continue restores your words and resumes recording. Stop finishes the combined dictation; if the original app is unavailable, the text is copied. Recover text saves it here without pasting. Sessions expire after 24 hours.",
                         icon: "arrow.counterclockwise"
                     )
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
                     ForEach(cancelledEntries) { entry in
                         DSDivider()
                         HStack(alignment: .top, spacing: 16) {

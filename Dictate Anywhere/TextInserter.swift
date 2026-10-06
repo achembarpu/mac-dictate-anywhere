@@ -8,12 +8,27 @@
 import Foundation
 import AppKit
 import CoreGraphics
+import CoreServices
 import os
 
 enum TextInsertionResult {
     case success
     case copiedOnly
     case failed
+}
+
+enum PasteScriptOutcome: Equatable, Sendable {
+    case success
+    case automationDenied
+    case failed
+
+    static func fromAppleScriptError(_ error: NSDictionary?) -> PasteScriptOutcome {
+        guard let error else { return .success }
+        if (error[NSAppleScript.errorNumber] as? Int) == Int(errAEEventNotPermitted) {
+            return .automationDenied
+        }
+        return .failed
+    }
 }
 
 /// Compiles and executes the paste script on one serial queue. The queue owns
@@ -36,16 +51,16 @@ private nonisolated final class PasteScriptRunner: @unchecked Sendable {
         }
     }
 
-    func paste() async -> Bool {
+    func paste() async -> PasteScriptOutcome {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 guard let script = compiledScript() else {
-                    continuation.resume(returning: false)
+                    continuation.resume(returning: .failed)
                     return
                 }
                 var error: NSDictionary?
                 script.executeAndReturnError(&error)
-                continuation.resume(returning: error == nil)
+                continuation.resume(returning: PasteScriptOutcome.fromAppleScriptError(error))
             }
         }
     }
@@ -70,6 +85,11 @@ final class TextInserter {
     private var pendingSeparator = ""
     private var pendingSeparatorTargetBundleIdentifier: String?
     private let pasteScriptRunner = PasteScriptRunner()
+    private let permissions: Permissions
+
+    init(permissions: Permissions = Permissions()) {
+        self.permissions = permissions
+    }
 
     // MARK: - Public
 
@@ -118,7 +138,7 @@ final class TextInserter {
         }
 
         // Check accessibility permission
-        guard hasAccessibilityPermission(promptIfNeeded: true) else {
+        guard permissions.checkAccessibilityForUse(promptIfNeeded: true) else {
             resetPendingSeparator()
             deliverOutcome = "copiedOnly"
             return .copiedOnly
@@ -706,7 +726,7 @@ final class TextInserter {
     }
 
     private func textBeforeInsertionPoint() -> String? {
-        guard hasAccessibilityPermission(promptIfNeeded: false),
+        guard permissions.checkAccessibilityForUse(promptIfNeeded: false),
               let focusedElement = focusedAccessibilityElement(),
               let selectedRange = selectedTextRange(in: focusedElement) else {
             return nil
@@ -810,13 +830,6 @@ final class TextInserter {
         return false
     }
 
-    private func hasAccessibilityPermission(promptIfNeeded: Bool) -> Bool {
-        guard promptIfNeeded else { return AXIsProcessTrusted() }
-        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        let options = [key: true] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
-    }
-
     private func simulatePasteWithCGEvent() -> Bool {
         let trace = PerfTrace.begin("insertion.pasteEvent")
         defer { trace.end() }
@@ -840,7 +853,16 @@ final class TextInserter {
     private func simulatePasteWithAppleScript() async -> Bool {
         let trace = PerfTrace.begin("insertion.pasteScript")
         defer { trace.end() }
-        return await pasteScriptRunner.paste()
+        switch await pasteScriptRunner.paste() {
+        case .success:
+            permissions.recordAutomationPastePermission(denied: false)
+            return true
+        case .automationDenied:
+            permissions.recordAutomationPastePermission(denied: true)
+            return false
+        case .failed:
+            return false
+        }
     }
 
     /// Compiles the paste script ahead of first use so no dictation pays

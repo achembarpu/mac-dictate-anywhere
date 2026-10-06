@@ -42,6 +42,7 @@ final class AppState {
     var currentTranscript = ""
     var lastTranscript = ""
     var selectedPage: SidebarPage = .models
+    var selectedAttentionIssueID: AttentionIssue.ID?
     var ollamaDownloadState: OllamaDownloadState?
     var ollamaDeletingModel: String?
     var ollamaModelActionError: String?
@@ -58,7 +59,7 @@ final class AppState {
     let hotkeyService = HotkeyService()
     let audioMonitor = AudioMonitor()
     let volumeController = VolumeController()
-    let textInserter = TextInserter()
+    let textInserter: TextInserter
     let overlay = OverlayWindow()
     let audioDeviceManager = AudioDeviceManager()
     let parakeetEngine = ParakeetEngine()
@@ -97,7 +98,7 @@ final class AppState {
     }
     var appleSpeechSupportedLanguages: [SupportedLanguage] = []
     var appleSpeechInstalledLanguages: [SupportedLanguage] = []
-    private var isShowingMigrationAlert = false
+    var appleSpeechUnsupportedSelection = false
 
     /// Whether the app is transitioning between states (simple guard)
     private var isTransitioning = false
@@ -149,6 +150,7 @@ final class AppState {
     private var cleanupPrewarmTask: Task<Void, Never>?
     private var hasStarted = false
     private var isShuttingDown = false
+    private var presentedBlockingAttentionIssues = Set<AttentionIssue.ID>()
 
     /// Serializes profile applies; a change arriving mid-apply queues behind it.
     private var inputSourceApplyTask: Task<Void, Never>?
@@ -188,6 +190,7 @@ final class AppState {
         appleSpeechAssetSnapshot: (() async -> (supported: [SupportedLanguage], installed: [SupportedLanguage]))? = nil
     ) {
         self.permissions = permissions ?? Permissions()
+        self.textInserter = TextInserter(permissions: self.permissions)
         self.microphonePermissionRequester = microphonePermissionRequester
         self.recoveryStore = recoveryStore ?? DictationRecoveryStore()
         self.engineOverride = engine
@@ -252,6 +255,139 @@ final class AppState {
                 self?.handleAccessibilityPermissionChanged(granted)
             }
         }
+    }
+
+    var attentionIssues: [AttentionIssue] {
+        AttentionIssue.pending(
+            permissionsChecked: permissions.hasChecked,
+            microphoneGranted: permissions.micGranted,
+            microphoneCanPrompt: permissions.canPromptForMicrophone,
+            accessibilityGranted: permissions.accessibilityGranted,
+            engineChoice: settings.engineChoice,
+            speechSetupNeeded: speechSetupNeeded,
+            automationDenied: permissions.automationDenied,
+            speechPreparationFailed: enginePreparationError != nil,
+            legacyAppleSpeechMigrationPending: settings.legacyAppleSpeechMigrationPending,
+            appleSpeechUnsupportedSelection: appleSpeechUnsupportedSelection,
+            appleSpeechRequiresMacOS26: !AppleSpeechEngine.isOperatingSystemSupported,
+            cleanupProblems: cleanupAttentionProblems
+        )
+    }
+
+    private var cleanupAttentionProblems: [AttentionIssue.CleanupProblem] {
+        guard settings.engineChoice != .assemblyAI else { return [] }
+        switch settings.transcriptPostProcessingMode {
+        case .none:
+            return []
+        case .fluidAudioVocabulary:
+            return settings.engineChoice != .parakeet || !settings.parakeetModelChoice.supportsFluidAudioVocabulary
+                ? [.fluidAudioVocabularyUnavailable] : []
+        case .appleIntelligence:
+            guard #available(macOS 26, *) else { return [.appleIntelligenceRequiresMacOS26] }
+            switch AIPostProcessingService.availability {
+            case .available: return []
+            case .unavailable(.deviceNotEligible): return [.appleIntelligenceDeviceIneligible]
+            case .unavailable(.appleIntelligenceNotEnabled): return [.appleIntelligenceNotEnabled]
+            case .unavailable(.modelNotReady): return []
+            case .unavailable(_): return [.appleIntelligenceUnavailable]
+            }
+        case .s1Mini:
+            var problems: [AttentionIssue.CleanupProblem] = []
+            let language = settings.engineChoice == .appleSpeech
+                ? settings.appleSpeechLanguage : settings.selectedLanguage
+            if language != .english { problems.append(.s1MiniLanguageUnsupported) }
+            if !s1MiniModelManager.isModelDownloaded && !s1MiniModelManager.isBusy {
+                problems.append(.s1MiniNotDownloaded)
+            }
+            return problems
+        case .ollama:
+            return settings.ollamaModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? [.ollamaModelMissing] : []
+        case .openRouter:
+            var problems: [AttentionIssue.CleanupProblem] = []
+            let keyStatus = OpenRouterPostProcessingService.apiKeyStatus(
+                apiKey: settings.openRouterAPIKey,
+                apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable
+            )
+            if case .missing = keyStatus.source { problems.append(.openRouterKeyMissing) }
+            if settings.openRouterModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                problems.append(.openRouterModelMissing)
+            }
+            return problems
+        case .openAICompatible:
+            return settings.openAICompatibleModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? [.openAICompatibleModelMissing] : []
+        }
+    }
+
+    func reportUnsupportedAppleSpeechSelection() {
+        appleSpeechUnsupportedSelection = true
+        selectedAttentionIssueID = .appleSpeechUnsupported
+    }
+
+    private var speechSetupNeeded: Bool {
+        guard !activeEngine.isReady, !isPreparingEngine else { return false }
+        if enginePreparationError != nil { return true }
+        switch settings.engineChoice {
+        case .parakeet:
+            return !parakeetEngine.isDownloading && !parakeetEngine.isModelDownloaded
+        case .appleSpeech:
+            return !appleSpeechInstalledLanguages.contains(settings.appleSpeechLanguage)
+        case .assemblyAI:
+            return !assemblyAIEngine.isReady
+        }
+    }
+
+    func resolveAttentionIssue(_ id: AttentionIssue.ID) {
+        switch id {
+        case .microphone:
+            Task {
+                await permissions.resolve(.microphone)
+                rearmResolvedBlockingAttentionIssues()
+            }
+        case .accessibility:
+            Task { await permissions.resolve(.accessibility) }
+        case .speechSetup:
+            selectedPage = .models
+        case .appleSpeechUnsupported:
+            appleSpeechUnsupportedSelection = false
+        case .cleanup(let problem):
+            if problem == .fluidAudioVocabularyUnavailable {
+                selectedPage = .models
+            } else if problem == .appleIntelligenceNotEnabled,
+               let url = URL(string: "x-apple.systempreferences:com.apple.preference.AppleIntelligence") {
+                NSWorkspace.shared.open(url)
+            } else {
+                selectedPage = .aiPostProcessing
+            }
+        case .automation:
+            Task { await permissions.resolve(.automation) }
+        }
+    }
+
+    func refreshPermissionsAfterActivation() async {
+        await permissions.refresh()
+        rearmResolvedBlockingAttentionIssues()
+    }
+
+    func updateAssemblyAIAPIKey(_ apiKey: String) {
+        settings.assemblyAIAPIKey = apiKey
+        // Entry and Clear may happen before the next view update or readiness check.
+        rearmResolvedBlockingAttentionIssues()
+    }
+
+    private func rearmResolvedBlockingAttentionIssues() {
+        if permissions.micGranted { presentedBlockingAttentionIssues.remove(.microphone) }
+        if permissions.accessibilityGranted { presentedBlockingAttentionIssues.remove(.accessibility) }
+        // Preparation temporarily hides setup warnings. Only actual readiness
+        // resolves the blocker; a failed retry must not request another window.
+        if activeEngine.isReady { presentedBlockingAttentionIssues.remove(.speechSetup) }
+    }
+
+    private func presentBlockingAttentionIssueOnce(_ id: AttentionIssue.ID) {
+        guard presentedBlockingAttentionIssues.insert(id).inserted else { return }
+        selectedAttentionIssueID = id
+        NotificationCenter.default.post(name: .requestShowMainWindow, object: nil)
     }
 
     private func setupInputSourceCallbacks() {
@@ -355,7 +491,7 @@ final class AppState {
             logger.warning("Startup paste script compilation failed; paste will retry on first use")
         }
         guard !isShuttingDown else { return }
-        await PerfTrace.measure("app.permissionCheck") { await permissions.check() }
+        await PerfTrace.measure("app.permissionCheck") { await permissions.refresh() }
         guard !isShuttingDown else { return }
         updateAccessibilityIntegration(granted: permissions.accessibilityGranted, promptIfNeeded: true)
         await PerfTrace.measure("app.appleSpeechAssetRefresh") {
@@ -423,6 +559,7 @@ final class AppState {
     }
 
     private func handleAccessibilityPermissionChanged(_ granted: Bool) {
+        rearmResolvedBlockingAttentionIssues()
         updateAccessibilityIntegration(granted: granted, promptIfNeeded: false)
     }
 
@@ -445,6 +582,7 @@ final class AppState {
     // MARK: - Engine Lifecycle
 
     func prepareActiveEngine(prewarmModel: Bool = true) async {
+        defer { rearmResolvedBlockingAttentionIssues() }
         while let inFlight = enginePreparation {
             await inFlight.task.value
             if enginePreparation?.id == inFlight.id {
@@ -560,6 +698,7 @@ final class AppState {
         let trace = PerfTrace.begin("stt.modelSwitch")
         defer { trace.end() }
         guard status == .idle else { return }
+        appleSpeechUnsupportedSelection = false
         settings.engineChoice = .parakeet
         settings.userHasChosenEngine = userInitiated
         await parakeetEngine.handleSelectedModelChange()
@@ -572,6 +711,8 @@ final class AppState {
         guard status == .idle else { return }
         guard availableEngineChoices.contains(choice) else { return }
         guard choice != .appleSpeech || AppleSpeechEngine.isSupported else { return }
+
+        appleSpeechUnsupportedSelection = false
 
         if choice != .appleSpeech {
             await appleSpeechEngine.invalidatePreparedSession()
@@ -885,6 +1026,12 @@ final class AppState {
             status = .idle
         }
         guard status == .idle, !isTransitioning else { return }
+        if hasStarted {
+            await permissions.refreshForDictation()
+            guard !isShuttingDown, status == .idle, !isTransitioning else { return }
+            if mode == .holdToRecord && !isHoldToRecordKeyDown { return }
+        }
+        rearmResolvedBlockingAttentionIssues()
         if !permissions.micGranted {
             let granted: Bool
             if let microphonePermissionRequester {
@@ -894,11 +1041,12 @@ final class AppState {
             }
 
             guard granted else {
-                status = .error("Microphone access is required to dictate. Enable it in System Settings, then try again.")
+                presentBlockingAttentionIssueOnce(.microphone)
                 return
             }
 
             permissions.micGranted = true
+            rearmResolvedBlockingAttentionIssues()
             return // The permission gesture must never become a recording gesture.
         }
         guard !isShuttingDown else { return }
@@ -944,11 +1092,9 @@ final class AppState {
 
             guard modelReady, engine.isReady else {
                 logger.warning("startDictation: FluidAudio engine not ready, aborting")
-                if settings.legacyAppleSpeechMigrationPending && !parakeetEngine.checkModelOnDisk() {
-                    showLegacyAppleSpeechUnavailableAlert()
-                }
                 status = .error("\(settings.parakeetModelChoice.displayName) is not ready. Download it from Speech Model settings.")
                 status = .idle
+                presentBlockingAttentionIssueOnce(.speechSetup)
                 return
             }
         case .appleSpeech:
@@ -959,6 +1105,7 @@ final class AppState {
                 logger.warning("startDictation: Apple Speech engine not ready, aborting")
                 status = .error("Apple Speech is not ready. Open Speech Model settings to finish setup.")
                 status = .idle
+                presentBlockingAttentionIssueOnce(.speechSetup)
                 return
             }
         case .assemblyAI:
@@ -966,6 +1113,7 @@ final class AppState {
                 logger.warning("startDictation: AssemblyAI API key is missing")
                 status = .error("Add an AssemblyAI API key in Speech Model settings before dictating.")
                 status = .idle
+                presentBlockingAttentionIssueOnce(.speechSetup)
                 return
             }
         }
@@ -1100,6 +1248,11 @@ final class AppState {
 
         guard !isShuttingDown else { return }
         guard didStart else {
+            await permissions.refreshForDictation()
+            guard !isShuttingDown, activeRecordingStartupID == recordingStartupID else { return }
+            if !permissions.micGranted {
+                presentBlockingAttentionIssueOnce(.microphone)
+            }
             invalidateContextCapture()
             let wasContinuing = continuingEntryID != nil
             await discardSessionRecovery()
@@ -1420,6 +1573,9 @@ final class AppState {
         case .copiedOnly:
             insertionOrchestrationTrace.end(outcome: "copiedOnly")
             trace.end(outcome: "copiedOnly")
+            if transcriptDeliveryOverride == nil && !permissions.accessibilityGranted {
+                presentBlockingAttentionIssueOnce(.accessibility)
+            }
         case .failed:
             insertionOrchestrationTrace.end(outcome: "failed")
             trace.end(outcome: "failed")
@@ -1647,6 +1803,11 @@ final class AppState {
 
     func continueCancelledDictation(_ entry: CancelledDictation) async {
         guard !isShuttingDown, status == .idle, !isTransitioning else { return }
+        if hasStarted {
+            await permissions.refreshForDictation()
+            guard !isShuttingDown, status == .idle, !isTransitioning else { return }
+        }
+        rearmResolvedBlockingAttentionIssues()
         let trace = PerfTrace.begin("recovery.continue")
         defer { trace.end() }
         isTransitioning = true
@@ -1656,9 +1817,11 @@ final class AppState {
             if let microphonePermissionRequester { granted = await microphonePermissionRequester() }
             else { granted = await permissions.requestMic() }
             permissions.micGranted = granted
+            rearmResolvedBlockingAttentionIssues()
             recoveryStore.errorMessage = granted
                 ? "Microphone access is ready. Click Continue to resume your saved session."
                 : "Microphone access is required to continue. Your saved session is still available."
+            if !granted { presentBlockingAttentionIssueOnce(.microphone) }
             return
         }
         do {
@@ -1929,42 +2092,6 @@ final class AppState {
         (engine as? ParakeetEngine)?.endOfUtteranceHandler = nil
     }
 
-    private func showLegacyAppleSpeechUnavailableAlert() {
-        guard !isShowingMigrationAlert else { return }
-        isShowingMigrationAlert = true
-        defer { isShowingMigrationAlert = false }
-
-        let restorePolicy = settings.appAppearanceMode.activationPolicy
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        defer {
-            NSApp.setActivationPolicy(restorePolicy)
-        }
-
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        if AppleSpeechEngine.isOperatingSystemSupported {
-            alert.messageText = "Apple Speech Isn’t Available on This Mac"
-            alert.informativeText = """
-            Dictate Anywhere has switched to FluidAudio. Download a FluidAudio speech model to \
-            continue dictating.
-            """
-        } else {
-            alert.messageText = "Apple Speech Requires macOS 26"
-            alert.informativeText = """
-            \(AppleSpeechEngine.operatingSystemDisplayName) does not support Apple Speech. Dictate \
-            Anywhere has switched to FluidAudio. Download a FluidAudio speech model to continue dictating.
-            """
-        }
-        alert.addButton(withTitle: "Open Speech Model")
-        alert.addButton(withTitle: "Not Now")
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-
-        selectedPage = .models
-        NotificationCenter.default.post(name: .requestShowMainWindow, object: nil)
-    }
 }
 
 // MARK: - Audio Device Manager

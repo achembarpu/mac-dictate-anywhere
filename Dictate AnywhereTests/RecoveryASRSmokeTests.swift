@@ -104,8 +104,6 @@ final class RecoveryASRSmokeTests: XCTestCase {
 
     func testAppleSpeechRecoversSavedAudio() async throws {
         try XCTSkipUnless(AppleSpeechEngine.isSupported, "Apple Speech is unavailable")
-        try XCTSkipUnless(SFSpeechRecognizer.authorizationStatus() == .authorized,
-                          "Apple Speech permission has not been granted to the test app")
         let installed = await AppleSpeechEngine.installedLanguages()
         try XCTSkipUnless(installed.contains(.english), "English Apple Speech assets are not installed")
         let oldLanguage = Settings.shared.appleSpeechLanguage
@@ -178,8 +176,7 @@ final class RecoveryASRSmokeTests: XCTestCase {
             didRun = true
         }
 
-        if AppleSpeechEngine.isSupported,
-           SFSpeechRecognizer.authorizationStatus() == .authorized {
+        if AppleSpeechEngine.isSupported {
             PerfTrace.clearSessionMetadata()
             let engine = AppleSpeechEngine()
             settings.appleSpeechLanguage = .english

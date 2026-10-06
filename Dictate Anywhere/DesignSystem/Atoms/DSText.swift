@@ -39,28 +39,3 @@ struct DSHint: View {
         }
     }
 }
-
-/// Atom: informational panel with tinted background (design "Panel").
-struct DSPanel: View {
-    let text: String
-    var icon: String = "sparkles"
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DS.Colors.accentDeep)
-                .frame(width: 16)
-                .padding(.top, 1)
-            Text(text)
-                .font(DS.Fonts.ui(12.5))
-                .lineSpacing(12.5 * 0.55 - 3)
-                .foregroundStyle(DS.Colors.panelText)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 14)
-        .background(DS.Colors.accentSoft, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
-    }
-}

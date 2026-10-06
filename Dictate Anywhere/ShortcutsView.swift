@@ -149,7 +149,7 @@ struct ShortcutsView: View {
                 )
             }
 
-            DSPanel(
+            DSHint(
                 text: "Press any key combo, or press only modifiers (like \u{2303}\u{2325}\u{2318}) and release. Left and right modifiers are supported — for example, R\u{2318} uses only the right Command key.",
                 icon: "keyboard"
             )

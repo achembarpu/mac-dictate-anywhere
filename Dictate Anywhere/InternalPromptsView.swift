@@ -43,7 +43,7 @@ struct InternalPromptsView: View {
                 subtitle: "Fine-tune the instructions AssemblyAI uses to recognize, clean, and format your dictation."
             )
 
-            DSPanel(
+            DSHint(
                 text: "Recognition prompts are always used. Cleanup, destination, style, and field-context prompts apply only when Output is set to Polished. Insertion and privacy safeguards remain protected. Keep prompts concise: applicable preferences share a limited instruction budget and long prompts may be shortened."
             )
 

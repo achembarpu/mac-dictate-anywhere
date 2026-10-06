@@ -380,7 +380,6 @@
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Dictate Anywhere uses Apple Events to paste transcribed text into other applications.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Dictate Anywhere needs microphone access to transcribe your speech in real-time.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Dictate Anywhere uses speech recognition to transcribe your voice into text.";
 				INFOPLIST_PREPROCESS = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -422,7 +421,6 @@
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Dictate Anywhere uses Apple Events to paste transcribed text into other applications.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Dictate Anywhere needs microphone access to transcribe your speech in real-time.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Dictate Anywhere uses speech recognition to transcribe your voice into text.";
 				INFOPLIST_PREPROCESS = YES;
 				INFOPLIST_PREPROCESSOR_DEFINITIONS = "RELEASE=1";
 				LD_RUNPATH_SEARCH_PATHS = (

@@ -11,7 +11,6 @@ struct ModelsView: View {
     @Environment(AppState.self) private var appState
 
     @State private var showDeleteConfirm = false
-    @State private var showUnsupportedAppleSpeechAlert = false
     @State private var downloadError: String?
 
     var body: some View {
@@ -32,7 +31,7 @@ struct ModelsView: View {
                             set: { newValue in
                                 downloadError = nil
                                 if newValue == .appleSpeech, !AppleSpeechEngine.isSupported {
-                                    showUnsupportedAppleSpeechAlert = true
+                                    appState.reportUnsupportedAppleSpeechSelection()
                                     return
                                 }
                                 Task { await appState.handleEngineSelectionChange(newValue) }
@@ -159,11 +158,6 @@ struct ModelsView: View {
         } message: {
             Text("This will remove the \(selectedModel.displayName.lowercased()) speech model (\(selectedModel.sizeSummary)). You can download it again later.")
         }
-        .alert(unsupportedAppleSpeechAlertTitle, isPresented: $showUnsupportedAppleSpeechAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(unsupportedAppleSpeechAlertMessage)
-        }
     }
 
     private func engineChoiceTitle(_ choice: TranscriptionEngineChoice) -> String {
@@ -192,12 +186,15 @@ struct ModelsView: View {
                 HStack(spacing: 8) {
                     DSTextField(
                         placeholder: "Paste AssemblyAI API key",
-                        text: $settings.assemblyAIAPIKey,
+                        text: Binding(
+                            get: { settings.assemblyAIAPIKey },
+                            set: { appState.updateAssemblyAIAPIKey($0) }
+                        ),
                         isSecure: true
                     )
                     .frame(width: 280)
                     if !settings.assemblyAIAPIKey.isEmpty {
-                        Button("Clear") { settings.assemblyAIAPIKey = "" }
+                        Button("Clear") { appState.updateAssemblyAIAPIKey("") }
                             .buttonStyle(.dsSecondary)
                     }
                 }
@@ -362,19 +359,6 @@ struct ModelsView: View {
             return "Used in Messages, WhatsApp, Telegram, and similar personal chat."
         case .other: return "Used when no email or messaging category matches."
         }
-    }
-
-    private var unsupportedAppleSpeechAlertTitle: String {
-        AppleSpeechEngine.isOperatingSystemSupported
-            ? "Apple Speech Isn’t Available on This Mac"
-            : "Apple Speech Requires macOS 26"
-    }
-
-    private var unsupportedAppleSpeechAlertMessage: String {
-        if !AppleSpeechEngine.isOperatingSystemSupported {
-            return "\(AppleSpeechEngine.operatingSystemDisplayName) does not support Apple Speech. Update to macOS 26 or later to use it. FluidAudio remains available on this Mac."
-        }
-        return "Apple Speech is not available on this Mac. You can continue using FluidAudio."
     }
 
     @ViewBuilder

@@ -22,7 +22,6 @@ final class ComponentRenderTests: XCTestCase {
     func testOverlineRenders() { assertRenders(DSOverline(text: "Startup")) }
     func testDividerRenders() { assertRenders(DSDivider()) }
     func testHintRenders() { assertRenders(DSHint(text: "Helpful hint text for the user.")) }
-    func testPanelRenders() { assertRenders(DSPanel(text: "Informational panel message body.", icon: "keyboard")) }
 
     func testChipRenders() {
         assertRenders(DSChip(text: "um"))
@@ -143,7 +142,16 @@ final class ComponentRenderTests: XCTestCase {
 
     // MARK: - Organisms
 
-    func testWarningBannerRenders() {
-        assertRenders(WarningBanner(message: "A speech model is required.", buttonTitle: "Set Up") {})
+    func testAttentionBannerRenders() {
+        let issues = AttentionIssue.pending(
+            permissionsChecked: true,
+            microphoneGranted: false,
+            microphoneCanPrompt: false,
+            accessibilityGranted: false,
+            engineChoice: .parakeet,
+            speechSetupNeeded: true,
+            automationDenied: true
+        )
+        assertRenders(AttentionBanner(issues: issues, selectedID: .constant(nil)) { _ in }, width: 676)
     }
 }
