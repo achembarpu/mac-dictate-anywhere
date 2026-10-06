@@ -269,7 +269,7 @@ hashes, not generated measurements. Record revisions and configuration alongside
 local results. Project guides describe the current runtime and commands.
 
 `--only s1-cpu` compares GGUF CPU KV precision. `--only s1-prepare`
-compares unloaded and prepared first requests using the installed GGUF model.
+compares unloaded and prepared first requests using the installed selected runtime.
 The shared S1 stress references and saved-output scorer apply to any runtime.
 
 `--only asr-language` compares unfiltered and script-filtered v3/Ultra output
