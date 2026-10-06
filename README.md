@@ -71,7 +71,7 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 | Off | On-device filler removal if enabled | Raw dictation | Retains the speech result after optional filler removal |
 | Vocabulary correction only | On-device | Domain terms without a cleanup LLM | Parakeet TDT rescoring or native Nemotron/Apple Speech vocabulary hints, where available |
 | Apple Intelligence | On-device | Native macOS cleanup | On-device cleanup on supported Macs |
-| S1-mini by Superwhisper | On-device | Compact English transcript normalization | One-click 462 MB download, fixed style/structure/context controls, and no separate server |
+| S1-mini by Superwhisper | On-device | Compact English transcript normalization | Architecture-specific download, trained controls, and no separate server; see the [native runtime](docs/s1-native-runtime.md) |
 | Ollama | Local or self-hosted server | Privacy-first LLM cleanup | Local model choice, optional reasoning controls, and in-app model management for local Ollama setups |
 | OpenRouter | Cloud | Broad hosted model access | Large model catalog, model search, secure key storage, and structured-output-aware selection |
 
@@ -79,11 +79,11 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 
 [S1-mini by Superwhisper](https://huggingface.co/superwhisper/s1-mini) is a compact model trained specifically to normalize speech-to-text transcripts.
 
-- Downloads a pinned Q4_K_M model directly from Hugging Face and verifies its exact size and SHA-256 before installation
-- Runs through the embedded llama.cpp runtime, with Metal acceleration on Apple Silicon and CPU inference on Intel
+- Downloads a pinned MLX 4-bit package for Apple Silicon or Q4_K_M GGUF for Intel; verifies package assets by size and SHA-256 before installation
+- Uses native MLX on Apple Silicon and embedded llama.cpp CPU inference on Intel. Existing GGUF downloads remain usable through Metal on Apple Silicon; **Optimize Model** installs the MLX package
 - Provides the model's trained styling, structure, and context controls instead of an arbitrary prompt
 - Supports English transcripts up to approximately 1,000 model tokens; unsupported languages or failed cleanup preserve the original transcript
-- Can be removed from the Transcript Cleanup page, including its locally stored license file
+- Can be removed from the Transcript Cleanup page, including both managed runtime formats and their license files
 
 ### Ollama
 
