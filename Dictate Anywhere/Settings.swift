@@ -677,7 +677,7 @@ enum TranscriptPostProcessingMode: String, CaseIterable {
     var displayName: String {
         switch self {
         case .none: return "Off"
-        case .fluidAudioVocabulary: return "FluidAudio Vocabulary"
+        case .fluidAudioVocabulary: return "Vocabulary correction only"
         case .appleIntelligence: return "Apple Intelligence"
         case .s1Mini: return "S1-mini by Superwhisper"
         case .ollama: return "Ollama"

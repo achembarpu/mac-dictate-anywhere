@@ -713,7 +713,7 @@ struct AIPostProcessingView: View {
     @ViewBuilder
     private func fluidAudioVocabularyContent(settings: Settings) -> some View {
         if settings.engineChoice != .parakeet || !settings.parakeetModelChoice.supportsFluidAudioVocabulary {
-            DSSection(overline: "FluidAudio Vocabulary") {
+            DSSection(overline: "Vocabulary Correction") {
                 DSInfoRow(label: "Status", value: "Requires Parakeet TDT or multilingual Nemotron")
             }
         } else if settings.transcriptPostProcessingMode.supportedFeatures.contains(.customVocabulary) {

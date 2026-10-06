@@ -277,7 +277,7 @@ final class ModelAndModeTests: XCTestCase {
 
     func testPostProcessingModeDisplayNames() {
         XCTAssertEqual(TranscriptPostProcessingMode.none.displayName, "Off")
-        XCTAssertEqual(TranscriptPostProcessingMode.fluidAudioVocabulary.displayName, "FluidAudio Vocabulary")
+        XCTAssertEqual(TranscriptPostProcessingMode.fluidAudioVocabulary.displayName, "Vocabulary correction only")
         XCTAssertEqual(TranscriptPostProcessingMode.appleIntelligence.displayName, "Apple Intelligence")
         XCTAssertEqual(TranscriptPostProcessingMode.s1Mini.displayName, "S1-mini by Superwhisper")
         XCTAssertEqual(TranscriptPostProcessingMode.ollama.displayName, "Ollama")
