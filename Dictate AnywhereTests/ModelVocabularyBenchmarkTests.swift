@@ -1,3 +1,4 @@
+#if PIPELINE_BENCHMARK
 import Foundation
 import FluidAudio
 import XCTest
@@ -121,3 +122,5 @@ final class ModelVocabularyBenchmarkTests: XCTestCase {
     }
     #endif
 }
+
+#endif
