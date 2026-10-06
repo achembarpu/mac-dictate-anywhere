@@ -392,89 +392,41 @@ struct ModelsView: View {
         }
     }
 
-    @ViewBuilder
     private var appleSpeechStatusRow: some View {
-        if appState.isPreparingEngine {
-            DSInfoRow(label: "Status") {
-                DSLoadingMessage(text: "Preparing Apple Speech…")
-            }
-        } else if appState.appleSpeechEngine.isReady {
-            DSInfoRow(label: "Status") {
-                DSStatusPill(text: "Ready")
-            }
-        } else {
-            DSInfoRow(label: "Status") {
-                HStack(spacing: 10) {
-                    DSStatusPill(
-                        text: "Not set up",
-                        dotColor: DS.Colors.textSecondary,
-                        textColor: DS.Colors.textSecondary,
-                        fill: DS.Colors.bgInset
-                    )
-                    Button("Set Up Apple Speech") {
-                        Task { await appState.prepareActiveEngine() }
-                    }
-                    .buttonStyle(.dsPrimary)
-                    .disabled(appState.status != .idle || appState.isPreparingEngine || isDeletingModel)
-                }
-            }
-        }
+        let readiness: ModelReadiness = appState.isPreparingEngine ? .preparing
+            : (appState.appleSpeechEngine.isReady ? .ready : .needsSetup)
+        return DSModelReadinessRow(readiness: readiness,
+            actionTitle: readiness == .needsSetup ? "Set Up Apple Speech" : nil,
+            action: { Task { await appState.prepareActiveEngine() } })
+            .disabled(appState.status != .idle || isDeletingModel)
     }
 
-    @ViewBuilder
+    private var speechReadiness: ModelReadiness {
+        if isDeletingModel { return .deleting }
+        if appState.parakeetEngine.isDownloading { return .downloading(appState.parakeetEngine.downloadProgress) }
+        if appState.isPreparingEngine { return .preparing }
+        if appState.parakeetEngine.isReady { return .ready }
+        return appState.parakeetEngine.isModelDownloaded ? .downloaded : .notDownloaded
+    }
+
     private var statusRow: some View {
-        if isDeletingModel {
-            DSInfoRow(label: "Status") {
-                DSLoadingMessage(text: "Deleting speech model…")
-            }
-        } else if appState.parakeetEngine.isDownloading {
-            let progress = appState.parakeetEngine.downloadProgress
-            DSInfoRow(label: "Downloading… \(Int(progress * 100))%") {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(DS.Colors.accent)
-                    .frame(width: 180)
-                    .accessibilityLabel("Download \(appState.settings.parakeetModelChoice.displayName)")
-            }
-        } else if appState.isPreparingEngine {
-            DSInfoRow(label: "Status") {
-                DSLoadingMessage(text: "Preparing speech model…")
-            }
-        } else if appState.parakeetEngine.isReady {
-            DSInfoRow(label: "Status") {
-                DSStatusPill(text: "Ready")
-            }
-        } else if appState.parakeetEngine.isModelDownloaded {
-            DSInfoRow(label: "Status") {
-                DSStatusPill(text: "Downloaded")
-            }
-        } else {
-            DSInfoRow(label: "Status") {
-                HStack(spacing: 10) {
-                    DSStatusPill(
-                        text: "Not downloaded",
-                        dotColor: DS.Colors.textSecondary,
-                        textColor: DS.Colors.textSecondary,
-                        fill: DS.Colors.bgInset
-                    )
-                    Button("Download Model") {
-                        modelActionError = nil
-                        Task {
-                            do {
-                                try await appState.parakeetEngine.downloadModel()
-                                await MainActor.run {
-                                    applyParakeetSelection(userInitiated: true)
-                                }
-                            } catch {
-                                modelActionError = error.localizedDescription
-                            }
-                        }
-                    }
-                    .buttonStyle(.dsPrimary)
-                    .disabled(appState.status != .idle || appState.isPreparingEngine || isDeletingModel)
+        let readiness = speechReadiness
+        let actionTitle = readiness == .notDownloaded ? "Download Model"
+            : (readiness == .downloaded ? "Prepare Model" : nil)
+        return DSModelReadinessRow(readiness: readiness, actionTitle: actionTitle, action: {
+            modelActionError = nil
+            Task {
+                if appState.parakeetEngine.isModelDownloaded {
+                    await appState.prepareActiveEngine()
+                } else {
+                    do {
+                        try await appState.parakeetEngine.downloadModel()
+                        applyParakeetSelection(userInitiated: true)
+                    } catch { modelActionError = error.localizedDescription }
                 }
             }
-        }
+        })
+        .disabled(appState.status != .idle || isDeletingModel)
     }
 
     private func applyParakeetSelection(userInitiated: Bool) {

@@ -770,13 +770,11 @@ struct AIPostProcessingView: View {
         DSSection(overline: "S1-mini by Superwhisper") {
             cardPadded {
                 HStack(alignment: .center, spacing: 12) {
-                    Image(systemName: s1MiniStatusIcon(manager: manager))
+                    Image(systemName: s1MiniReadiness(manager: manager).symbol)
                         .foregroundStyle(manager.isModelDownloaded ? DS.Colors.success : DS.Colors.accent)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(s1MiniStatusTitle(manager: manager))
-                            .font(DS.Fonts.ui(13.5, .semibold))
-                            .foregroundStyle(DS.Colors.ink)
+                        DSModelReadinessStatus(readiness: s1MiniReadiness(manager: manager))
                         Text("462 MB · English · Local transcript normalizer")
                             .font(DS.Fonts.ui(12.5))
                             .foregroundStyle(DS.Colors.textSecondary)
@@ -877,18 +875,11 @@ struct AIPostProcessingView: View {
         }
     }
 
-    private func s1MiniStatusTitle(manager: S1MiniModelManager) -> String {
-        if manager.isDownloading { return "Downloading and verifying…" }
-        if manager.isDeleting { return "Deleting…" }
-        if manager.isVerifying { return "Verifying installation…" }
-        return manager.isModelDownloaded ? "Ready" : "Not downloaded"
-    }
-
-    private func s1MiniStatusIcon(manager: S1MiniModelManager) -> String {
-        if manager.isDownloading { return "arrow.down.circle" }
-        if manager.isDeleting { return "trash.circle" }
-        if manager.isVerifying { return "checkmark.shield" }
-        return manager.isModelDownloaded ? "checkmark.circle.fill" : "internaldrive"
+    private func s1MiniReadiness(manager: S1MiniModelManager) -> ModelReadiness {
+        if manager.isDownloading { return .downloading(s1MiniVisibleDownloadProgress(manager: manager)) }
+        if manager.isDeleting { return .deleting }
+        if manager.isVerifying { return .verifying }
+        return manager.isModelDownloaded ? .downloaded : .notDownloaded
     }
 
     private func s1MiniVisibleDownloadProgress(manager: S1MiniModelManager) -> Double {
