@@ -88,7 +88,7 @@ struct AIPostProcessingView: View {
                         action: { Task { await appState.prepareCleanupEngineIfNeeded(force: true) } })
                         .disabled(appState.status != .idle)
                     DSDivider()
-                    DSCardCaption(text: "Ready means the selected setup has been prepared. Preparing downloads missing local support files before first use. For remote services, it checks the connection and model configuration.")
+                    DSCardCaption(text: "Ready means the local model has been prepared. Preparing downloads missing local support files before first use. Remote services show Configured; preparation checks their connection and model information.")
                 }
             }
 

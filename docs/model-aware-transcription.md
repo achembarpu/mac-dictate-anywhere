@@ -99,8 +99,8 @@ already resident models.
 
 Speech and cleanup settings share **Downloaded**, **Preparing for first use…**
 and **Ready** states, with download progress, preparation failures and a manual
-Prepare action. Remote services use **Configured** before their connection/model
-preparation succeeds. Vocabulary readiness includes its tokenizer, scorer and
+Prepare action. Remote services use **Configured**; connection/model discovery
+does not establish local runtime readiness or verify a paid inference. Vocabulary readiness includes its tokenizer, scorer and
 actual CTC/native decoder warmup; edited terms invalidate it. Manual preparation
 works even when automatic preparation is disabled.
 

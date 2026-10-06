@@ -200,6 +200,35 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testUnavailableAppleModelCannotInheritCachedPreparedReadiness() {
+        guard #available(macOS 26, *) else { return }
+        for availability in [SystemLanguageModel.Availability.unavailable(.deviceNotEligible),
+                             .unavailable(.appleIntelligenceNotEnabled), .unavailable(.modelNotReady)] {
+            XCTAssertFalse(AppState.appleCleanupReadiness(availability: availability, isPrepared: true).isReady)
+        }
+        XCTAssertEqual(AppState.appleCleanupReadiness(availability: .unavailable(.modelNotReady), isPrepared: true), .preparing)
+        XCTAssertEqual(AppState.appleCleanupReadiness(availability: .available, isPrepared: false), .available)
+        XCTAssertEqual(AppState.appleCleanupReadiness(availability: .available, isPrepared: true), .ready)
+    }
+
+    func testRemotePreparationShowsConfiguredWithoutClaimingLocalReadiness() async {
+        let settings = Settings.shared
+        let previousModel = settings.ollamaModel
+        defer { settings.ollamaModel = previousModel }
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .ollama
+        settings.ollamaModel = "test-remote-model"
+        settings.prewarmEnginesAtStartup = false
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: { _ in true })
+        XCTAssertEqual(app.cleanupReadiness, .configured)
+        XCTAssertTrue(app.canPrepareCleanupEngine)
+        await app.prepareCleanupEngineIfNeeded(force: true)
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        XCTAssertEqual(app.cleanupReadiness, .configured, "Remote discovery is not proof of an inference-ready local model")
+        XCTAssertFalse(app.canPrepareCleanupEngine, "A completed matching preparation does not need another Prepare action")
+        await app.shutdown()
+    }
+
     func testCleanupChoiceChangedDuringPreparationIsPreparedAfterTheOldLoad() async {
         let settings = Settings.shared
         settings.engineChoice = .parakeet

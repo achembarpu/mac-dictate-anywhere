@@ -618,10 +618,22 @@ final class AppState {
             guard settings.engineChoice == .parakeet else { return .unavailable("Requires a supported Parakeet speech model.") }
             return parakeetEngine.vocabularyReadiness
         }
+        if mode == .appleIntelligence {
+            guard #available(macOS 26, *) else { return .unavailable("Requires macOS 26 or later.") }
+            let readiness = Self.appleCleanupReadiness(availability: AIPostProcessingService.availability,
+                                                       isPrepared: isCleanupEnginePrepared)
+            if readiness == .available || readiness.isReady {
+                if isPreparingCleanupEngine { return .preparing }
+                if let failure = cleanupPreparationFailure, cleanupConfigurationMatches(failure.key, cleanupPreparationKey) {
+                    return .failed(failure.message)
+                }
+            }
+            return readiness
+        }
         if mode == .openRouter, !OpenRouterPostProcessingService.apiKeyStatus(apiKey: settings.openRouterAPIKey,
             apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable).isConfigured { return .needsSetup }
         if isPreparingCleanupEngine { return .preparing }
-        if isCleanupEnginePrepared { return .ready }
+        if isCleanupEnginePrepared, ![.ollama, .openRouter, .openAICompatible].contains(mode) { return .ready }
         if let failure = cleanupPreparationFailure, cleanupConfigurationMatches(failure.key, cleanupPreparationKey) {
             return .failed(failure.message)
         }
@@ -632,10 +644,6 @@ final class AppState {
             if s1MiniModelManager.isVerifying { return .verifying }
             if s1MiniModelManager.isDeleting { return .deleting }
             return s1MiniModelManager.isModelDownloaded ? .downloaded : .notDownloaded
-        case .appleIntelligence:
-            guard #available(macOS 26, *) else { return .unavailable("Requires macOS 26 or later.") }
-            return AIPostProcessingService.availability == .available ? .available
-                : .unavailable("Enable Apple Intelligence and finish its model download in System Settings.")
         case .ollama, .openRouter, .openAICompatible:
             return cleanupPreparationKey.providerModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? .needsSetup : .configured
@@ -643,11 +651,25 @@ final class AppState {
         }
     }
 
+    @available(macOS 26, *)
+    nonisolated static func appleCleanupReadiness(availability: SystemLanguageModel.Availability,
+                                                isPrepared: Bool) -> ModelReadiness {
+        switch availability {
+        case .available: return isPrepared ? .ready : .available
+        case .unavailable(.deviceNotEligible): return .unavailable("Apple Intelligence is unavailable on this Mac.")
+        case .unavailable(.appleIntelligenceNotEnabled): return .unavailable("Enable Apple Intelligence in System Settings.")
+        case .unavailable(.modelNotReady): return .preparing
+        case .unavailable(_): return .unavailable("Apple Intelligence is temporarily unavailable.")
+        }
+    }
+
     var canPrepareCleanupEngine: Bool {
         guard status == .idle, !isPreparingCleanupEngine, !isShuttingDown,
               settings.engineChoice != .assemblyAI else { return false }
+        if [.ollama, .openRouter, .openAICompatible].contains(settings.transcriptPostProcessingMode),
+           isCleanupEnginePrepared { return false }
         switch cleanupReadiness {
-        case .notDownloaded, .needsSetup, .unavailable, .ready, .downloading, .verifying, .deleting: return false
+        case .notDownloaded, .needsSetup, .unavailable, .ready, .downloading, .verifying, .preparing, .deleting: return false
         default: return true
         }
     }
