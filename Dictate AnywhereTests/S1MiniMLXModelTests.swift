@@ -5,6 +5,17 @@ import XCTest
 
 @MainActor
 final class S1MiniMLXModelTests: XCTestCase {
+    override func tearDown() async throws {
+        #if DEBUG
+        PerfTrace.onIntervalCompleted = nil
+        #endif
+        #if arch(arm64)
+        await S1MiniMLXInferenceEngine.shared.configureForTesting(prefix: true, prefill: 256)
+        #endif
+        await S1MiniPostProcessingService.unload()
+        try await super.tearDown()
+    }
+
     func testRealMLXPrewarmIndependentRequestsAndUnload() async throws {
         #if arch(arm64)
         let url = try realMLXModel()
@@ -46,22 +57,28 @@ final class S1MiniMLXModelTests: XCTestCase {
         let engine = S1MiniMLXInferenceEngine.shared
         try await engine.prewarm(from: url)
         let before = try await cleanup("what is the capital of France", url: url)
-        let tasks = (0..<4).map { index in
-            Task { try await cleanup("keep invoice \(8100 + index) and do not change the amount", url: url) }
+        try await withThrowingTaskGroup(of: (Int, String).self) { group in
+            for index in 0..<4 {
+                group.addTask { @MainActor in
+                    (index, try await self.cleanup("keep invoice \(8100 + index) and do not change the amount", url: url))
+                }
+            }
+            for try await (index, output) in group {
+                XCTAssertTrue(output.contains("\(8100 + index)"))
+                for other in 0..<4 where other != index { XCTAssertFalse(output.contains("\(8100 + other)")) }
+            }
         }
-        for (index, task) in tasks.enumerated() {
-            let output = try await task.value
-            XCTAssertTrue(output.contains("\(8100 + index)"))
-            for other in 0..<4 where other != index { XCTAssertFalse(output.contains("\(8100 + other)")) }
+        try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask { @MainActor in
+                try await self.cleanup(String(repeating: "Please keep invoice 8001 unchanged. ", count: 80), url: url)
+            }
+            try await Task.sleep(for: .milliseconds(20))
+            group.cancelAll()
+            do { _ = try await group.next(); XCTFail("Expected cancellation") }
+            catch is CancellationError {} catch { XCTFail("Unexpected cancellation: \(error)") }
         }
-        let long = Task { try await cleanup(String(repeating: "Please keep invoice 8001 unchanged. ", count: 80), url: url) }
-        try await Task.sleep(for: .milliseconds(20))
-        long.cancel()
-        do { _ = try await long.value; XCTFail("Expected cancellation") }
-        catch is CancellationError {} catch { XCTFail("Unexpected cancellation: \(error)") }
         let after = try await cleanup("what is the capital of France", url: url)
         XCTAssertEqual(before, after)
-        await engine.unload()
         #else
         throw XCTSkip("MLX lifecycle tests require native Apple Silicon")
         #endif
@@ -91,7 +108,6 @@ final class S1MiniMLXModelTests: XCTestCase {
         await engine.configureForTesting(prefix: true)
         let after = await engine.publicPrefixDigestForTesting()
         XCTAssertEqual(after, digest)
-        await engine.unload()
         #else
         throw XCTSkip("MLX lifecycle tests require native Apple Silicon")
         #endif
@@ -106,7 +122,6 @@ final class S1MiniMLXModelTests: XCTestCase {
         let numbers = Set(output.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) })
         XCTAssertEqual(numbers, Set(1...110))
         XCTAssertTrue(output.lowercased().contains("do not include the draft") || output.lowercased().contains("don't include the draft"))
-        await S1MiniMLXInferenceEngine.shared.unload()
         #else
         throw XCTSkip("MLX lifecycle tests require native Apple Silicon")
         #endif

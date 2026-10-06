@@ -9,6 +9,15 @@ final class S1MiniModelTests: XCTestCase {
         try XCTSkipUnless(realModelPath() != nil, "Set S1_MINI_MODEL_PATH to run installed-model regressions")
     }
 
+    override func tearDown() async throws {
+        #if DEBUG
+        PerfTrace.onIntervalCompleted = nil
+        #endif
+        await S1MiniInferenceEngine.shared.configureCacheForTesting(f16: nil)
+        await S1MiniPostProcessingService.unload()
+        try await super.tearDown()
+    }
+
     func testRealContextReuseMatchesFreshRequestsAndClearsHistory() async throws {
         guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check context reuse") }
         let url = URL(fileURLWithPath: path)
@@ -54,7 +63,6 @@ final class S1MiniModelTests: XCTestCase {
         let output = try await process("Send invoice 43 on Thursday.", modelURL: alias)
         XCTAssertTrue(output.contains("43"))
         XCTAssertTrue(output.lowercased().contains("thursday"))
-        await engine.unload()
     }
 
     #if DEBUG
@@ -89,7 +97,6 @@ final class S1MiniModelTests: XCTestCase {
         XCTAssertTrue(recovered.lowercased().contains("nadia"))
         XCTAssertFalse(recovered.contains("812"))
         XCTAssertFalse(recovered.lowercased().contains("mara"))
-        await engine.unload()
     }
     #endif
 
@@ -123,7 +130,6 @@ final class S1MiniModelTests: XCTestCase {
         XCTAssertTrue(output.lowercased().contains("thursday"))
         XCTAssertFalse(output.lowercased().contains("hello"))
         XCTAssertFalse(output.lowercased().contains("friday"))
-        await S1MiniPostProcessingService.unload()
     }
 
     func testRealRepeatedLongTranscriptCannotLoseNumbersWhenModelIsAvailable() async throws {
@@ -139,7 +145,6 @@ final class S1MiniModelTests: XCTestCase {
         XCTAssertTrue(output.lowercased().contains("tomorrow"))
         let numbers = output.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
         XCTAssertEqual(Set(numbers), Set(1...110), "Cleanup lost an invoice number around a chunk boundary")
-        await S1MiniPostProcessingService.unload()
     }
 
     func testRealVariedLongTranscriptCleansFinalCorrectionWhenModelIsAvailable() async throws {
@@ -154,7 +159,6 @@ final class S1MiniModelTests: XCTestCase {
         XCTAssertTrue(output.lowercased().contains("utrecht"))
         XCTAssertTrue(output.lowercased().contains("thursday"))
         XCTAssertFalse(output.lowercased().contains("friday"), "Long input fell back to uncorrected text")
-        await S1MiniPostProcessingService.unload()
     }
 
     func testModelManagerValidatesAndDeletesInstalledModelWhenRealModelExists() async throws {
@@ -232,7 +236,6 @@ final class S1MiniModelTests: XCTestCase {
             modelURL: modelURL
         )
         XCTAssertFalse(email.isEmpty)
-        await S1MiniPostProcessingService.unload()
     }
 
     private func realModelPath() -> String? {
