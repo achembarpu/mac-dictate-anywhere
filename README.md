@@ -69,7 +69,7 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 | Provider | Runs Where | Best For | Benefits |
 |----------|------------|----------|----------|
 | Off | On-device filler removal if enabled | Raw dictation | Retains the speech result after optional filler removal |
-| FluidAudio Vocabulary | On-device | Lightweight terminology correction | Applies vocabulary rescoring to Parakeet TDT final transcripts without an LLM |
+| Vocabulary correction only | On-device | Domain terms without a cleanup LLM | Parakeet TDT rescoring or native Nemotron/Apple Speech vocabulary hints, where available |
 | Apple Intelligence | On-device | Native macOS cleanup | On-device cleanup on supported Macs |
 | S1-mini by Superwhisper | On-device | Compact English transcript normalization | One-click 462 MB download, fixed style/structure/context controls, and no separate server |
 | Ollama | Local or self-hosted server | Privacy-first LLM cleanup | Local model choice, optional reasoning controls, and in-app model management for local Ollama setups |
