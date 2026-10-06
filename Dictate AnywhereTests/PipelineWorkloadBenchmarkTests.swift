@@ -50,15 +50,46 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
             keytermsPrompt: ["microphone"],
             llmInstruction: nil
         )
-        var lastBody = Data()
-        measure(metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()], options: measureOptions) {
-            let audio = AssemblyAIEngine.pcm16Data(from: samples)
-            lastBody = (try? AssemblyAIEngine.multipartBody(
-                config: config, pcmAudio: audio, boundary: "benchmark-boundary"
-            )) ?? Data()
+        let pcm = samples.map { Int16(min(max($0, -1), 1) * Float(Int16.max)).littleEndian }
+        let reference = pcm.withUnsafeBytes { Data($0) }
+        let marker = Data("Content-Type: audio/pcm\r\n\r\n".utf8)
+        for iteration in -1..<iterations {
+            let order = iteration.isMultiple(of: 2) ? ["legacy-copy", "direct-request"] : ["direct-request", "legacy-copy"]
+            for mode in order {
+                let before = try BenchmarkProcessResources.sample()
+                let start = ContinuousClock.now
+                let body = try mode == "direct-request"
+                    ? AssemblyAIEngine.multipartBody(config: config, samples: samples, boundary: "benchmark-boundary")
+                    : legacyAssemblyAIRequest(config: config, samples: samples)
+                let elapsed = BenchmarkStatistics.elapsedMilliseconds(from: start)
+                let after = try BenchmarkProcessResources.sample()
+                let audioStart = try XCTUnwrap(body.range(of: marker)).upperBound
+                XCTAssertEqual(body.subdata(in: audioStart..<(audioStart + reference.count)), reference)
+                let row: [String: Any] = ["mode": mode, "iteration": iteration, "latency_ms": elapsed,
+                    "cpu_ms": after.cpuMilliseconds - before.cpuMilliseconds,
+                    "process_peak_rss_bytes": after.peakResidentBytes,
+                    "input_samples": samples.count, "request_bytes": body.count]
+                print("ASSEMBLYAI_ENCODING_RESULT " + String(decoding: try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]), as: UTF8.self))
+            }
         }
-        XCTAssertGreaterThan(lastBody.count, samples.count * MemoryLayout<Int16>.size)
-        print("PIPELINE_BENCHMARK component=assembly_ai_request input_samples=\(samples.count) body_bytes=\(lastBody.count)")
+    }
+
+    /// Frozen map → audio Data → multipart append path for paired comparisons.
+    private func legacyAssemblyAIRequest(config: AssemblyAIRequestConfiguration, samples: [Float]) throws -> Data {
+        let pcm = samples.map { Int16(min(max($0, -1), 1) * Float(Int16.max)).littleEndian }
+        let audio = pcm.withUnsafeBytes { Data($0) }
+        let configData = try JSONEncoder().encode(config)
+        var body = Data()
+        body.append(Data("--benchmark-boundary\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"config\"\r\n".utf8))
+        body.append(Data("Content-Type: application/json\r\n\r\n".utf8))
+        body.append(configData)
+        body.append(Data("\r\n--benchmark-boundary\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"audio\"; filename=\"audio.pcm\"\r\n".utf8))
+        body.append(Data("Content-Type: audio/pcm\r\n\r\n".utf8))
+        body.append(audio)
+        body.append(Data("\r\n--benchmark-boundary--\r\n".utf8))
+        return body
     }
 
     /// Fixed disjoint chunks reveal long-dictation string-growth costs while

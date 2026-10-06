@@ -115,7 +115,7 @@ time or transcript quality.
 | Encoder placement | Opt in with `PIPELINE_BENCHMARK_ENCODER=1` and `multilingual` or `multilingualUltra`. Alternates ANE/GPU order on the supported golden clips and reports exact errors and per-trial decode times. First-use compilation is visible; compare warm trials separately. |
 | Audio polling | Processes fixed sample windows and measures RMS/smoothing plus meaningful-display-change decisions. |
 | PCM buffer creation | Repeatedly calls the app's 4096-frame 16 kHz buffer builder. XCTest records clock, CPU, and memory metrics. |
-| Cloud request encoding | Converts 60 s of synthetic samples to PCM16 and builds AssemblyAI's multipart body, without network access. XCTest records clock, CPU, and memory. |
+| Cloud request encoding | Alternates direct PCM16 writing into AssemblyAI's multipart body with the frozen array/Data/copy path on 60 s of synthetic samples. Verifies every audio byte and records latency, process CPU and peak RSS without network access. |
 | Recovery I/O | Enqueues 30 s of synthetic audio through the real recovery writer, preserves it, reloads, and reads bounded chunks. Reports save and read p50/p95. |
 | Long transcript | Joins 300 disjoint transcript segments and normalizes the result. XCTest records clock, CPU, and memory. |
 | Insertion preparation | Replays whitespace, list, CJK, and boundary fixtures through insertion formatting. |

@@ -373,7 +373,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
             let boundary = "dictate-anywhere-\(UUID().uuidString)"
             let body = try Self.multipartBody(
                 config: config,
-                pcmAudio: Self.pcm16Data(from: samples),
+                samples: samples,
                 boundary: boundary
             )
             var request = URLRequest(
@@ -626,21 +626,14 @@ final class AssemblyAIEngine: TranscriptionEngine {
         return preferenceBlock + rules + "\nNEARBY DATA:\n" + nearby
     }
 
-    static func pcm16Data(from samples: [Float]) -> Data {
-        let pcm = samples.map { sample -> Int16 in
-            let clamped = min(max(sample, -1), 1)
-            return Int16(clamped * Float(Int16.max)).littleEndian
-        }
-        return pcm.withUnsafeBytes { Data($0) }
-    }
-
     static func multipartBody(
         config: AssemblyAIRequestConfiguration,
-        pcmAudio: Data,
+        samples: [Float],
         boundary: String
     ) throws -> Data {
         let configData = try JSONEncoder().encode(config)
         var body = Data()
+        body.reserveCapacity(configData.count + samples.count * 2 + 512)
         body.append(Data("--\(boundary)\r\n".utf8))
         body.append(Data("Content-Disposition: form-data; name=\"config\"\r\n".utf8))
         body.append(Data("Content-Type: application/json\r\n\r\n".utf8))
@@ -649,7 +642,20 @@ final class AssemblyAIEngine: TranscriptionEngine {
         body.append(
             Data("Content-Disposition: form-data; name=\"audio\"; filename=\"audio.pcm\"\r\n".utf8))
         body.append(Data("Content-Type: audio/pcm\r\n\r\n".utf8))
-        body.append(pcmAudio)
+        let audioOffset = body.count
+        body.count += samples.count * 2
+        body.withUnsafeMutableBytes { (bytes: UnsafeMutableRawBufferPointer) in
+            for (index, sample) in samples.enumerated() {
+                // Write directly into the request, avoiding an Int16 array,
+                // separate audio Data and another full audio copy. Byte stores
+                // also work when the multipart header leaves an odd alignment.
+                let clamped = sample.isNaN ? 0 : min(max(sample, -1), 1)
+                let value = UInt16(bitPattern: Int16(clamped * Float(Int16.max)))
+                let offset = audioOffset + index * 2
+                bytes[offset] = UInt8(truncatingIfNeeded: value)
+                bytes[offset + 1] = UInt8(truncatingIfNeeded: value >> 8)
+            }
+        }
         body.append(Data("\r\n--\(boundary)--\r\n".utf8))
         return body
     }
