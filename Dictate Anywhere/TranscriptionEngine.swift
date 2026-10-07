@@ -1270,7 +1270,8 @@ final class ParakeetEngine: TranscriptionEngine {
             let total = totalSampleCount
             let shouldPreview = BatchTranscriptionPolicy.shouldPreview(
                 totalSamples: total, lastPreviewSamples: lastBatchPreviewSampleCount,
-                hasVisibleText: !currentTranscript.isEmpty)
+                hasVisibleText: !currentTranscript.isEmpty,
+                model: recordingModelChoice ?? selectedModelChoice)
             let recent = shouldPreview ? volumeGate.recentSamples : []
             return (pending, total, recent, shouldPreview)
         }

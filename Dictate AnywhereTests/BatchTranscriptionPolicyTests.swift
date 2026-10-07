@@ -31,11 +31,31 @@ final class BatchTranscriptionPolicyTests: XCTestCase {
     }
 
     func testFirstPreviewIsFastAndLaterPreviewsRequireNewAudio() {
-        XCTAssertFalse(BatchTranscriptionPolicy.shouldPreview(totalSamples: 7_999, lastPreviewSamples: 0, hasVisibleText: false))
-        XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(totalSamples: 8_000, lastPreviewSamples: 0, hasVisibleText: false))
-        XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(totalSamples: 16_000, lastPreviewSamples: 8_000, hasVisibleText: false), "Empty guesses must not slow first visible words")
-        XCTAssertFalse(BatchTranscriptionPolicy.shouldPreview(totalSamples: 23_999, lastPreviewSamples: 8_000, hasVisibleText: true))
-        XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(totalSamples: 24_000, lastPreviewSamples: 8_000, hasVisibleText: true))
+        XCTAssertFalse(BatchTranscriptionPolicy.shouldPreview(totalSamples: 7_999, lastPreviewSamples: 0, hasVisibleText: false, model: .multilingual))
+        XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(totalSamples: 8_000, lastPreviewSamples: 0, hasVisibleText: false, model: .multilingual))
+        XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(totalSamples: 16_000, lastPreviewSamples: 8_000, hasVisibleText: false, model: .multilingual), "Empty guesses must not slow first visible words")
+        XCTAssertFalse(BatchTranscriptionPolicy.shouldPreview(totalSamples: 23_999, lastPreviewSamples: 8_000, hasVisibleText: true, model: .multilingual))
+        XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(totalSamples: 24_000, lastPreviewSamples: 8_000, hasVisibleText: true, model: .multilingual))
+    }
+
+    func testSustainedTDTPreviewsReduceWorkWithoutDelayingFirstText() {
+        for model in ParakeetModelChoice.allCases {
+            XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(
+                totalSamples: 127_999, lastPreviewSamples: 111_999,
+                hasVisibleText: true, model: model), "Short recordings retain one-second feedback")
+            XCTAssertEqual(BatchTranscriptionPolicy.shouldPreview(
+                totalSamples: 128_000, lastPreviewSamples: 112_000,
+                hasVisibleText: true, model: model), ![ParakeetModelChoice.englishOnly, .multilingual, .multilingualUltra, .compactEnglish].contains(model))
+            XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(
+                totalSamples: 144_000, lastPreviewSamples: 112_000,
+                hasVisibleText: true, model: model))
+            XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(
+                totalSamples: 160_000, lastPreviewSamples: 152_000,
+                hasVisibleText: false, model: model), "Empty guesses keep retrying quickly")
+            XCTAssertFalse(BatchTranscriptionPolicy.shouldPreview(
+                totalSamples: 160_000, lastPreviewSamples: 160_000,
+                hasVisibleText: true, model: model), "Inference never schedules a stale guess")
+        }
     }
 
     func testFinalCorrectionWinsEvenWhenItRemovesWords() {

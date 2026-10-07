@@ -7,6 +7,8 @@ nonisolated enum BatchTranscriptionPolicy {
     static let pollingMilliseconds: UInt64 = 500
     static let firstPreviewSamples = sampleRate / 2
     static let previewDeltaSamples = sampleRate
+    static let sustainedPreviewStartSamples = sampleRate * 8
+    static let sustainedPreviewDeltaSamples = sampleRate * 2
     static let previewWindowSamples = sampleRate * 15
     static let senseVoiceTargetSamples = sampleRate * 15
     static let senseVoiceMaximumSamples = sampleRate * 30
@@ -29,8 +31,16 @@ nonisolated enum BatchTranscriptionPolicy {
         }
     }
 
-    static func shouldPreview(totalSamples: Int, lastPreviewSamples: Int, hasVisibleText: Bool) -> Bool {
-        totalSamples - lastPreviewSamples >= (hasVisibleText ? previewDeltaSamples : firstPreviewSamples)
+    /// Growing-window TDT guesses repeatedly decode the same audio. Preserve
+    /// early feedback, then reduce duplicate inference on sustained recordings.
+    static func shouldPreview(totalSamples: Int, lastPreviewSamples: Int,
+                              hasVisibleText: Bool, model: ParakeetModelChoice) -> Bool {
+        let interval: Int
+        if !hasVisibleText { interval = firstPreviewSamples }
+        else if !model.usesTrueStreaming, model != .senseVoice, totalSamples >= sustainedPreviewStartSamples {
+            interval = sustainedPreviewDeltaSamples
+        } else { interval = previewDeltaSamples }
+        return totalSamples - lastPreviewSamples >= interval
     }
 
     /// A successful final decode may legitimately be shorter than a live guess.
