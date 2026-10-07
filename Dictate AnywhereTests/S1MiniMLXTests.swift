@@ -51,6 +51,12 @@ final class S1MiniMLXTests: XCTestCase {
         let unloaded = await engine.stateForTesting()
         XCTAssertFalse(unloaded.loaded || unloaded.warmed)
         XCTAssertTrue(unloaded.prefixPositions.isEmpty)
+        let readyAfterUnload = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+        XCTAssertFalse(readyAfterUnload)
+        _ = try await cleanup("Keep invoice 4182 for Mara.", url: url)
+        let readyAfterFirstUse = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+        XCTAssertTrue(readyAfterFirstUse, "Native first use prepares the runtime without synthetic prewarm")
+        await engine.unload()
     }
 
     func testRealMLXConcurrentRequestsAndCancellationLeaveNextRequestIndependent() async throws {

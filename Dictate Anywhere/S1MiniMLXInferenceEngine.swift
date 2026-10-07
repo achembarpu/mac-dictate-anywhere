@@ -110,6 +110,12 @@ actor S1MiniMLXInferenceEngine {
         prefixTokens = []
     }
 
+    func isPrepared(for modelURL: URL) async -> Bool {
+        await acquireOperation()
+        defer { releaseOperation() }
+        return context != nil && warmed && modelPath == modelURL.standardizedFileURL.path
+    }
+
     private func loadIfNeeded(from url: URL) async throws {
         let path = url.standardizedFileURL.path
         if context != nil, modelPath == path { return }
@@ -184,6 +190,7 @@ actor S1MiniMLXInferenceEngine {
             try Task.checkCancellation()
             if stops.contains(token) {
                 completed = true
+                warmed = true
                 trace.recordCounts(["output_tokens": output.count])
                 return context.tokenizer.decode(tokenIds: output, skipSpecialTokens: true)
                     .trimmingCharacters(in: .whitespacesAndNewlines)

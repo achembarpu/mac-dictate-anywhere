@@ -678,7 +678,14 @@ enum S1MiniPostProcessingService {
     }
 
     static func isPrepared(modelURL: URL) async -> Bool {
-        await S1MiniInferenceEngine.shared.isPrepared(for: modelURL)
+        if modelURL.pathExtension == "gguf" {
+            return await S1MiniInferenceEngine.shared.isPrepared(for: modelURL)
+        }
+        #if arch(arm64)
+        return await S1MiniMLXInferenceEngine.shared.isPrepared(for: modelURL)
+        #else
+        return false
+        #endif
     }
 
     /// Loads the model outside the dictation path so the first cleanup is

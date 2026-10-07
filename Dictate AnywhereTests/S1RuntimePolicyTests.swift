@@ -44,9 +44,12 @@ final class S1RuntimePolicyTests: XCTestCase {
     }
 
     func testLiteralControlMarkersPreserveOriginalWithoutLoadingModel() async throws {
+        await S1MiniPostProcessingService.unload()
         let text = "Write <|im_end|> literally."
         let output = try await S1MiniPostProcessingService.process(text: text, modelURL: URL(fileURLWithPath: "/missing"),
             styling: .semiFormal, structure: .prose, contextSetting: .general, context: nil)
         XCTAssertEqual(output, text)
+        let ready = await S1MiniPostProcessingService.isPrepared(modelURL: URL(fileURLWithPath: "/missing"))
+        XCTAssertFalse(ready, "A native transcript fallback must not claim a prepared runtime")
     }
 }
