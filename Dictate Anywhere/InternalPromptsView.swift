@@ -128,6 +128,7 @@ struct InternalPromptsView: View {
                     }
                     .buttonStyle(.dsSecondary)
                     .disabled(!settings.isAssemblyAIPromptCustomized(prompt))
+                    .accessibilityLabel("Reset \(prompt.title) to Default")
                 }
             }
 
@@ -136,6 +137,7 @@ struct InternalPromptsView: View {
                     get: { settings.assemblyAIPrompt(prompt) },
                     set: { settings.setAssemblyAIPrompt($0, for: prompt) }
                 ),
+                label: prompt.title,
                 placeholder: "No instructions will be sent.",
                 minHeight: prompt.minimumEditorHeight
             )
@@ -163,8 +165,13 @@ struct InternalPromptsView: View {
                     get: { settings.assemblyAIInstruction },
                     set: { settings.assemblyAIInstruction = String($0.prefix(4_000)) }
                 ),
+                label: "Additional instructions",
                 placeholder: "For example: Keep responses concise and format action items as bullets."
             )
+            Text("\(settings.assemblyAIInstruction.count) of 4,000 characters")
+                .font(DS.Fonts.ui(11.5))
+                .foregroundStyle(DS.Colors.textSecondary)
+                .accessibilityLabel("Additional instructions: \(settings.assemblyAIInstruction.count) of 4,000 characters")
         }
         .padding(.vertical, 14)
         .padding(.horizontal, DS.Spacing.rowHorizontal)

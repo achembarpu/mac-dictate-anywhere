@@ -35,13 +35,14 @@ struct TranscriptHistoryView: View {
 
     var body: some View {
         @Bindable var settings = appState.settings
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let entries = Self.filteredEntries(
             Array(settings.transcriptHistory.reversed()),
-            searchText: searchText
+            searchText: query
         )
         let cancelledEntries = appState.recoveryStore.entries.filter {
-            searchText.isEmpty || $0.preview.localizedCaseInsensitiveContains(searchText)
-                || "Cancelled dictation".localizedCaseInsensitiveContains(searchText)
+            query.isEmpty || $0.preview.localizedCaseInsensitiveContains(query)
+                || "Cancelled dictation".localizedCaseInsensitiveContains(query)
         }
 
         DSPage(spacing: 20) {
@@ -51,7 +52,10 @@ struct TranscriptHistoryView: View {
             )
 
             HStack(spacing: 10) {
-                DSSearchField(placeholder: "Search your dictations", text: $searchText)
+                DSSearchField(
+                    placeholder: "Search your dictations", text: $searchText,
+                    accessibilityName: "Search transcript history"
+                )
                 Button("Clear All…") {
                     showClearAllConfirm = true
                 }
@@ -83,35 +87,41 @@ struct TranscriptHistoryView: View {
                                     .font(DS.Fonts.ui(11.5))
                                     .foregroundStyle(DS.Colors.textSecondary)
                                 if entry.captureError != nil || (!entry.hasAudio && entry.completedTranscript == nil && entry.transcriptPrefix == nil) {
-                                    Text("Partial recovery copy — some audio may be unavailable.")
-                                        .font(DS.Fonts.ui(11.5))
-                                        .foregroundStyle(DS.Colors.accentDeep)
+                                    DSFieldMessage(
+                                        text: "Partial recovery copy — some audio may be unavailable.",
+                                        tone: .warning
+                                    )
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             VStack(spacing: 8) {
-                                Button(appState.continuingEntryID == entry.id
-                                       ? (appState.recoveringEntryID == entry.id ? "Preparing…"
-                                          : (appState.status == .recording ? "Stop" : "Finishing…"))
-                                       : "Continue") {
+                                let continueTitle = appState.continuingEntryID == entry.id
+                                    ? (appState.recoveringEntryID == entry.id ? "Preparing…"
+                                       : (appState.status == .recording ? "Stop" : "Finishing…"))
+                                    : "Continue"
+                                let recoverTitle = appState.recoveringEntryID == entry.id && appState.continuingEntryID == nil
+                                    ? "Recovering…" : "Recover text"
+                                Button(continueTitle) {
                                     Task {
                                         if appState.continuingEntryID == entry.id { await appState.stopDictation() }
                                         else { await appState.continueCancelledDictation(entry) }
                                     }
                                 }
                                 .buttonStyle(.dsPrimary)
+                                .accessibilityLabel("\(continueTitle) cancelled session from \(Self.dateFormatter.string(from: entry.createdAt))")
                                 .disabled(appState.continuingEntryID == entry.id
                                           ? !appState.canStopDictation : appState.status != .idle)
-                                Button(appState.recoveringEntryID == entry.id && appState.continuingEntryID == nil
-                                       ? "Recovering…" : "Recover text") {
+                                Button(recoverTitle) {
                                     Task { await appState.recoverCancelledDictation(entry) }
                                 }
-                                .buttonStyle(.plain)
-                                .font(DS.Fonts.ui(11.5, .medium))
-                                .foregroundStyle(DS.Colors.textSecondary)
+                                .buttonStyle(.dsSecondary)
+                                .accessibilityLabel("\(recoverTitle) from cancelled session on \(Self.dateFormatter.string(from: entry.createdAt))")
                                 .disabled(appState.status != .idle)
                             }
-                            DSIconButton(systemImage: "trash", accessibilityLabel: "Delete cancelled session") {
+                            DSIconButton(
+                                systemImage: "trash",
+                                accessibilityLabel: "Delete cancelled session from \(Self.dateFormatter.string(from: entry.createdAt))"
+                            ) {
                                 do { try appState.recoveryStore.remove(id: entry.id) }
                                 catch { appState.recoveryStore.errorMessage = error.localizedDescription }
                             }
@@ -124,21 +134,14 @@ struct TranscriptHistoryView: View {
 
             if entries.isEmpty && cancelledEntries.isEmpty {
                 DSCard {
-                    VStack(spacing: 8) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 26))
-                            .foregroundStyle(DS.Colors.textSecondary)
-                        Text(searchText.isEmpty ? "No Transcripts" : "No Matches")
-                            .font(DS.Fonts.ui(14, .semibold))
-                            .foregroundStyle(DS.Colors.ink)
-                        Text(searchText.isEmpty
-                             ? "Completed dictations will appear here."
-                             : "No dictations match “\(searchText)”.")
-                            .font(DS.Fonts.ui(12.5))
-                            .foregroundStyle(DS.Colors.textSecondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 44)
+                    DSEmptyState(
+                        systemImage: "clock.arrow.circlepath",
+                        title: query.isEmpty ? "No transcripts" : "No matches",
+                        message: query.isEmpty
+                            ? "Completed dictations will appear here."
+                            : "No dictations match “\(query)”."
+                    )
+                    .padding(.vertical, 20)
                 }
             } else if !entries.isEmpty {
                 DSCard {
@@ -148,7 +151,7 @@ struct TranscriptHistoryView: View {
                         }
                         TranscriptHistoryRow(
                             entry: entry,
-                            onCopy: { copyToPasteboard(entry.text) },
+                            onCopy: copyToPasteboard,
                             onDelete: { settings.removeTranscriptHistoryEntry(id: entry.id) }
                         )
                     }
@@ -171,16 +174,20 @@ struct TranscriptHistoryView: View {
         }
     }
 
-    private func copyToPasteboard(_ text: String) {
+    private func copyToPasteboard(_ text: String) -> Bool {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        return NSPasteboard.general.setString(text, forType: .string)
     }
 }
 
 private struct TranscriptHistoryRow: View {
+    private enum CopiedKind { case transcript, raw }
+
     let entry: TranscriptHistoryEntry
-    let onCopy: () -> Void
+    let onCopy: (String) -> Bool
     let onDelete: () -> Void
+    @State private var copiedKind: CopiedKind?
+    @State private var copyResetTask: Task<Void, Never>?
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -204,10 +211,15 @@ private struct TranscriptHistoryRow: View {
                                 .foregroundStyle(DS.Colors.textSecondary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            DSInsetButton(title: "Copy raw", systemImage: "doc.on.doc") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(rawText, forType: .string)
+                            DSInsetButton(
+                                title: copiedKind == .raw ? "Copied raw" : "Copy raw",
+                                systemImage: "doc.on.doc"
+                            ) {
+                                copy(rawText, kind: .raw)
                             }
+                            .accessibilityLabel(copiedKind == .raw
+                                ? "Copied raw transcript"
+                                : "Copy raw transcript from \(TranscriptHistoryView.dateFormatter.string(from: entry.createdAt))")
                         }
                         .padding(.top, 6)
                     }
@@ -216,12 +228,36 @@ private struct TranscriptHistoryRow: View {
             }
 
             HStack(spacing: 6) {
-                DSInsetButton(title: "Copy", systemImage: "doc.on.doc", action: onCopy)
-                DSIconButton(systemImage: "trash", accessibilityLabel: "Delete transcript", action: onDelete)
-                    .help("Delete transcript")
+                DSInsetButton(
+                    title: copiedKind == .transcript ? "Copied" : "Copy",
+                    systemImage: "doc.on.doc"
+                ) {
+                    copy(entry.text, kind: .transcript)
+                }
+                .accessibilityLabel(copiedKind == .transcript
+                    ? "Copied transcript"
+                    : "Copy transcript from \(TranscriptHistoryView.dateFormatter.string(from: entry.createdAt))")
+                DSIconButton(
+                    systemImage: "trash",
+                    accessibilityLabel: "Delete transcript from \(TranscriptHistoryView.dateFormatter.string(from: entry.createdAt))",
+                    action: onDelete
+                )
+                .help("Delete transcript")
             }
         }
         .padding(.vertical, 14)
         .padding(.horizontal, DS.Spacing.rowHorizontal)
+        .onDisappear { copyResetTask?.cancel() }
+    }
+
+    private func copy(_ text: String, kind: CopiedKind) {
+        guard onCopy(text) else { return }
+        copiedKind = kind
+        copyResetTask?.cancel()
+        copyResetTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            copiedKind = nil
+        }
     }
 }

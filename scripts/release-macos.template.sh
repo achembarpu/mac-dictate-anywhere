@@ -147,8 +147,13 @@ xcodebuild \
   -configuration "$CONFIGURATION" \
   -destination "generic/platform=macOS" \
   -archivePath "$ARCHIVE_PATH" \
-  SWIFT_ACTIVE_COMPILATION_CONDITIONS="DISTRIBUTION_BUILD" \
+  'ARCHS=$(ARCHS_STANDARD)' \
+  ONLY_ACTIVE_ARCH=NO \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) DISTRIBUTION_BUILD" \
   archive
+
+log "Verifying universal archive"
+"$ROOT_DIR/scripts/verify-universal-app.sh" "$ARCHIVE_PATH/Products/Applications/$APP_NAME"
 
 log "Preparing dist folder"
 mkdir -p "$DIST_DIR"
@@ -194,6 +199,7 @@ log "Verifying mounted DMG app"
 MOUNT_POINT="$TEMP_DIR/dmg-mount"
 mkdir -p "$MOUNT_POINT"
 hdiutil attach "$DMG_ASSET" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+"$ROOT_DIR/scripts/verify-universal-app.sh" "$MOUNT_POINT/$APP_NAME"
 codesign --verify --deep --strict --verbose=2 "$MOUNT_POINT/$APP_NAME"
 spctl -a -vv "$MOUNT_POINT/$APP_NAME"
 hdiutil detach "$MOUNT_POINT" -quiet

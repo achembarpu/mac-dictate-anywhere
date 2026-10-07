@@ -83,6 +83,7 @@ struct AboutView: View {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 12))
                     .foregroundStyle(DS.Colors.accent)
+                    .accessibilityHidden(true)
                 Text("Built with the help of the open-source community. Thank you to all contributors.")
                     .font(DS.Fonts.ui(12.5))
                     .foregroundStyle(DS.Colors.textSecondary)
@@ -116,11 +117,13 @@ private struct LibraryRow: View {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.up.right.square")
                             .font(.system(size: 10.5, weight: .medium))
+                            .accessibilityHidden(true)
                         Text(displayURL)
                             .font(DS.Fonts.ui(12.5, .medium))
                     }
                     .foregroundStyle(DS.Colors.accent)
                 }
+                .accessibilityLabel("\(name) project website")
 
             }
             Spacer(minLength: 0)

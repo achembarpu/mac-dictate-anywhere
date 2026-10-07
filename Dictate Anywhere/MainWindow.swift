@@ -61,6 +61,7 @@ struct AttentionBanner: View {
     let issues: [AttentionIssue]
     @Binding var selectedID: AttentionIssue.ID?
     let action: (AttentionIssue.ID) -> Void
+    @AccessibilityFocusState private var issueIsFocused: Bool
 
     private var selectedIndex: Int {
         issues.firstIndex(where: { $0.id == selectedID }) ?? 0
@@ -82,6 +83,8 @@ struct AttentionBanner: View {
                 }
                 .foregroundStyle(DS.Colors.panelText)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityFocused($issueIsFocused)
 
                 Button(issue.actionTitle) { action(issue.id) }
                     .buttonStyle(.dsSecondary)
@@ -90,7 +93,7 @@ struct AttentionBanner: View {
                     HStack(spacing: 4) {
                         DSIconButton(
                             systemImage: "chevron.left",
-                            accessibilityLabel: "Previous setup issue"
+                            accessibilityLabel: "Previous issue"
                         ) { selectIssue(offset: -1) }
                         Text("\(selectedIndex + 1) of \(issues.count)")
                             .font(DS.Fonts.ui(11))
@@ -98,7 +101,7 @@ struct AttentionBanner: View {
                             .accessibilityLabel("Issue \(selectedIndex + 1) of \(issues.count)")
                         DSIconButton(
                             systemImage: "chevron.right",
-                            accessibilityLabel: "Next setup issue"
+                            accessibilityLabel: "Next issue"
                         ) { selectIssue(offset: 1) }
                     }
                     .foregroundStyle(DS.Colors.panelText)
@@ -118,6 +121,7 @@ struct AttentionBanner: View {
 
     private func selectIssue(offset: Int) {
         selectedID = issues[(selectedIndex + offset + issues.count) % issues.count].id
+        issueIsFocused = true
     }
 }
 
@@ -142,18 +146,22 @@ struct MainWindow: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DS.Colors.bgWindow)
-        .alert("Dictation recovery", isPresented: Binding(
-            get: { appState.recoveryStore.errorMessage != nil },
-            set: { if !$0 { appState.recoveryStore.errorMessage = nil } }
-        )) {
-            Button("OK") { appState.recoveryStore.errorMessage = nil }
-        } message: { Text(appState.recoveryStore.errorMessage ?? "") }
+        .onAppear { selectRecoveryIssueIfNeeded() }
+        .onChange(of: appState.recoveryStore.errorMessage) { _, error in
+            if error != nil { selectRecoveryIssueIfNeeded() }
+        }
         .frame(
             minWidth: MainWindowSizing.minimumWidth,
             maxWidth: .infinity,
             minHeight: MainWindowSizing.minimumHeight,
             maxHeight: .infinity
         )
+    }
+
+    private func selectRecoveryIssueIfNeeded() {
+        guard appState.recoveryStore.errorMessage != nil else { return }
+        appState.selectedAttentionIssueID = appState.permissions.hasChecked
+            && !appState.permissions.micGranted ? .microphone : .recovery
     }
 
     @ViewBuilder

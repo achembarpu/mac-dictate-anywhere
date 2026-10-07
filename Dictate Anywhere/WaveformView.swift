@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct WaveformView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let audioLevel: Float
 
     private let idleAmplitude: CGFloat = 0.12
@@ -29,15 +30,24 @@ struct WaveformView: View {
     ]
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            Canvas { context, size in
-                let time = timeline.date.timeIntervalSinceReferenceDate
-                for layer in layers {
-                    drawWaveLayer(context: context, size: size, time: time, layer: layer)
+        Group {
+            if reduceMotion {
+                waveCanvas(time: 0)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    waveCanvas(time: timeline.date.timeIntervalSinceReferenceDate)
                 }
             }
         }
         .frame(height: OverlayMetrics.size(24))
+    }
+
+    private func waveCanvas(time: TimeInterval) -> some View {
+        Canvas { context, size in
+            for layer in layers {
+                drawWaveLayer(context: context, size: size, time: time, layer: layer)
+            }
+        }
     }
 
     private func drawWaveLayer(context: GraphicsContext, size: CGSize, time: TimeInterval, layer: WaveLayer) {

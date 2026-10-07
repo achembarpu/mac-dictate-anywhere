@@ -9,6 +9,7 @@ import Foundation
 import AppKit
 import CoreGraphics
 import CoreServices
+import Carbon
 import os
 
 enum TextInsertionResult {
@@ -20,6 +21,7 @@ enum TextInsertionResult {
 enum PasteScriptOutcome: Equatable, Sendable {
     case success
     case automationDenied
+    case targetUnavailable
     case failed
 
     static func fromAppleScriptError(_ error: NSDictionary?) -> PasteScriptOutcome {
@@ -35,9 +37,31 @@ enum PasteScriptOutcome: Equatable, Sendable {
 /// the non-Sendable NSAppleScript; no other thread reads or executes it.
 private nonisolated final class PasteScriptRunner: @unchecked Sendable {
     private static let source = """
-        tell application "System Events"
-            keystroke "v" using command down
-        end tell
+        on pasteIntoProcess(targetPID)
+            tell application "System Events"
+                set targets to application processes whose unix id is targetPID
+                if (count of targets) is not 1 then return false
+                tell item 1 of targets
+                    if not frontmost then return false
+                    -- AX menu clicks are addressed to this process. System Events'
+                    -- keystroke command can reach a different app after a focus change.
+                    repeat with topItem in menu bar items of menu bar 1
+                        repeat with candidate in menu items of menu 1 of topItem
+                            try
+                                if (value of attribute "AXMenuItemCmdChar" of candidate) is "V" and ¬
+                                   (value of attribute "AXMenuItemCmdModifiers" of candidate) is 0 and ¬
+                                   enabled of candidate then
+                                    click candidate
+                                    return true
+                                end if
+                            end try
+                        end repeat
+                    end repeat
+                    error "No enabled Paste menu item" number -1728
+                end tell
+            end tell
+            return true
+        end pasteIntoProcess
         """
 
     private let queue = DispatchQueue(label: "com.dictate-anywhere.paste-script", qos: .userInitiated)
@@ -51,7 +75,7 @@ private nonisolated final class PasteScriptRunner: @unchecked Sendable {
         }
     }
 
-    func paste() async -> PasteScriptOutcome {
+    func paste(targetProcessIdentifier: pid_t) async -> PasteScriptOutcome {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 guard let script = compiledScript() else {
@@ -59,8 +83,19 @@ private nonisolated final class PasteScriptRunner: @unchecked Sendable {
                     return
                 }
                 var error: NSDictionary?
-                script.executeAndReturnError(&error)
-                continuation.resume(returning: PasteScriptOutcome.fromAppleScriptError(error))
+                let event = NSAppleEventDescriptor(
+                    eventClass: AEEventClass(kASAppleScriptSuite), eventID: AEEventID(kASSubroutineEvent),
+                    targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
+                    transactionID: AETransactionID(kAnyTransactionID)
+                )
+                event.setParam(NSAppleEventDescriptor(string: "pasteintoprocess"), forKeyword: AEKeyword(keyASSubroutineName))
+                let arguments = NSAppleEventDescriptor.list()
+                arguments.insert(NSAppleEventDescriptor(int32: targetProcessIdentifier), at: 1)
+                event.setParam(arguments, forKeyword: AEKeyword(keyDirectObject))
+                let result = script.executeAppleEvent(event, error: &error)
+                continuation.resume(returning: error == nil
+                    ? (result.booleanValue ? .success : .targetUnavailable)
+                    : PasteScriptOutcome.fromAppleScriptError(error))
             }
         }
     }
@@ -108,9 +143,17 @@ final class TextInserter {
         var deliverOutcome: StaticString = "failed"
         defer { trace.end(outcome: deliverOutcome) }
         let frontmostApplication = NSWorkspace.shared.frontmostApplication
-        let targetApplication = targetProcessIdentifier.flatMap {
-            NSRunningApplication(processIdentifier: $0)
-        } ?? frontmostApplication
+        // An explicit destination must never fall back to a different frontmost app.
+        let targetApplication: NSRunningApplication?
+        if let targetProcessIdentifier {
+            targetApplication = NSRunningApplication(processIdentifier: targetProcessIdentifier)
+        } else {
+            targetApplication = frontmostApplication
+        }
+        let targetIsReady = {
+            guard let targetApplication, !targetApplication.isTerminated else { return false }
+            return NSWorkspace.shared.frontmostApplication?.processIdentifier == targetApplication.processIdentifier
+        }
         let resolvedTargetProcessIdentifier = targetApplication?.processIdentifier
         let targetBundleIdentifier = targetApplication?.bundleIdentifier
         let insertionText = PerfTrace.measure("insertion.prepare") {
@@ -131,7 +174,7 @@ final class TextInserter {
 
         // Copy to clipboard first (always)
         guard await copyToClipboard(insertionText) else { return .failed }
-        guard pasteAutomatically else {
+        guard pasteAutomatically, targetIsReady() else {
             resetPendingSeparator()
             deliverOutcome = "copiedOnly"
             return .copiedOnly
@@ -206,17 +249,22 @@ final class TextInserter {
             }
         }
 
-        // AppleScript is more reliable than synthetic HID key events for many apps.
-        if await simulatePasteWithAppleScript() {
-            await finishListEdit(listEdit, insertionText: insertionText)
-            prepareForNextInsertion(targetBundleIdentifier: targetBundleIdentifier)
-            deliverOutcome = "success"
-            return .success
-        }
-
-        // Fallback: CGEvent paste
-        if simulatePasteWithCGEvent() {
-            try? await Task.sleep(for: .milliseconds(100))
+        // Revalidate after every suspension, including before the keyboard fallback.
+        var usedKeyboardEvent = false
+        let pasteResult = await Self.deliverToTarget(
+            isTargetReady: targetIsReady,
+            pasteScript: {
+                guard let pid = resolvedTargetProcessIdentifier else { return .targetUnavailable }
+                return await self.simulatePasteWithAppleScript(targetProcessIdentifier: pid)
+            },
+            pasteEvent: {
+                guard let pid = resolvedTargetProcessIdentifier else { return false }
+                usedKeyboardEvent = true
+                return self.simulatePasteWithCGEvent(targetProcessIdentifier: pid)
+            }
+        )
+        if pasteResult == .success {
+            if usedKeyboardEvent { try? await Task.sleep(for: .milliseconds(100)) }
             await finishListEdit(listEdit, insertionText: insertionText)
             prepareForNextInsertion(targetBundleIdentifier: targetBundleIdentifier)
             deliverOutcome = "success"
@@ -830,7 +878,7 @@ final class TextInserter {
         return false
     }
 
-    private func simulatePasteWithCGEvent() -> Bool {
+    private func simulatePasteWithCGEvent(targetProcessIdentifier: pid_t) -> Bool {
         let trace = PerfTrace.begin("insertion.pasteEvent")
         defer { trace.end() }
         let vKeyCode: CGKeyCode = 9
@@ -844,25 +892,38 @@ final class TextInserter {
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
 
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        keyDown.postToPid(targetProcessIdentifier)
+        keyUp.postToPid(targetProcessIdentifier)
 
         return true
     }
 
-    private func simulatePasteWithAppleScript() async -> Bool {
+    private func simulatePasteWithAppleScript(targetProcessIdentifier: pid_t) async -> PasteScriptOutcome {
         let trace = PerfTrace.begin("insertion.pasteScript")
         defer { trace.end() }
-        switch await pasteScriptRunner.paste() {
+        let outcome = await pasteScriptRunner.paste(targetProcessIdentifier: targetProcessIdentifier)
+        switch outcome {
         case .success:
             permissions.recordAutomationPastePermission(denied: false)
-            return true
         case .automationDenied:
             permissions.recordAutomationPastePermission(denied: true)
-            return false
-        case .failed:
-            return false
+        case .targetUnavailable, .failed:
+            break
         }
+        return outcome
+    }
+
+    /// The production dispatch sequence, injectable without sending real keystrokes.
+    static func deliverToTarget(
+        isTargetReady: () -> Bool,
+        pasteScript: () async -> PasteScriptOutcome,
+        pasteEvent: () -> Bool
+    ) async -> TextInsertionResult {
+        guard isTargetReady() else { return .copiedOnly }
+        let result = await pasteScript()
+        if result == .success { return .success }
+        guard result != .targetUnavailable, isTargetReady() else { return .copiedOnly }
+        return pasteEvent() ? .success : .copiedOnly
     }
 
     /// Compiles the paste script ahead of first use so no dictation pays

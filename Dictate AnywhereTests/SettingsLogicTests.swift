@@ -85,10 +85,11 @@ final class SettingsLogicTests: XCTestCase {
         XCTAssertNil(entry.rawText)
     }
 
-    func testHistoryPersistsAndSearchesRawAndFinalText() throws {
+    func testHistoryPersistsAndSearchesRawAndFinalText() async throws {
         let settings = Settings.shared
         settings.clearTranscriptHistory()
         settings.addTranscriptHistoryEntry("Rotation snapping is reversed.", rawText: "um snapping for rotation is reversed")
+        await settings.flushTranscriptHistory()
         let data = try XCTUnwrap(UserDefaults.standard.data(forKey: "transcriptHistory"))
         let restored = try JSONDecoder().decode([TranscriptHistoryEntry].self, from: data)
         XCTAssertEqual(restored.first?.text, "Rotation snapping is reversed.")
@@ -96,6 +97,7 @@ final class SettingsLogicTests: XCTestCase {
         XCTAssertEqual(TranscriptHistoryView.filteredEntries(restored, searchText: "UM SNAPPING").count, 1)
         XCTAssertEqual(TranscriptHistoryView.filteredEntries(restored, searchText: "Rotation snapping").count, 1)
         settings.removeTranscriptHistoryEntry(id: restored[0].id)
+        await settings.flushTranscriptHistory()
         let deleted = try JSONDecoder().decode([TranscriptHistoryEntry].self,
             from: XCTUnwrap(UserDefaults.standard.data(forKey: "transcriptHistory")))
         XCTAssertTrue(deleted.isEmpty)

@@ -21,6 +21,7 @@ struct DSBrandMark: View {
                     .foregroundStyle(.white)
             }
             .shadow(color: DS.Colors.accentDeep.opacity(size > 40 ? 0.25 : 0.18), radius: size > 40 ? 20 : 4, x: 0, y: size > 40 ? 8 : 2)
+            .accessibilityHidden(true)
     }
 }
 
@@ -52,6 +53,7 @@ struct DSFooterCard: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(statusText)
                     .font(DS.Fonts.ui(12, .medium))
@@ -98,5 +100,7 @@ struct DSNavItem: View {
             .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

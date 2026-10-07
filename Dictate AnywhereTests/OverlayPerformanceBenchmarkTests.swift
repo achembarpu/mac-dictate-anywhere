@@ -52,7 +52,7 @@ final class OverlayPerformanceBenchmarkTests: XCTestCase {
         guard !transcript.isEmpty else { return "" }
         let limit = OverlayPreviewText.maximumCharacters
         guard transcript.count > limit else { return transcript }
-        return "..." + String(transcript.suffix(limit))
+        return "…" + String(transcript.suffix(limit))
     }
 
     private func time(

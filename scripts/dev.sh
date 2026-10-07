@@ -203,12 +203,25 @@ validate_clean_path() {
 }
 
 configure_xcodebuild_args() {
+  # An Apple silicon Mac exposes both native and Rosetta destinations. Select
+  # the hardware's native architecture even if this shell runs under Rosetta.
+  local native_arch
+  if [[ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" == "1" ]]; then
+    native_arch=arm64
+  else
+    native_arch="$(uname -m)"
+  fi
+  case "$native_arch" in
+    arm64|x86_64) ;;
+    *) fail "Unsupported Mac architecture: $native_arch" ;;
+  esac
+
   xcodebuild_args=(
     -project "$PROJECT_PATH"
     -scheme "$SCHEME"
     -configuration "$CONFIGURATION"
     -derivedDataPath "$DERIVED_DATA_PATH"
-    -destination 'platform=macOS'
+    -destination "platform=macOS,arch=$native_arch"
   )
 
   if [[ "$CONFIGURATION" == "Debug" && -f "$SIGNING_CONFIG_PATH" ]]; then

@@ -4,6 +4,11 @@
 <dict>
 	<key>ATSApplicationFontsPath</key>
 	<string>.</string>
+	<key>LSArchitecturePriority</key>
+	<array>
+		<string>arm64</string>
+		<string>x86_64</string>
+	</array>
 #if RELEASE
 	<key>SUFeedURL</key>
 	<string>https:&#x2F;&#x2F;raw.githubusercontent.com/hoomanaskari/mac-dictate-anywhere/main/appcast.xml</string>

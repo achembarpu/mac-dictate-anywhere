@@ -77,11 +77,25 @@ struct DSStackedRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.dsSwitch)
+            DSSwitch(accessibilityName: label, isOn: $isOn)
         }
         .padding(.vertical, 14)
         .padding(.horizontal, DS.Spacing.rowHorizontal)
+    }
+}
+
+/// Secondary text spanning the width of a settings card.
+struct DSCardCaption: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(DS.Fonts.ui(12.5))
+            .lineSpacing(12.5 * 0.5 - 3)
+            .foregroundStyle(DS.Colors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 12)
+            .padding(.horizontal, DS.Spacing.rowHorizontal)
     }
 }

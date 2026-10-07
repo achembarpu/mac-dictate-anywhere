@@ -23,16 +23,20 @@ struct SettingsView: View {
 
             DSSection(overline: "Startup") {
                 DSInfoRow(label: "Launch at login") {
-                    Toggle("", isOn: $settings.launchAtLogin)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Launch at login", isOn: $settings.launchAtLogin)
+                }
+                if let error = settings.launchAtLoginError {
+                    DSFieldMessage(text: error, tone: .error)
+                        .padding(.horizontal, DS.Spacing.rowHorizontal)
+                        .padding(.bottom, 10)
                 }
                 DSDivider()
                 DSInfoRow(label: "App appears in") {
                     DSDropdown(
                         selection: $settings.appAppearanceMode,
                         options: AppAppearanceMode.allCases,
-                        title: \.displayName
+                        title: \.displayName,
+                        accessibilityName: "App appearance"
                     )
                 }
                 DSDivider()
@@ -40,9 +44,7 @@ struct SettingsView: View {
                     label: "Prewarm models at startup",
                     caption: "Load the selected speech model and eligible S1-mini cleanup model before first use."
                 ) {
-                    Toggle("", isOn: $settings.prewarmEnginesAtStartup)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Prewarm models at startup", isOn: $settings.prewarmEnginesAtStartup)
                 }
             }
 
@@ -54,7 +56,8 @@ struct SettingsView: View {
                     DSDropdown(
                         selection: $settings.themeMode,
                         options: ThemeMode.allCases,
-                        title: \.displayName
+                        title: \.displayName,
+                        accessibilityName: "Theme"
                     )
                 }
             }
@@ -76,7 +79,8 @@ struct SettingsView: View {
                                 options: appState.appleSpeechSupportedLanguages.isEmpty
                                     ? [settings.appleSpeechLanguage]
                                     : appState.appleSpeechSupportedLanguages,
-                                title: \.displayWithFlag
+                                title: \.displayWithFlag,
+                                accessibilityName: "Transcription language"
                             )
                         }
                     } else if settings.engineChoice == .parakeet {
@@ -93,7 +97,8 @@ struct SettingsView: View {
                                     selection: $settings.selectedLanguage,
                                     options: parakeetModelChoice.selectableLanguages
                                         ?? Array(SupportedLanguage.allCases),
-                                    title: \.displayWithFlag
+                                    title: \.displayWithFlag,
+                                    accessibilityName: "Transcription language"
                                 )
                             }
                         }
@@ -116,27 +121,31 @@ struct SettingsView: View {
                         title: { uid in
                             guard let uid else { return "System Default" }
                             return appState.audioDeviceManager.availableInputDevices
-                                .first { $0.uid == uid }?.name ?? uid
-                        }
+                                .first { $0.uid == uid }?.name ?? "Selected microphone unavailable"
+                        },
+                        accessibilityName: "Microphone"
                     )
+                }
+                if let uid = settings.selectedMicrophoneUID,
+                   !appState.audioDeviceManager.availableInputDevices.contains(where: { $0.uid == uid }) {
+                    DSFieldMessage(
+                        text: "The selected microphone is disconnected or unavailable. Reconnect it, choose another microphone, or select System Default.",
+                        tone: .warning
+                    )
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+                    .padding(.bottom, 10)
                 }
                 DSDivider()
                 DSInfoRow(label: "Boost microphone volume during recording") {
-                    Toggle("", isOn: $settings.boostMicrophoneVolumeEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Boost microphone volume during recording", isOn: $settings.boostMicrophoneVolumeEnabled)
                 }
                 DSDivider()
                 DSInfoRow(label: "Mute system audio during recording") {
-                    Toggle("", isOn: $settings.muteSystemAudioDuringRecordingEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Mute system audio during recording", isOn: $settings.muteSystemAudioDuringRecordingEnabled)
                 }
                 DSDivider()
                 DSInfoRow(label: "Sound effects") {
-                    Toggle("", isOn: $settings.soundEffectsEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.dsSwitch)
+                    DSSwitch(accessibilityName: "Sound effects", isOn: $settings.soundEffectsEnabled)
                 }
                 if settings.soundEffectsEnabled {
                     DSDivider()
@@ -144,13 +153,15 @@ struct SettingsView: View {
                         Image(systemName: "speaker.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(DS.Colors.textSecondary)
+                            .accessibilityHidden(true)
                         DSSlider(value: Binding(
                             get: { Double(settings.soundEffectsVolume) },
                             set: { settings.soundEffectsVolume = Float($0) }
-                        ))
+                        ), label: "Sound effects volume")
                         Image(systemName: "speaker.wave.3.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(DS.Colors.textSecondary)
+                            .accessibilityHidden(true)
                     }
                     .padding(.vertical, 14)
                     .padding(.horizontal, DS.Spacing.rowHorizontal)

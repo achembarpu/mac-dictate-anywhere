@@ -640,19 +640,19 @@ enum OllamaPostProcessingService {
             let lowered = normalized.lowercased()
 
             if lowered == "pulling manifest" {
-                return "Preparing model download..."
+                return "Preparing model download…"
             }
             if lowered.hasPrefix("pulling ") {
-                return "Downloading model..."
+                return "Downloading model…"
             }
             if lowered == "verifying sha256 digest" {
-                return "Verifying model files..."
+                return "Verifying model files…"
             }
             if lowered == "writing manifest" {
-                return "Finalizing model..."
+                return "Finalizing model…"
             }
             if lowered == "removing any unused layers" {
-                return "Cleaning up cached layers..."
+                return "Cleaning up cached layers…"
             }
             if lowered == "success" {
                 return "Download complete."

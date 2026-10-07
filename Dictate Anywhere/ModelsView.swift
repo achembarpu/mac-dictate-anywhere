@@ -10,8 +10,9 @@ import SwiftUI
 struct ModelsView: View {
     @Environment(AppState.self) private var appState
 
-    @State private var showDeleteConfirm = false
-    @State private var downloadError: String?
+    @State private var modelPendingDeletion: ParakeetModelChoice?
+    @State private var isDeletingModel = false
+    @State private var modelActionError: String?
 
     var body: some View {
         @Bindable var settings = appState.settings
@@ -29,7 +30,7 @@ struct ModelsView: View {
                         selection: Binding(
                             get: { settings.engineChoice },
                             set: { newValue in
-                                downloadError = nil
+                                modelActionError = nil
                                 if newValue == .appleSpeech, !AppleSpeechEngine.isSupported {
                                     appState.reportUnsupportedAppleSpeechSelection()
                                     return
@@ -39,9 +40,11 @@ struct ModelsView: View {
                         ),
                         options: appState.availableEngineChoices,
                         title: engineChoiceTitle,
+                        accessibilityName: "Speech engine",
                         isEnabled: appState.status == .idle
                             && !appState.isPreparingEngine
                             && !appState.parakeetEngine.isDownloading
+                            && !isDeletingModel
                     )
                 }
             }
@@ -53,7 +56,7 @@ struct ModelsView: View {
                             selection: Binding(
                                 get: { settings.parakeetModelChoice },
                                 set: { newValue in
-                                    downloadError = nil
+                                    modelActionError = nil
                                     settings.parakeetModelChoice = newValue
                                     Task {
                                         await appState.parakeetEngine.recheckModelOnDisk(for: newValue)
@@ -63,7 +66,9 @@ struct ModelsView: View {
                             ),
                             options: ParakeetModelChoice.availableCases,
                             title: \.displayName,
+                            accessibilityName: "FluidAudio model variant",
                             isEnabled: appState.status == .idle && !appState.parakeetEngine.isDownloading
+                                && !appState.isPreparingEngine && !isDeletingModel
                         )
                     }
                     DSDivider()
@@ -84,9 +89,7 @@ struct ModelsView: View {
                     if selectedModel.supportsEndOfUtterance {
                         DSDivider()
                         DSInfoRow(label: "Stop hands-free dictation after speech ends") {
-                            Toggle("", isOn: $settings.autoStopAfterSpeechEndsEnabled)
-                                .labelsHidden()
-                                .toggleStyle(.dsSwitch)
+                            DSSwitch(accessibilityName: "Stop hands-free dictation after speech ends", isOn: $settings.autoStopAfterSpeechEndsEnabled)
                         }
                     }
                     DSDivider()
@@ -99,21 +102,17 @@ struct ModelsView: View {
                             labelWeight: .regular
                         ) {
                             Button("Delete Model…") {
-                                showDeleteConfirm = true
+                                modelPendingDeletion = selectedModel
                             }
                             .buttonStyle(.dsDestructive)
-                            .disabled(appState.status != .idle)
+                            .disabled(appState.status != .idle || appState.isPreparingEngine || isDeletingModel)
                         }
                     }
-                    if let error = downloadError {
+                    if let error = modelActionError ?? appState.enginePreparationError {
                         DSDivider()
-                        DSInfoRow(
-                            label: error,
-                            labelColor: DS.Colors.destructive,
-                            labelWeight: .regular
-                        ) {
-                            EmptyView()
-                        }
+                        DSFieldMessage(text: error, tone: .error)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, DS.Spacing.rowHorizontal)
                     }
                 }
 
@@ -129,13 +128,9 @@ struct ModelsView: View {
                     appleSpeechStatusRow
                     if let error = appState.enginePreparationError {
                         DSDivider()
-                        DSInfoRow(
-                            label: error,
-                            labelColor: DS.Colors.destructive,
-                            labelWeight: .regular
-                        ) {
-                            EmptyView()
-                        }
+                        DSFieldMessage(text: error, tone: .error)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, DS.Spacing.rowHorizontal)
                     }
                 }
 
@@ -147,16 +142,42 @@ struct ModelsView: View {
                 assemblyAIContent(settings: settings)
             }
         }
-        .alert("Delete \(selectedModel.displayName)?", isPresented: $showDeleteConfirm) {
+        .alert(
+            "Delete \(modelPendingDeletion?.displayName ?? selectedModel.displayName)?",
+            isPresented: Binding(
+                get: { modelPendingDeletion != nil },
+                set: { if !$0 { modelPendingDeletion = nil } }
+            ),
+            presenting: modelPendingDeletion
+        ) { model in
             Button("Delete", role: .destructive) {
-                Task {
-                    try? await appState.parakeetEngine.deleteModel()
-                    await MainActor.run { applyParakeetSelection(userInitiated: false) }
-                }
+                modelPendingDeletion = nil
+                deleteModel(model)
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will remove the \(selectedModel.displayName.lowercased()) speech model (\(selectedModel.sizeSummary)). You can download it again later.")
+            Button("Cancel", role: .cancel) { modelPendingDeletion = nil }
+        } message: { model in
+            Text("This will remove the \(model.displayName.lowercased()) speech model (\(model.sizeSummary)). You can download it again later.")
+        }
+    }
+
+    private func deleteModel(_ model: ParakeetModelChoice) {
+        guard appState.status == .idle, !appState.isPreparingEngine,
+              !appState.parakeetEngine.isDownloading, !isDeletingModel,
+              appState.settings.engineChoice == .parakeet,
+              appState.settings.parakeetModelChoice == model else {
+            modelActionError = "The selected model is busy or has changed. Review it and try deleting again."
+            return
+        }
+        modelActionError = nil
+        isDeletingModel = true
+        Task {
+            defer { isDeletingModel = false }
+            do {
+                try await appState.parakeetEngine.deleteModel()
+                await appState.handleParakeetModelSelectionChange(userInitiated: false)
+            } catch {
+                modelActionError = error.localizedDescription
+            }
         }
     }
 
@@ -190,14 +211,20 @@ struct ModelsView: View {
                             get: { settings.assemblyAIAPIKey },
                             set: { appState.updateAssemblyAIAPIKey($0) }
                         ),
-                        isSecure: true
+                        isSecure: true,
+                        accessibilityName: "AssemblyAI API key"
                     )
                     .frame(width: 280)
                     if !settings.assemblyAIAPIKey.isEmpty {
-                        Button("Clear") { appState.updateAssemblyAIAPIKey("") }
-                            .buttonStyle(.dsSecondary)
+                        Button("Clear Stored Key") { appState.updateAssemblyAIAPIKey("") }
+                            .buttonStyle(.dsDestructive)
                     }
                 }
+            }
+            if let error = settings.assemblyAIAPIKeyError {
+                DSFieldMessage(text: error, tone: .error)
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+                    .padding(.bottom, 10)
             }
             DSDivider()
             DSInfoRow(label: "Status") {
@@ -221,7 +248,8 @@ struct ModelsView: View {
                 DSDropdown(
                     selection: $settings.assemblyAIRegion,
                     options: AssemblyAIRegion.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "AssemblyAI processing region"
                 )
             }
             DSDivider()
@@ -237,7 +265,8 @@ struct ModelsView: View {
                 DSDropdown(
                     selection: $settings.assemblyAILanguage,
                     options: AssemblyAILanguage.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "AssemblyAI language"
                 )
             }
             DSDivider()
@@ -260,7 +289,8 @@ struct ModelsView: View {
                 DSDropdown(
                     selection: $settings.assemblyAIOutputMode,
                     options: AssemblyAIOutputMode.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "AssemblyAI output"
                 )
             }
         }
@@ -329,7 +359,8 @@ struct ModelsView: View {
             DSDropdown(
                 selection: assemblyAIWritingStyleBinding(settings: settings, category: category),
                 options: DictationWritingStyle.options(for: category),
-                title: \.displayName
+                title: \.displayName,
+                accessibilityName: "AssemblyAI writing style for \(category.displayName)"
             )
         }
     }
@@ -361,77 +392,41 @@ struct ModelsView: View {
         }
     }
 
-    @ViewBuilder
     private var appleSpeechStatusRow: some View {
-        if appState.isPreparingEngine {
-            DSInfoRow(label: "Preparing Apple Speech…") {
-                ProgressView()
-                    .controlSize(.small)
-            }
-        } else if appState.appleSpeechEngine.isReady {
-            DSInfoRow(label: "Status") {
-                DSStatusPill(text: "Ready")
-            }
-        } else {
-            DSInfoRow(label: "Status") {
-                HStack(spacing: 10) {
-                    DSStatusPill(
-                        text: "Not set up",
-                        dotColor: DS.Colors.textSecondary,
-                        textColor: DS.Colors.textSecondary,
-                        fill: DS.Colors.bgInset
-                    )
-                    Button("Set Up Apple Speech") {
-                        Task { await appState.prepareActiveEngine() }
-                    }
-                    .buttonStyle(.dsPrimary)
-                    .disabled(appState.status != .idle)
-                }
-            }
-        }
+        let readiness: ModelReadiness = appState.isPreparingEngine ? .preparing
+            : (appState.appleSpeechEngine.isReady ? .ready : .needsSetup)
+        return DSModelReadinessRow(readiness: readiness,
+            actionTitle: readiness == .needsSetup ? "Set Up Apple Speech" : nil,
+            action: { Task { await appState.prepareActiveEngine() } })
+            .disabled(appState.status != .idle || isDeletingModel)
     }
 
-    @ViewBuilder
+    private var speechReadiness: ModelReadiness {
+        if isDeletingModel { return .deleting }
+        if appState.parakeetEngine.isDownloading { return .downloading(appState.parakeetEngine.downloadProgress) }
+        if appState.isPreparingEngine { return .preparing }
+        if appState.parakeetEngine.isReady { return .ready }
+        return appState.parakeetEngine.isModelDownloaded ? .downloaded : .notDownloaded
+    }
+
     private var statusRow: some View {
-        if appState.parakeetEngine.isModelDownloaded {
-            DSInfoRow(label: "Status") {
-                DSStatusPill(text: "Ready")
-            }
-        } else if appState.parakeetEngine.isDownloading {
-            let progress = appState.parakeetEngine.downloadProgress
-            DSInfoRow(label: "Downloading… \(Int(progress * 100))%") {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(DS.Colors.accent)
-                    .frame(width: 180)
-            }
-        } else {
-            DSInfoRow(label: "Status") {
-                HStack(spacing: 10) {
-                    DSStatusPill(
-                        text: "Not downloaded",
-                        dotColor: DS.Colors.textSecondary,
-                        textColor: DS.Colors.textSecondary,
-                        fill: DS.Colors.bgInset
-                    )
-                    Button("Download Model") {
-                        downloadError = nil
-                        Task {
-                            do {
-                                try await appState.parakeetEngine.downloadModel()
-                                await MainActor.run {
-                                    applyParakeetSelection(userInitiated: true)
-                                }
-                            } catch {
-                                downloadError = error.localizedDescription
-                            }
-                        }
-                    }
-                    .buttonStyle(.dsPrimary)
-                    .disabled(appState.status != .idle)
+        let readiness = speechReadiness
+        let actionTitle = readiness == .notDownloaded ? "Download Model"
+            : (readiness == .downloaded ? "Prepare Model" : nil)
+        return DSModelReadinessRow(readiness: readiness, actionTitle: actionTitle, action: {
+            modelActionError = nil
+            Task {
+                if appState.parakeetEngine.isModelDownloaded {
+                    await appState.prepareActiveEngine()
+                } else {
+                    do {
+                        try await appState.parakeetEngine.downloadModel()
+                        applyParakeetSelection(userInitiated: true)
+                    } catch { modelActionError = error.localizedDescription }
                 }
             }
-        }
+        })
+        .disabled(appState.status != .idle || isDeletingModel)
     }
 
     private func applyParakeetSelection(userInitiated: Bool) {

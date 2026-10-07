@@ -48,6 +48,7 @@ final class AppState {
     var ollamaModelActionError: String?
     var ollamaModelActionsRevision = 0
     var enginePreparationError: String?
+    var recordingStartError: String?
 
     /// Static accessor for AppDelegate menu bar (avoids circular dependency)
     nonisolated(unsafe) static var lastTranscriptForMenuBar = ""
@@ -267,6 +268,8 @@ final class AppState {
             speechSetupNeeded: speechSetupNeeded,
             automationDenied: permissions.automationDenied,
             speechPreparationFailed: enginePreparationError != nil,
+            recoveryError: recoveryStore.errorMessage,
+            recordingError: recordingStartError,
             legacyAppleSpeechMigrationPending: settings.legacyAppleSpeechMigrationPending,
             appleSpeechUnsupportedSelection: appleSpeechUnsupportedSelection,
             appleSpeechRequiresMacOS26: !AppleSpeechEngine.isOperatingSystemSupported,
@@ -349,6 +352,10 @@ final class AppState {
             Task { await permissions.resolve(.accessibility) }
         case .speechSetup:
             selectedPage = .models
+        case .recovery:
+            recoveryStore.errorMessage = nil
+        case .recordingFailed:
+            recordingStartError = nil
         case .appleSpeechUnsupported:
             appleSpeechUnsupportedSelection = false
         case .cleanup(let problem):
@@ -476,6 +483,7 @@ final class AppState {
         isCancelling = false
         isTransitioning = false
         status = .idle
+        await settings.flushTranscriptHistory()
         volumeController.restoreMicrophoneVolume()
         volumeController.restoreAfterRecording()
         overlay.hide(afterDelay: 0)
@@ -903,7 +911,7 @@ final class AppState {
         ollamaModelActionError = nil
         ollamaDownloadState = OllamaDownloadState(
             model: trimmedModel,
-            status: "Preparing model download...",
+            status: "Preparing model download…",
             fractionCompleted: nil,
             completed: nil,
             total: nil
@@ -1021,6 +1029,7 @@ final class AppState {
 
     func startDictation(mode: HotkeyMode? = nil) async {
         guard !isShuttingDown else { return }
+        recordingStartError = nil
         logger.info("startDictation: entry, status=\(String(describing: self.status), privacy: .public), isTransitioning=\(self.isTransitioning, privacy: .public), engineChoice=\(String(describing: self.settings.engineChoice), privacy: .public)")
         if case .error = status {
             status = .idle
@@ -1262,6 +1271,11 @@ final class AppState {
                 recoveryStore.errorMessage = "Could not start the microphone. Your saved session is still available. \(message)"
             }
             status = .error("Failed to start recording: \(message)")
+            recordingStartError = permissions.micGranted && !wasContinuing
+                ? "Could not start the microphone. \(message)" : nil
+            selectedAttentionIssueID = !permissions.micGranted ? .microphone
+                : (wasContinuing ? .recovery : .recordingFailed)
+            NotificationCenter.default.post(name: .requestShowMainWindow, object: nil)
             overlay.show(state: .processing)
             overlay.hide(afterDelay: 2.0)
             insertionTargetApp = nil
@@ -1548,15 +1562,17 @@ final class AppState {
         await reactivateInsertionTargetIfNeeded()
         let insertionContext = await insertionContextForDelivery()
         let insertionStyle = insertionContext.map { settings.dictationWritingStyle(for: $0.category) }
+        // Encoding overlaps target/context preparation, but history is saved
+        // before delivery can discard the recording's recovery copy.
+        await settings.flushTranscriptHistory()
         let result: TextInsertionResult
         if let transcriptDeliveryOverride {
             result = await transcriptDeliveryOverride(processedText)
         } else {
-            // A continued session with no usable original destination must not
-            // paste into History or an unrelated app that happens to be frontmost.
-            let canPaste = continuingEntryID == nil || (insertionTargetApp != nil
+            // Every session must still own its destination, including ordinary dictation.
+            let canPaste = insertionTargetApp != nil
                 && insertionTargetApp?.isTerminated == false
-                && NSWorkspace.shared.frontmostApplication?.processIdentifier == insertionTargetApp?.processIdentifier)
+                && NSWorkspace.shared.frontmostApplication?.processIdentifier == insertionTargetApp?.processIdentifier
             result = await textInserter.insertText(
                 processedText, context: insertionContext, style: insertionStyle,
                 knownTerms: settings.customVocabulary,
@@ -1775,6 +1791,7 @@ final class AppState {
                 return
             }
             settings.addTranscriptHistoryEntry(cleaned)
+            await settings.flushTranscriptHistory()
             lastTranscript = cleaned
             Self.lastTranscriptForMenuBar = cleaned
             recoveryStore.release(id: entry.id)
