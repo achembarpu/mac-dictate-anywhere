@@ -88,7 +88,11 @@ chmod +x scripts/release-macos.sh
 If `scripts/release-macos.sh` already exists, compare its archive command with
 the current template before packaging. The script is ignored and does not
 update automatically; it must pass `DISTRIBUTION_BUILD` to default performance
-tracing off in the distributed app. Local Release benchmarks remain traced.
+tracing off in the distributed app. It must also pass the literal build setting
+`'ARCHS=$(ARCHS_STANDARD)'` and `ONLY_ACTIVE_ARCH=NO`, and run
+`scripts/verify-universal-app.sh` on the archived app and the app mounted from
+the DMG. Copy those changes from the current template into existing local scripts.
+Local Release benchmarks remain traced.
 
 Then run it:
 
@@ -99,11 +103,13 @@ Then run it:
 It does all of this:
 
 - archives the Release app
+- checks that every Mach-O binary in the archive contains both `arm64` and `x86_64`
 - verifies the Developer ID Application signature
 - notarizes and staples the app
 - creates `dist/DictateAnywhere-<version>.zip`
 - creates `dist/DictateAnywhere-<version>.dmg`
 - notarizes and staples the DMG
+- checks the app and embedded binaries mounted from the DMG are universal
 - regenerates `appcast.xml` from the notarized zip
 
 ### 4. Verify the outputs before upload
@@ -112,12 +118,14 @@ It does all of this:
 VERSION="2.11.0"
 
 spctl -a -vv "dist/Dictate Anywhere.app"
+scripts/verify-universal-app.sh "dist/Dictate Anywhere.app"
 xcrun stapler validate "dist/DictateAnywhere-${VERSION}.dmg"
 ```
 
 Expected results:
 
 - the app is accepted as `Notarized Developer ID`
+- all app binaries, frameworks, updater helpers, and XPC services contain `arm64` and `x86_64`
 - the DMG has a stapled ticket
 
 ### 5. Commit and tag the verified artifacts and source
@@ -151,6 +159,10 @@ The appcast is served from:
 `https://raw.githubusercontent.com/hoomanaskari/mac-dictate-anywhere/main/appcast.xml`
 
 ## Troubleshooting
+
+**macOS warns about future Intel-app support**: [Apple says general Rosetta support ends after macOS 27](https://support.apple.com/en-us/102527). Ship and install the verified universal app, including its embedded components. A signature or notarization ticket does not establish architecture support. Check the affected copy with `scripts/verify-universal-app.sh "/path/to/Dictate Anywhere.app"`. If it passes, check Finder's Get Info for **Open using Rosetta** and deselect it for normal use. The app prioritizes `arm64` on Apple silicon while retaining `x86_64` for Intel Macs. Debug builds are native to the development Mac and should not be distributed.
+
+Architecture settings follow [Apple's universal binary guidance](https://developer.apple.com/documentation/apple-silicon/building-a-universal-macos-binary): standard architectures, Debug active architecture only, Release all architectures. Before publishing, test native `arm64` on Apple silicon and native `x86_64` on Intel hardware. An `x86_64` test run under Rosetta on Apple silicon is useful additional coverage, but does not verify Intel-specific hardware behavior.
 
 **No EdDSA key found**: Run `"$SPARKLE_BIN/generate_keys"` to create one, or import with `generate_keys -f private-eddsa-key.pem`.
 
