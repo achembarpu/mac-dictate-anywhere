@@ -74,6 +74,12 @@ fixtures/repeats with the usual settings. These checks do not capture a micropho
 or measure end-to-end dictation latency. Save logs and xcresults outside the
 checkout with an absolute output path.
 
+The paired candidate-discovery check in `tdt-vocabulary` also rejects vocabulary
+corrections that increase a golden fixture's WER. Include short possessive names
+and longer phrases using `PIPELINE_BENCHMARK_FIXTURE`; matching the acoustic
+reference alone does not prove that the reference itself preserves accuracy.
+Decoder/default changes must satisfy both the parity and accuracy checks.
+
 For Apple prompt comparisons, set `PIPELINE_BENCHMARK_CLEANUP_PROVIDER=apple`
 and `PIPELINE_BENCHMARK_CLEANUP_PROMPT_PATH` to an external JSON array of
 `{"id":"candidate-name","prompt":"cleanup instructions"}` objects, then run

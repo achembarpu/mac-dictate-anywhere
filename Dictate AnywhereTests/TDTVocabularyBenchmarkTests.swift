@@ -192,7 +192,14 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
                 while let chunk = try reader.nextSamples() { audio.append(contentsOf: chunk) }
                 var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
                 let original = try await manager.transcribe(audio, decoderState: &state)
-                let genuine = id == "golden-en-fleurs-2" ? ["Chandra Shekhar Solanki"] : ["Quilter"]
+                let genuine: [String]
+                switch id {
+                case "golden-en-fleurs-2": genuine = ["Chandra Shekhar Solanki"]
+                case "golden-en-fleurs-1": genuine = ["traffic", "behavior"]
+                case "golden-en-ami-3": genuine = ["David", "Andrew", "Craig"]
+                case "golden-en-boundaries": genuine = ["Quilter", "Frederick Leighton", "Ithaca", "Linnell", "Birket Foster", "John Collier"]
+                default: genuine = ["Quilter"]
+                }
                 for (list, terms) in [("genuine", genuine), ("irrelevant", ["Czechoslovakia", "photosynthesis"])] {
                     let prepared = try await PreparedTDTVocabulary.prepare(models: models, terms: terms, cachedCTCModels: nil)
                     var timings: [String: [Double]] = [:]
@@ -208,6 +215,9 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
                             let after = try BenchmarkProcessResources.sample()
                             if let reference { XCTAssertEqual(output, reference, "Candidate discovery changed final text") }
                             else { reference = output }
+                            XCTAssertLessThanOrEqual(try fixture.errorRate(hypothesis: output),
+                                try fixture.errorRate(hypothesis: original.text),
+                                "Vocabulary rescoring regressed the golden transcript: \(choice.rawValue)/\(id)/\(list)")
                             timings[variant, default: []].append(elapsed)
                             try emit(fixture: fixture, model: choice, list: list, terms: terms, variant: variant,
                                 iteration: iteration, elapsed: elapsed, cpu: after.cpuMilliseconds - before.cpuMilliseconds,
