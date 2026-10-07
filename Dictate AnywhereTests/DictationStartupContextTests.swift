@@ -575,7 +575,11 @@ private final class StartupContextEngine: TranscriptionEngine {
         onPrepare?()
     }
     func startRecording(deviceID: AudioDeviceID?) async throws { capturing = true }
-    func stopAudioCapture() async { capturing = false; onCaptureStopped?() }
+    func stopAudioCapture() async {
+        guard capturing else { return }
+        capturing = false
+        onCaptureStopped?()
+    }
     func stopRecording() async -> String {
         finalizationCount += 1
         contextAtFinalization = context

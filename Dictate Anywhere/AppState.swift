@@ -1352,6 +1352,7 @@ final class AppState {
         // Local final decoding can overlap a cold editor's context capture.
         // Context-dependent engines retain their context-before-decode order.
         await engine.stopAudioCapture()
+        volumeController.recordCaptureStopped()
         let contextTask = contextApplicationTask
         async let recognition = finalizeRecording(
             engine: engine,
@@ -1688,6 +1689,8 @@ final class AppState {
         let engine = sessionEngine ?? activeEngine
         // Let a cancelled finish/cleanup unwind before reusing the same engine.
         // The task checks cancellation before saving or delivering its result.
+        await engine.stopAudioCapture()
+        volumeController.recordCaptureStopped()
         await processingTask?.value
         processingOperationID = nil
         processingTask = nil
