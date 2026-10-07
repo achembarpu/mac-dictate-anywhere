@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import os
 
 enum OpenAICompatiblePostProcessingService {
@@ -7,6 +8,12 @@ enum OpenAICompatiblePostProcessingService {
         subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
         category: "OpenAICompatiblePostProcessing"
     )
+
+    nonisolated struct DiscoveryKey: Hashable, Sendable {
+        let endpoint: URL
+        let credentialID: Data
+    }
+    private static let discovery = TimedRequestCache<DiscoveryKey, [String]>()
 
     struct Availability: Sendable {
         let models: [String]
@@ -43,9 +50,11 @@ enum OpenAICompatiblePostProcessingService {
         }
     }
 
-    static func availability(baseURL: String, apiKey: String, selectedModel: String) async throws -> Availability {
+    static func availability(baseURL: String, apiKey: String, selectedModel: String,
+                             session: URLSession = .shared,
+                             cache: TimedRequestCache<DiscoveryKey, [String]>? = nil) async throws -> Availability {
         Availability(
-            models: try await fetchModels(baseURL: baseURL, apiKey: apiKey),
+            models: try await fetchModels(baseURL: baseURL, apiKey: apiKey, refresh: true, session: session, cache: cache ?? (session === URLSession.shared ? discovery : TimedRequestCache())),
             selectedModel: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         )
     }
@@ -87,29 +96,31 @@ enum OpenAICompatiblePostProcessingService {
         }
     }
 
-    static func prewarm(baseURL: String, model: String, apiKey: String) async -> Bool {
+    static func prewarm(baseURL: String, model: String, apiKey: String,
+                        refresh: Bool = false, session: URLSession = .shared,
+                        cache: TimedRequestCache<DiscoveryKey, [String]>? = nil) async -> Bool {
         guard !Task.isCancelled else { return false }
         // The portable API has no model-load operation. Prepare the connection
         // and discover models without generating or sharing transcript/context.
-        return (try? await fetchModels(baseURL: baseURL, apiKey: apiKey))?.contains {
+        return (try? await fetchModels(baseURL: baseURL, apiKey: apiKey, refresh: refresh, session: session, cache: cache ?? (session === URLSession.shared ? discovery : TimedRequestCache())))?.contains {
             $0.caseInsensitiveCompare(model) == .orderedSame
         } ?? false
     }
 
-    private struct ModelsResponse: Decodable {
+    nonisolated private struct ModelsResponse: Decodable {
         let data: [ModelResponse]
     }
 
-    private struct ModelResponse: Decodable {
+    nonisolated private struct ModelResponse: Decodable {
         let id: String
     }
 
-    private struct ErrorResponse: Decodable {
-        struct ErrorPayload: Decodable {
+    nonisolated private struct ErrorResponse: Decodable {
+        nonisolated struct ErrorPayload: Decodable {
             let message: String?
         }
 
-        enum ErrorValue: Decodable {
+        nonisolated enum ErrorValue: Decodable {
             case text(String)
             case payload(ErrorPayload)
 
@@ -146,15 +157,30 @@ enum OpenAICompatiblePostProcessingService {
         let message: String?
     }
 
-    private static func fetchModels(baseURL: String, apiKey: String) async throws -> [String] {
-        var request = URLRequest(url: try endpointURL(baseURL: baseURL, path: "models"))
+    private static func fetchModels(baseURL: String, apiKey: String, refresh: Bool,
+                                    session: URLSession, cache: TimedRequestCache<DiscoveryKey, [String]>) async throws -> [String] {
+        let credential = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = DiscoveryKey(endpoint: try endpointURL(baseURL: baseURL, path: "models"),
+                               credentialID: credentialIdentity(apiKey: credential))
+        return try await cache.value(for: key, refresh: refresh) {
+            try await fetchModelsUncached(endpoint: key.endpoint, apiKey: credential, session: session)
+        }
+    }
+
+    /// Cache identity must separate authenticated catalogs without retaining keys.
+    nonisolated static func credentialIdentity(apiKey: String) -> Data {
+        Data(SHA256.hash(data: Data(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).utf8)))
+    }
+
+    nonisolated private static func fetchModelsUncached(endpoint: URL, apiKey: String,
+                                                       session: URLSession) async throws -> [String] {
+        var request = URLRequest(url: endpoint)
         request.timeoutInterval = 5
-        let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedAPIKey.isEmpty {
-            request.setValue("Bearer \(trimmedAPIKey)", forHTTPHeaderField: "Authorization")
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(ModelsResponse.self, from: data)
@@ -226,7 +252,7 @@ enum OpenAICompatiblePostProcessingService {
         return responseText
     }
 
-    private static func validate(response: URLResponse, data: Data) throws {
+    nonisolated private static func validate(response: URLResponse, data: Data) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.invalidResponse
         }

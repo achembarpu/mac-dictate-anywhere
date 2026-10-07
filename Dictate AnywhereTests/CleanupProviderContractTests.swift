@@ -47,6 +47,62 @@ final class CleanupProviderContractTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
+    func testPortableDiscoveryCachesPrewarmButRefreshesExplicitChecksAndSeparatesCredentials() async throws {
+        let calls = OSAllocatedUnfairLock(initialState: [String]())
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            calls.withLock { $0.append((request.url?.absoluteString ?? "") + " " + (request.value(forHTTPHeaderField: "Authorization") ?? "")) }
+            return (200, Data(#"{"data":[{"id":" model "},{"id":"model"},{"id":""}]}"#.utf8))
+        } }
+        let cache = TimedRequestCache<OpenAICompatiblePostProcessingService.DiscoveryKey, [String]>()
+        for _ in 0..<3 {
+            let ready = await OpenAICompatiblePostProcessingService.prewarm(baseURL: "http://cleanup.test/v1/", model: "model",
+                apiKey: " first ", session: session, cache: cache)
+            XCTAssertTrue(ready)
+        }
+        XCTAssertEqual(calls.withLock { $0.count }, 1)
+        let availability = try await OpenAICompatiblePostProcessingService.availability(baseURL: "http://cleanup.test/v1", apiKey: "first",
+            selectedModel: "model", session: session, cache: cache)
+        XCTAssertEqual(availability.models, ["model"])
+        XCTAssertEqual(calls.withLock { $0.count }, 2, "An explicit readiness check must fetch current models")
+        _ = await OpenAICompatiblePostProcessingService.prewarm(baseURL: "http://cleanup.test/v1", model: "model",
+            apiKey: "second", session: session, cache: cache)
+        _ = await OpenAICompatiblePostProcessingService.prewarm(baseURL: "http://other.test/v1", model: "model",
+            apiKey: "second", session: session, cache: cache)
+        XCTAssertEqual(calls.withLock { $0.count }, 4)
+        XCTAssertTrue(calls.withLock { $0[2].hasSuffix("Bearer second") })
+    }
+
+    func testPortableDiscoveryDoesNotCacheFailuresOrExpiredResults() async throws {
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        CleanupHTTPStub.handler.withLock { $0 = { _ in
+            let count = calls.withLock { $0 += 1; return $0 }
+            return count == 1 ? (503, Data()) : (200, Data(#"{"data":[{"id":"model"}]}"#.utf8))
+        } }
+        let cache = TimedRequestCache<OpenAICompatiblePostProcessingService.DiscoveryKey, [String]>(lifetime: .zero)
+        var readiness: [Bool] = []
+        for _ in 0..<3 {
+            readiness.append(await OpenAICompatiblePostProcessingService.prewarm(baseURL: "http://cleanup.test", model: "model",
+                apiKey: "", session: session, cache: cache))
+        }
+        XCTAssertEqual(readiness, [false, true, true])
+        XCTAssertEqual(calls.withLock { $0 }, 3)
+    }
+
+    func testConcurrentDiscoverySharesOneInFlightRequest() async throws {
+        let cache = TimedRequestCache<String, Int>(lifetime: .zero)
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let load: @Sendable () async throws -> Int = {
+            calls.withLock { $0 += 1 }
+            try await Task.sleep(for: .milliseconds(100))
+            return 42
+        }
+        async let first = cache.value(for: "same", load: load)
+        async let second = cache.value(for: "same", load: load)
+        let results = try await [first, second]
+        XCTAssertEqual(results, [42, 42])
+        XCTAssertEqual(calls.withLock { $0 }, 1)
+    }
+
     func testOllamaPreloadContainsNoTranscriptAndGenerationKeepsModelPreset() async throws {
         let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
         CleanupHTTPStub.handler.withLock { callback in
