@@ -2,8 +2,8 @@ import XCTest
 @testable import Dictate_Anywhere
 
 /// `ParakeetEngine.joinChunkTranscripts` joins transcripts of **disjoint**
-/// audio: `commitBufferedChunksIfNeeded` drops exactly one chunk per commit and
-/// retains no overlap, so consecutive chunk transcripts never share speech.
+/// audio: SenseVoice pause segmentation retains every sample once, so
+/// consecutive chunk transcripts never share speech.
 /// The join must therefore add a separator and nothing else — never delete.
 final class MergeTranscriptsTests: XCTestCase {
     // Existing Latin behavior must not regress
@@ -65,10 +65,10 @@ final class MergeTranscriptsTests: XCTestCase {
                        "不知道不知道该怎么办")
     }
 
-    // MARK: - Disjoint chunk seams (the shipping chunker's actual output)
+    // MARK: - Disjoint SenseVoice segment seams
 
-    // commitBufferedChunksIfNeeded drops exactly one chunk per commit and keeps
-    // no overlap, so consecutive chunk transcripts share no repeated audio. The
+    // Pause segmentation keeps no overlap, so consecutive segment transcripts
+    // share no repeated audio. The
     // seam must join with nothing added and nothing dropped.
     func testDisjointCJKChunkSeamJoinsWithoutSpaceOrLoss() {
         let first = "今天天气很好我们打算"
@@ -89,14 +89,6 @@ final class MergeTranscriptsTests: XCTestCase {
         XCTAssertEqual(
             ParakeetEngine.joinChunkTranscripts(base: "we are going to the", addition: "park this afternoon"),
             "we are going to the park this afternoon")
-    }
-
-    // The chunk length the seam tests split on must stay tied to production.
-    func testChunkConstantsMatchProductionChunker() {
-        XCTAssertEqual(ParakeetEngine.transcriptionSampleRate, 16_000)
-        XCTAssertEqual(
-            ParakeetEngine.chunkTranscriptionSampleCount,
-            ParakeetEngine.transcriptionSampleRate * ParakeetEngine.chunkTranscriptionSeconds)
     }
 
     // MARK: - Opening CJK punctuation at a seam

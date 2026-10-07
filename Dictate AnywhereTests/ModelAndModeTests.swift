@@ -143,7 +143,13 @@ final class ModelAndModeTests: XCTestCase {
             let fallback = ParakeetModelChoice.availableFallback(for: language, hasNeuralEngine: false)
             XCTAssertNotEqual(fallback, .nemotronMultilingual, "\(language) fell back to an Intel-incapable model")
             XCTAssertTrue(fallback.isAvailable(hasNeuralEngine: false))
-            XCTAssertTrue(fallback.supportsLanguage(language), "\(language) lost language support on Intel")
+            if language == .norwegian {
+                XCTAssertFalse(fallback.supportsLanguage(language))
+                XCTAssertTrue(ParakeetModelChoice.availableCases(hasNeuralEngine: false)
+                    .filter { $0.supportsLanguage(language) }.isEmpty)
+            } else {
+                XCTAssertTrue(fallback.supportsLanguage(language), "\(language) lost language support on Intel")
+            }
         }
     }
 
@@ -432,18 +438,44 @@ final class ModelAndModeTests: XCTestCase {
         XCTAssertNil(ParakeetModelChoice.senseVoice.selectableLanguages)
         XCTAssertNotNil(ParakeetModelChoice.senseVoice.fixedLanguageLabel)
         XCTAssertEqual(ParakeetModelChoice.nemotronMultilingual.selectableLanguages,
-                       SupportedLanguage.allCases)
-        XCTAssertEqual(ParakeetModelChoice.multilingual.selectableLanguages,
-                       SupportedLanguage.allCases.filter { $0 != .chinese })
+                       SupportedLanguage.allCases.filter { $0 != .maltese })
+        XCTAssertEqual(Set(ParakeetModelChoice.multilingual.selectableLanguages ?? []),
+                       Set(SupportedLanguage.allCases.filter { $0 != .chinese && $0 != .norwegian }))
         XCTAssertFalse(ParakeetModelChoice.multilingual.supportsLanguage(.chinese))
         XCTAssertTrue(ParakeetModelChoice.nemotronMultilingual.supportsLanguage(.chinese))
         XCTAssertTrue(ParakeetModelChoice.senseVoice.supportsLanguage(.chinese))
         XCTAssertFalse(ParakeetModelChoice.englishOnly.supportsLanguage(.chinese))
     }
 
-    func testMandarinModelsDisableFluidAudioVocabulary() {
+    func testVocabularySupportMatchesAvailableDecoderPaths() {
         XCTAssertFalse(ParakeetModelChoice.senseVoice.supportsFluidAudioVocabulary)
-        XCTAssertFalse(ParakeetModelChoice.nemotronMultilingual.supportsFluidAudioVocabulary)
+        XCTAssertTrue(ParakeetModelChoice.nemotronMultilingual.supportsFluidAudioVocabulary)
         XCTAssertTrue(ParakeetModelChoice.multilingual.supportsFluidAudioVocabulary)
+    }
+
+    func testModelStreamingClassificationIsComplete() {
+        let streaming: Set<ParakeetModelChoice> = [
+            .parakeetEou320, .nemotron560, .nemotron1120,
+            .nemotron2240, .nemotronMultilingual
+        ]
+        let batch: Set<ParakeetModelChoice> = [
+            .multilingual, .multilingualUltra, .englishOnly, .compactEnglish, .senseVoice
+        ]
+
+        XCTAssertEqual(Set(ParakeetModelChoice.allCases), streaming.union(batch))
+        XCTAssertTrue(streaming.isDisjoint(with: batch))
+        XCTAssertTrue(streaming.allSatisfy(\.usesTrueStreaming))
+        XCTAssertTrue(batch.allSatisfy { !$0.usesTrueStreaming })
+    }
+
+    func testNativeStreamingDoesNotOfferUnusedCTCVocabularyFinalizer() {
+        for model in ParakeetModelChoice.allCases where model.usesTrueStreaming && model != .nemotronMultilingual {
+            XCTAssertFalse(model.supportsFluidAudioVocabulary, model.rawValue)
+        }
+        XCTAssertTrue(ParakeetModelChoice.multilingualUltra.supportsFluidAudioVocabulary)
+        XCTAssertEqual(ParakeetModelChoice.multilingualUltra.selectableLanguages,
+                       ParakeetModelChoice.multilingual.selectableLanguages)
+        XCTAssertFalse(ParakeetModelChoice.multilingualUltra.usesTrueStreaming)
+        XCTAssertTrue(ParakeetModelChoice.multilingualUltra.isAvailable(hasNeuralEngine: false))
     }
 }

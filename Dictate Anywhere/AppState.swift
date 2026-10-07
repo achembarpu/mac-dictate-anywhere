@@ -1386,17 +1386,14 @@ final class AppState {
         clearEndOfUtteranceHandler(for: engine)
         sessionHotkeyMode = nil
 
-        // AssemblyAI already returns the user-selected polished or verbatim
-        // result. Local engines retain the existing filler/live-preview path.
+        // Engines own decoder fallback. A provisional preview can be longer
+        // because it contains repetitions or words rejected by final decoding.
         let normalizeTrace = PerfTrace.begin("transcript.normalize")
         let finalText: String
         if usesAssemblyAI {
             finalText = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
-            let cleaned = settings.removeFillerWords(from: transcript).trimmingCharacters(in: .whitespacesAndNewlines)
-            let liveFallback = settings.removeFillerWords(from: currentTranscript).trimmingCharacters(
-                in: .whitespacesAndNewlines)
-            finalText = liveFallback.count > cleaned.count ? liveFallback : cleaned
+            finalText = settings.removeFillerWords(from: transcript).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         normalizeTrace.end()
 
@@ -1433,11 +1430,8 @@ final class AppState {
         case .none:
             break
         case .fluidAudioVocabulary:
-            if settings.parakeetModelChoice.usesTrueStreaming {
-                logger.warning(
-                    "postProcessing: FluidAudio Vocabulary is not available for true streaming model \(self.settings.parakeetModelChoice.rawValue, privacy: .public)"
-                )
-            }
+            // Vocabulary is applied by the speech decoder or its final pass.
+            break
         case .appleIntelligence:
             let context = postProcessingContext(for: .appleIntelligence)
             if !settings.aiPostProcessingPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

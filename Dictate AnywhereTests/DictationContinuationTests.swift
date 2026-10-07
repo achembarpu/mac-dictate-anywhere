@@ -135,6 +135,52 @@ final class DictationContinuationTests: XCTestCase {
         XCTAssertTrue(relaunched.entries.isEmpty)
     }
 
+    func testFinalDecoderTextWinsOverLongerProvisionalPreview() async throws {
+        let engine = ContinuationTestEngine()
+        engine.stoppedText = "The corrected words."
+        var delivered: [String] = []
+        let app = app(engine: engine) { delivered.append($0); return .success }
+        app.status = .recording
+        app.currentTranscript = "The provisional words with a repeated repeated ending."
+
+        await app.stopDictation()
+
+        XCTAssertEqual(delivered, [engine.stoppedText])
+        XCTAssertEqual(Settings.shared.transcriptHistory.first?.rawText, engine.stoppedText)
+        XCTAssertEqual(app.lastTranscript, engine.stoppedText)
+    }
+
+    func testEmptyFinalDecoderTextDoesNotResurrectProvisionalWords() async throws {
+        let engine = ContinuationTestEngine()
+        engine.stoppedText = ""
+        var delivered: [String] = []
+        let app = app(engine: engine) { delivered.append($0); return .success }
+        app.status = .recording
+        app.currentTranscript = "A preview rejected as silence."
+
+        await app.stopDictation()
+
+        XCTAssertTrue(delivered.isEmpty)
+        XCTAssertTrue(Settings.shared.transcriptHistory.isEmpty)
+        XCTAssertEqual(app.currentTranscript, "")
+        XCTAssertEqual(app.status, .idle)
+    }
+
+    func testContinuedFinalDecoderTextWinsOverLongerProvisionalPreview() async throws {
+        let entry = try await savedSession(completed: "The original words.")
+        let engine = ContinuationTestEngine()
+        engine.stoppedText = "A corrected ending."
+        var delivered: [String] = []
+        let app = app(engine: engine) { delivered.append($0); return .success }
+        await app.continueCancelledDictation(entry)
+        app.currentTranscript = "The original words. A longer provisional provisional ending."
+
+        await app.stopDictation()
+
+        XCTAssertEqual(delivered, ["The original words. A corrected ending."])
+        XCTAssertNil(Settings.shared.transcriptHistory.first?.rawText)
+    }
+
     func testStopWithoutNewSpeechKeepsOriginalWords() async throws {
         let entry = try await savedSession(completed: "The original words.")
         let engine = ContinuationTestEngine()

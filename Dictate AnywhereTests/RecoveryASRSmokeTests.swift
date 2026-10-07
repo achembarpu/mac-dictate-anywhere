@@ -302,55 +302,7 @@ final class RecoveryASRSmokeTests: XCTestCase {
         #endif
     }
 
-    func testNonStreamingPendingAudioWorkBenchmark() throws {
-        #if !PIPELINE_BENCHMARK
-        throw XCTSkip("Run scripts/dev.sh benchmark to enable pipeline benchmarks")
-        #else
-        // Use the production batch-preview policy. This deterministic fixture
-        // models continuous speech and buffer work without microphone or model
-        // availability; it does not measure inference time or transcript quality.
-        let sampleRate = ParakeetEngine.transcriptionSampleRate
-        let intervalMilliseconds = Int(ParakeetEngine.batchPreviewIntervalMilliseconds)
-        let callbackSamples = sampleRate * intervalMilliseconds / 1_000
-        let commitThreshold = ParakeetEngine.batchCommitThresholdSamples
-        let commitChunk = ParakeetEngine.chunkTranscriptionSampleCount
-        let callbackCount = 60_000 / intervalMilliseconds
-        var pendingSamples = 0
-        var totalCapturedSamples = 0
-        var lastObservedSampleCount = 0
-        var reprocessedSamples = 0
-        var newlyCapturedSamples = 0
-        var transcriptionCount = 0
 
-        for _ in 0..<callbackCount {
-            pendingSamples += callbackSamples
-            totalCapturedSamples += callbackSamples
-            if pendingSamples >= commitThreshold {
-                pendingSamples -= commitChunk
-            }
-
-            let newSampleCount = totalCapturedSamples - lastObservedSampleCount
-            guard ParakeetEngine.hasEnoughNewSamplesForBatchPreview(newSampleCount) else { continue }
-            reprocessedSamples += pendingSamples
-            newlyCapturedSamples += newSampleCount
-            transcriptionCount += 1
-            lastObservedSampleCount = totalCapturedSamples
-        }
-
-        let ratio = Double(reprocessedSamples) / Double(newlyCapturedSamples)
-        XCTAssertEqual(transcriptionCount, 120)
-        XCTAssertEqual(reprocessedSamples, 31_840_000)
-        XCTAssertEqual(newlyCapturedSamples, 960_000)
-        let ratioText = String(format: "%.2f", ratio)
-        print(
-            "PIPELINE_BENCHMARK component=non_streaming_pending_audio "
-                + "callbacks=\(callbackCount) transcriptions=\(transcriptionCount) "
-                + "reprocessed_samples=\(reprocessedSamples) "
-                + "new_samples=\(newlyCapturedSamples) "
-                + "reprocess_ratio=\(ratioText)"
-        )
-        #endif
-    }
 
     private func benchmark(
         engine: TranscriptionEngine,
