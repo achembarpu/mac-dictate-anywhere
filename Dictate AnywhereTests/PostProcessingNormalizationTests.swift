@@ -2,6 +2,29 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class PostProcessingNormalizationTests: XCTestCase {
+    func testLiteralApologyIsPreservedButNewRefusalIsRejected() {
+        let input = "i am sorry Maya but we cannot ship version 2.4 today"
+        XCTAssertFalse(looksLikeNewRefusalMessage(input: input, output: "I am sorry, Maya, but we cannot ship version 2.4 today."))
+        XCTAssertTrue(looksLikeNewRefusalMessage(input: input, output: "I am sorry, but I cannot assist with that request."))
+    }
+
+    func testEnvelopeIsRemovedOnlyWhenModelAddedIt() {
+        XCTAssertEqual(stripCleanupTranscriptEnvelope("<transcript>What time?</transcript>", original: "what time"), "What time?")
+        let literal = "<transcript>Some code</transcript>"
+        XCTAssertEqual(stripCleanupTranscriptEnvelope(literal, original: literal), literal)
+    }
+    func testMalformedOrUnknownStructuredOutputPreservesOriginal() {
+        let original = "send the full report and its appendix"
+        for response in [
+            #"{"action":"pasteCleanedText","text":"Send the full report"#,
+            #"{"action":"unknown","text":"Partial"}"#,
+            "<think>Some reasoning without a final answer",
+            #"{"text":"Partial"}"#
+        ] {
+            XCTAssertEqual(cleanedRemotePostProcessingResponse(from: response, originalText: original), original)
+        }
+    }
+
     func testRemoteCleanupExtractsStructuredResultBeforeTrailingReasoningToken() {
         let original = "i want to test something can you give me fit and fill buttons so two buttons right next to the sample image one is fit and the other is fill i want to test if it does the job and then we will talk and see if we can take this to production"
         let expected = "I want to test something. Can you give me fit and fill buttons? So, two buttons right next to the sample image. One of them is fit, and the other one is fill. I just want to test and see if it actually does the job, and then we'll talk. Then we will see if we can take this to production."

@@ -710,7 +710,8 @@ struct AIPostProcessingView: View {
             if supportedFeatures.contains(.customPrompt) {
                 cleanupPromptSection(
                     text: $settings.aiPostProcessingPrompt,
-                    label: "Apple Intelligence prompt"
+                    label: "Apple Intelligence prompt",
+                    defaultPrompt: Settings.recommendedAppleIntelligenceCleanupPrompt
                 )
             }
 
@@ -951,7 +952,7 @@ struct AIPostProcessingView: View {
                             let isSelected = settings.ollamaModel == model
                             let isDeleting = appState.ollamaDeletingModel == model
                             let canDelete = ollamaCanDeleteModels
-                            let isBusy = appState.ollamaDownloadState != nil || appState.ollamaDeletingModel != nil
+                            let isBusy = appState.ollamaDeletingModel != nil
 
                             DSChip(
                                 text: model,
@@ -964,16 +965,18 @@ struct AIPostProcessingView: View {
                     }
                 }
             }
+            if let error = appState.ollamaModelActionError {
+                DSDivider()
+                DSFieldMessage(text: error, tone: .error)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+            }
             DSDivider()
             DSCardCaption(text: "Runs transcript cleanup through your local Ollama server. Use the server base URL and an installed model name. Larger models are noticeably better at following cleanup instructions and vocabulary normalization.")
         }
 
-        if !OllamaPostProcessingService.suggestedModels.isEmpty {
-            ollamaSuggestedModelsSection(settings: settings)
-        }
-
         if let capability = ollamaAvailability?.selectedModelReasoningCapability,
-           capability.supportsReasoning {
+           capability.supportsReasoning, capability != .required {
             DSSection(overline: "Reasoning") {
                 DSDetailRow(
                     label: "Reasoning",
@@ -990,6 +993,10 @@ struct AIPostProcessingView: View {
                     )
                 }
             }
+        }
+
+        if ollamaAvailability?.selectedModelReasoningCapability == .required {
+            DSHint(text: "This model always uses reasoning. An Instruct model usually cleans short dictation faster.")
         }
 
         let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
@@ -1253,178 +1260,6 @@ struct AIPostProcessingView: View {
         }
     }
 
-    // MARK: - Ollama suggested models
-
-    @ViewBuilder
-    private func ollamaSuggestedModelsSection(settings: Settings) -> some View {
-        DSSection(overline: "Suggested Models") {
-            ForEach(Array(OllamaPostProcessingService.suggestedModels.enumerated()), id: \.element.id) { index, suggestion in
-                if index > 0 {
-                    DSDivider()
-                }
-                ollamaSuggestedModelRow(suggestion, settings: settings)
-            }
-
-            if let error = appState.ollamaModelActionError {
-                DSDivider()
-                DSFieldMessage(text: error, tone: .error)
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, DS.Spacing.rowHorizontal)
-            }
-            DSDivider()
-            DSCardCaption(text: ollamaSuggestedModelsFooter(settings: settings))
-        }
-    }
-
-    @ViewBuilder
-    private func ollamaSuggestedModelRow(
-        _ suggestion: OllamaPostProcessingService.SuggestedModel,
-        settings: Settings
-    ) -> some View {
-        let installedModels = ollamaAvailability?.installedModels ?? []
-        let resolvedInstalledModel = OllamaPostProcessingService.matchingInstalledModel(
-            for: suggestion.name,
-            in: installedModels
-        )
-        let isInstalled = resolvedInstalledModel != nil
-        let isSelected = settings.ollamaModel.trimmingCharacters(in: .whitespacesAndNewlines) == suggestion.name
-        let isDownloading = appState.ollamaDownloadState?.model == suggestion.name
-        let isDeleting = appState.ollamaDeletingModel == suggestion.name
-        let canDownload = ollamaCanDownloadSuggestedModels(settings: settings)
-        let canDelete = ollamaCanDeleteModels
-        let isAnotherDownloadRunning = appState.ollamaDownloadState != nil && !isDownloading
-        let isAnotherDeleteRunning = appState.ollamaDeletingModel != nil && !isDeleting
-        let installedMetadata = OllamaPostProcessingService.installedModelMetadata(
-            for: resolvedInstalledModel ?? suggestion.name,
-            in: ollamaAvailability
-        )
-        let downloadSizeLabel = installedMetadata.flatMap(ollamaDownloadSizeBadgeText) ?? suggestion.downloadSizeLabel
-        let parameterSizeLabel = installedMetadata.flatMap(ollamaParameterSizeBadgeText) ?? suggestion.parameterSizeLabel
-
-        cardPadded {
-            Text(suggestion.name)
-                .font(DS.Fonts.ui(13.5, .medium))
-                .foregroundStyle(DS.Colors.ink)
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            FlowLayout(spacing: 6) {
-                ollamaBadge(
-                    text: suggestion.badge,
-                    foreground: DS.Colors.accent,
-                    background: DS.Colors.accentSoft
-                )
-
-                if isInstalled {
-                    ollamaBadge(
-                        text: "Installed",
-                        foreground: DS.Colors.successText,
-                        background: DS.Colors.successSoft
-                    )
-                }
-
-                if isSelected {
-                    ollamaBadge(
-                        text: "Selected",
-                        foreground: DS.Colors.ink,
-                        background: DS.Colors.bgInset
-                    )
-                }
-
-                if let downloadSizeLabel {
-                    ollamaBadge(
-                        text: downloadSizeLabel,
-                        foreground: DS.Colors.textSecondary,
-                        background: DS.Colors.bgInset
-                    )
-                }
-
-                if let parameterSizeLabel {
-                    ollamaBadge(
-                        text: parameterSizeLabel,
-                        foreground: DS.Colors.textSecondary,
-                        background: DS.Colors.bgInset
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(suggestion.description)
-                .font(DS.Fonts.ui(12.5))
-                .foregroundStyle(DS.Colors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack {
-                Spacer(minLength: 0)
-
-                if isInstalled {
-                    HStack(spacing: 8) {
-                        if isSelected {
-                            DSStatusPill(text: "Selected")
-                        } else {
-                            Button("Use") {
-                                settings.ollamaModel = resolvedInstalledModel ?? suggestion.name
-                            }
-                            .buttonStyle(.dsPrimary)
-                            .disabled(isDownloading || isDeleting)
-                            .accessibilityLabel("Use \(suggestion.name)")
-                        }
-
-                        if canDelete {
-                            Button(isDeleting ? "Deleting…" : "Delete…") {
-                                ollamaPendingDeletionModel = resolvedInstalledModel ?? suggestion.name
-                            }
-                            .buttonStyle(.dsDestructive)
-                            .disabled(isDeleting || isDownloading || isAnotherDownloadRunning || isAnotherDeleteRunning)
-                            .accessibilityLabel(isDeleting ? "Deleting \(suggestion.name)" : "Delete \(suggestion.name)")
-                        }
-                    }
-                } else if canDownload {
-                    if isDownloading {
-                        DSLoadingMessage(text: "Downloading \(suggestion.name)…")
-                    } else {
-                        Button("Download") {
-                            Task {
-                                await appState.startOllamaModelDownload(suggestion.name)
-                            }
-                        }
-                        .buttonStyle(.dsPrimary)
-                        .disabled(isAnotherDownloadRunning || isAnotherDeleteRunning || isCheckingOllama)
-                        .accessibilityLabel("Download \(suggestion.name)")
-                    }
-                } else {
-                    Button("Use Name") {
-                        settings.ollamaModel = suggestion.name
-                    }
-                    .buttonStyle(.dsSecondary)
-                    .disabled(isAnotherDownloadRunning || isAnotherDeleteRunning)
-                    .accessibilityLabel("Use name \(suggestion.name)")
-                }
-            }
-
-            if let downloadState = appState.ollamaDownloadState, downloadState.model == suggestion.name {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let fractionCompleted = downloadState.fractionCompleted {
-                        ProgressView(value: fractionCompleted)
-                            .progressViewStyle(.linear)
-                            .tint(DS.Colors.accent)
-                            .accessibilityLabel("Download \(suggestion.name)")
-                    } else {
-                        ProgressView()
-                            .progressViewStyle(.linear)
-                            .tint(DS.Colors.accent)
-                            .accessibilityLabel("Download \(suggestion.name)")
-                    }
-
-                    Text(ollamaDownloadCaption(downloadState))
-                        .font(DS.Fonts.ui(12))
-                        .foregroundStyle(DS.Colors.textSecondary)
-                }
-            }
-        }
-    }
-
     // MARK: - Vocabulary
 
     @ViewBuilder
@@ -1524,75 +1359,8 @@ struct AIPostProcessingView: View {
         }
     }
 
-    @ViewBuilder
-    private func ollamaBadge(text: String, foreground: Color, background: Color) -> some View {
-        Text(text)
-            .font(DS.Fonts.ui(11, .semibold))
-            .fixedSize(horizontal: true, vertical: true)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(background)
-            .foregroundStyle(foreground)
-            .clipShape(Capsule())
-    }
-
-    private func ollamaCanDownloadSuggestedModels(settings: Settings) -> Bool {
-        ollamaCLIAvailability.isAvailable && OllamaPostProcessingService.isLocalServer(baseURL: settings.ollamaBaseURL)
-    }
-
     private var ollamaCanDeleteModels: Bool {
         ollamaCLIAvailability.isAvailable
-    }
-
-    private func ollamaSuggestedModelsFooter(settings: Settings) -> String {
-        if !ollamaCLIAvailability.isAvailable {
-            return "Suggested models can be selected here, but download and delete actions are shown only when the Ollama CLI is installed."
-        }
-        if !OllamaPostProcessingService.isLocalServer(baseURL: settings.ollamaBaseURL) {
-            return "Downloads are available only when the server URL points at your local Ollama instance. Delete actions still use the configured Ollama server through the CLI."
-        }
-        return "Click Download to pull one of these recommended Ollama models locally, or Delete to remove an installed model through the Ollama CLI."
-    }
-
-    private func ollamaDownloadSizeBadgeText(
-        _ metadata: OllamaPostProcessingService.InstalledModelMetadata
-    ) -> String? {
-        guard let size = metadata.size, size > 0 else { return nil }
-        return "\(formattedOllamaModelSize(size)) download"
-    }
-
-    private func ollamaParameterSizeBadgeText(
-        _ metadata: OllamaPostProcessingService.InstalledModelMetadata
-    ) -> String? {
-        guard let parameterSize = metadata.parameterSize?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !parameterSize.isEmpty else {
-            return nil
-        }
-        return "\(parameterSize) params"
-    }
-
-    private func formattedOllamaModelSize(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useGB, .useMB]
-        formatter.countStyle = .file
-        formatter.includesUnit = true
-        return formatter.string(fromByteCount: bytes)
-    }
-
-    private func ollamaDownloadCaption(_ state: AppState.OllamaDownloadState) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useGB, .useMB]
-        formatter.countStyle = .file
-        formatter.includesUnit = true
-
-        if let completed = state.completed, let total = state.total, total > 0 {
-            let progressText = formatter.string(fromByteCount: completed) + " of " + formatter.string(fromByteCount: total)
-            let percentage = Int((state.fractionCompleted ?? 0) * 100)
-            return "\(state.status) \(percentage)% (\(progressText))"
-        }
-
-        return state.status
     }
 
     // MARK: - Status views
@@ -1954,6 +1722,8 @@ struct AIPostProcessingView: View {
         switch capability {
         case .unsupported:
             return ""
+        case .required:
+            return "This model always uses reasoning."
         case .toggle:
             return "Shown only when the selected model reports Ollama thinking support. Automatic keeps the model default; Off disables reasoning to reduce latency."
         case .level:
