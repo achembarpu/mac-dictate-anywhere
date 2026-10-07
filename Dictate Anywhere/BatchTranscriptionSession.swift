@@ -15,7 +15,7 @@ actor BatchTranscriptionSession {
     private let language: Language?
     private let vad: VadManager
     private var updateTask: Task<Void, Never>?
-    private var samples: [Float] = []
+    private var samples = AudioSampleBuffer()
     private var startSample = 0
     private var totalSamples = 0
     private var lastPreviewTotalSamples = 0
@@ -23,7 +23,7 @@ actor BatchTranscriptionSession {
     private var committedText = ""
     private var pauseBoundaries = SenseVoicePauseBoundaries()
     private var vadState = VadStreamState.initial()
-    private var vadPending: [Float] = []
+    private var vadPending = AudioSampleBuffer()
     private var speechPresence = BatchSpeechPresence()
 
     private init(backend: Backend, vad: VadManager, language: Language? = nil) {
@@ -67,7 +67,7 @@ actor BatchTranscriptionSession {
 
     func append(_ newSamples: [Float]) async throws {
         guard !newSamples.isEmpty else { return }
-        samples.append(contentsOf: newSamples)
+        samples.append(newSamples)
         totalSamples += newSamples.count
         switch backend {
         case .parakeet(_, let overlapping):
@@ -77,7 +77,7 @@ actor BatchTranscriptionSession {
             retainPreviewWindow()
         case .senseVoice: break
         }
-        vadPending.append(contentsOf: newSamples)
+        vadPending.append(newSamples)
         try await processVad()
         try await commitSenseVoiceSegments()
     }
@@ -85,7 +85,7 @@ actor BatchTranscriptionSession {
     private func retainPreviewWindow() {
         let excess = samples.count - BatchTranscriptionPolicy.previewWindowSamples
         if excess > 0 {
-            samples.removeFirst(excess)
+            samples.discardFirst(excess)
             startSample += excess
         }
     }
@@ -95,11 +95,11 @@ actor BatchTranscriptionSession {
         do {
             while vadPending.count >= VadManager.chunkSize || (flushTail && !vadPending.isEmpty) {
                 let count = min(vadPending.count, VadManager.chunkSize)
-                var chunk = Array(vadPending.prefix(count))
+                var chunk = Array(vadPending.samples.prefix(count))
                 chunk.append(contentsOf: repeatElement(Float(0), count: VadManager.chunkSize - count))
                 let result = try await vad.processStreamingChunk(chunk, state: vadState)
                 vadState = result.state
-                vadPending.removeFirst(count)
+                vadPending.discardFirst(count)
                 speechPresence.observe(isSpeech: result.state.triggered, at: min(result.state.processedSamples, totalSamples))
                 if case .senseVoice = backend, let event = result.event, event.isEnd {
                     pauseBoundaries.recordPause(at: min(event.sampleIndex, totalSamples))
@@ -125,8 +125,8 @@ actor BatchTranscriptionSession {
         // decode bounded too; the authoritative finish still processes every sample.
         let input: [Float]
         switch backend {
-        case .parakeet, .parakeetBatch: input = samples
-        case .senseVoice: input = Array(samples.prefix(BatchTranscriptionPolicy.senseVoiceMaximumSamples))
+        case .parakeet, .parakeetBatch: input = Array(samples.samples)
+        case .senseVoice: input = Array(samples.samples.prefix(BatchTranscriptionPolicy.senseVoiceMaximumSamples))
         }
         let newCount = min(input.count, totalSamples - lastPreviewTotalSamples)
         let trace = PerfTrace.begin("stt.batchPreview", counts: [
@@ -154,11 +154,11 @@ actor BatchTranscriptionSession {
         guard case .senseVoice(let manager) = backend else { return }
         while let boundary = pauseBoundaries.nextBoundary(start: startSample, end: totalSamples) {
             let count = boundary - startSample
-            let chunk = Array(samples.prefix(count))
+            let chunk = Array(samples.samples.prefix(count))
             let text = try await manager.transcribe(audio: chunk)
             // Retire audio only after a successful decode, preserving failure recovery.
             committedText = ParakeetEngine.joinChunkTranscripts(base: committedText, addition: text)
-            samples.removeFirst(count)
+            samples.discardFirst(count)
             startSample = boundary
             pauseBoundaries.didCommit(through: boundary)
         }
@@ -185,9 +185,9 @@ actor BatchTranscriptionSession {
         case .senseVoice(let manager):
             try await commitSenseVoiceSegments()
             if !samples.isEmpty {
-                let text = try await manager.transcribe(audio: samples)
+                let text = try await manager.transcribe(audio: Array(samples.samples))
                 committedText = ParakeetEngine.joinChunkTranscripts(base: committedText, addition: text)
-                samples.removeAll()
+                samples.reset()
             }
             return committedText
         }
@@ -198,8 +198,8 @@ actor BatchTranscriptionSession {
             await overlapping.cancel()
             await closeOverlap(overlapping)
         }
-        samples.removeAll()
-        vadPending.removeAll()
+        samples.reset()
+        vadPending.reset()
     }
 
     private func closeOverlap(_ overlapping: SlidingWindowAsrManager) async {
