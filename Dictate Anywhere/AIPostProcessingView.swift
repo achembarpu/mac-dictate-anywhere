@@ -768,45 +768,31 @@ struct AIPostProcessingView: View {
         let manager = appState.s1MiniModelManager
 
         DSSection(overline: "S1-mini by Superwhisper") {
-            cardPadded {
-                HStack(alignment: .center, spacing: 12) {
-                    Image(systemName: s1MiniReadiness(manager: manager).symbol)
-                        .foregroundStyle(manager.isModelDownloaded ? DS.Colors.success : DS.Colors.accent)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 3) {
-                        DSModelReadinessStatus(readiness: s1MiniReadiness(manager: manager))
-                        Text("462 MB · English · Local transcript normalizer")
-                            .font(DS.Fonts.ui(12.5))
-                            .foregroundStyle(DS.Colors.textSecondary)
+            DSInfoRow(label: "Model", value: "462 MB · English · Local transcript normalizer")
+            DSDivider()
+            DSModelReadinessRow(
+                readiness: s1MiniReadiness(manager: manager),
+                actionTitle: !manager.isModelDownloaded && !manager.isBusy ? "Download Model" : nil,
+                action: downloadS1MiniModel
+            )
+            .disabled(manager.isBusy)
+
+            if manager.isDownloading {
+                DSCardCaption(text: s1MiniDownloadProgressText(manager: manager))
+            }
+            if let error = s1MiniActionError ?? manager.lastError {
+                DSFieldMessage(text: error, tone: .error)
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+                    .padding(.bottom, 10)
+            }
+            if manager.isModelDownloaded {
+                DSDivider()
+                DSInfoRow(label: "Remove the downloaded model files from this Mac.", labelColor: DS.Colors.textSecondary) {
+                    Button(manager.isDeleting ? "Deleting…" : "Delete Model…") {
+                        isConfirmingS1MiniDeletion = true
                     }
-                    Spacer(minLength: 12)
-
-                    if manager.isModelDownloaded {
-                        Button(manager.isDeleting ? "Deleting…" : "Delete Model…") {
-                            isConfirmingS1MiniDeletion = true
-                        }
-                        .buttonStyle(.dsDestructive)
-                        .disabled(manager.isBusy)
-                    } else {
-                        Button(manager.isDownloading ? "Downloading…" : "Download Model") {
-                            downloadS1MiniModel()
-                        }
-                        .buttonStyle(.dsPrimary)
-                        .disabled(manager.isBusy)
-                    }
-                }
-
-                if manager.isDownloading {
-                    ProgressView(value: s1MiniVisibleDownloadProgress(manager: manager))
-                        .progressViewStyle(.linear)
-                        .accessibilityLabel("Download S1-mini")
-                    Text(s1MiniDownloadProgressText(manager: manager))
-                        .font(DS.Fonts.ui(11.5, .medium))
-                        .foregroundStyle(DS.Colors.textSecondary)
-                }
-
-                if let error = s1MiniActionError ?? manager.lastError {
-                    DSFieldMessage(text: error, tone: .error)
+                    .buttonStyle(.dsDestructive)
+                    .disabled(manager.isBusy)
                 }
             }
             DSDivider()
