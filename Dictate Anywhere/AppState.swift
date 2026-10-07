@@ -549,7 +549,7 @@ final class AppState {
             }
         }
         guard !isShuttingDown else { return }
-        await prepareActiveEngine(prewarmModel: settings.prewarmEnginesAtStartup)
+        await prepareSelectedEngines(prewarmModel: settings.prewarmEnginesAtStartup)
         guard !isShuttingDown else { return }
         inputSourceMonitor.startMonitoring()
         // A source can change during model loading. Reconcile it once after
@@ -568,7 +568,6 @@ final class AppState {
         }
         guard !isShuttingDown else { return }
         appleSpeechAssetsRefreshedDuringStartup = false
-        await prepareCleanupEngineIfNeeded()
     }
 
     var cleanupPreparationKey: CleanupPreparationKey {
@@ -821,6 +820,20 @@ final class AppState {
 
     // MARK: - Engine Lifecycle
 
+    /// Resolve configuration first, then overlap independent speech and cleanup
+    /// loads. Vocabulary preparation needs the selected speech weights resident.
+    func prepareSelectedEngines(prewarmModel: Bool = true) async {
+        guard !isShuttingDown, !Task.isCancelled else { return }
+        if !prewarmModel || settings.transcriptPostProcessingMode == .fluidAudioVocabulary {
+            await prepareActiveEngine(prewarmModel: prewarmModel)
+            if prewarmModel, !Task.isCancelled { await prepareCleanupEngineIfNeeded() }
+            return
+        }
+        async let speech: Void = prepareActiveEngine(prewarmModel: prewarmModel)
+        async let cleanup: Void = prepareCleanupEngineIfNeeded()
+        _ = await (speech, cleanup)
+    }
+
     func prepareActiveEngine(prewarmModel: Bool = true) async {
         defer { rearmResolvedBlockingAttentionIssues() }
         while let inFlight = enginePreparation {
@@ -942,8 +955,7 @@ final class AppState {
         settings.engineChoice = .parakeet
         settings.userHasChosenEngine = userInitiated
         await parakeetEngine.handleSelectedModelChange()
-        await prepareActiveEngine(prewarmModel: prewarmModel)
-        if prewarmModel { await prepareCleanupEngineIfNeeded() }
+        await prepareSelectedEngines(prewarmModel: prewarmModel)
     }
 
     func handleEngineSelectionChange(_ choice: TranscriptionEngineChoice, prewarmModel: Bool = true) async {
@@ -964,8 +976,7 @@ final class AppState {
         if !selectedPage.isVisible(for: choice) {
             selectedPage = .models
         }
-        await prepareActiveEngine(prewarmModel: prewarmModel)
-        if prewarmModel { await prepareCleanupEngineIfNeeded() }
+        await prepareSelectedEngines(prewarmModel: prewarmModel)
     }
 
     func handleAppleSpeechLanguageChange(_ language: SupportedLanguage, prewarmModel: Bool = true) async {
@@ -975,8 +986,7 @@ final class AppState {
         guard appleSpeechSupportedLanguages.contains(language) else { return }
         settings.appleSpeechLanguage = language
         await appleSpeechEngine.invalidatePreparedSession()
-        await prepareActiveEngine(prewarmModel: prewarmModel)
-        if prewarmModel { await prepareCleanupEngineIfNeeded() }
+        await prepareSelectedEngines(prewarmModel: prewarmModel)
     }
 
     /// Refreshes both the supportable and the installed Apple Speech language

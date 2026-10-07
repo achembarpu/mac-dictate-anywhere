@@ -448,6 +448,68 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testIndependentSelectedEnginesBeginPreparationBeforeEitherCompletes() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.selectedLanguage = .english
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.prewarmEnginesAtStartup = true
+        let speechStarted = expectation(description: "speech preparation started")
+        let cleanupStarted = expectation(description: "cleanup preparation started")
+        let speechGate = StartupModelPreparationGate(started: speechStarted)
+        let cleanupGate = StartupModelPreparationGate(started: cleanupStarted)
+        let engine = StartupContextEngine()
+        engine.isReady = false
+        engine.onPrepareAsync = { await speechGate.wait() }
+        let app = app(engine: engine, capture: { _ in nil }, cleanupPreparation: { _ in
+            XCTAssertFalse(engine.isReady, "Independent cleanup must start before speech completes")
+            await cleanupGate.wait()
+            return true
+        })
+        let preparation = Task { await app.prepareSelectedEngines() }
+        await fulfillment(of: [speechStarted, cleanupStarted], timeout: 2)
+        XCTAssertFalse(engine.isReady)
+        XCTAssertTrue(app.isPreparingCleanupEngine)
+        await speechGate.release()
+        await cleanupGate.release()
+        await preparation.value
+        XCTAssertTrue(engine.isReady)
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        await app.shutdown()
+    }
+
+    func testVocabularyPreparationWaitsForSpeechAndOptOutDoesNotLoadCleanup() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.parakeetModelChoice = .multilingual
+        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
+        settings.prewarmEnginesAtStartup = true
+        let speechStarted = expectation(description: "vocabulary speech load started")
+        let speechGate = StartupModelPreparationGate(started: speechStarted)
+        let engine = StartupContextEngine()
+        engine.isReady = false
+        engine.onPrepareAsync = { await speechGate.wait() }
+        var calls = 0
+        let app = app(engine: engine, capture: { _ in nil }, cleanupPreparation: { _ in
+            calls += 1
+            XCTAssertTrue(engine.isReady, "Vocabulary needs the selected speech weights")
+            return true
+        })
+        let preparation = Task { await app.prepareSelectedEngines() }
+        await fulfillment(of: [speechStarted], timeout: 2)
+        XCTAssertEqual(calls, 0)
+        await speechGate.release()
+        await preparation.value
+        XCTAssertEqual(calls, 1)
+        await app.prepareSelectedEngines(prewarmModel: false)
+        XCTAssertEqual(calls, 1)
+        settings.prewarmEnginesAtStartup = false
+        settings.transcriptPostProcessingMode = .s1Mini
+        await app.prepareSelectedEngines()
+        XCTAssertEqual(calls, 1)
+        await app.shutdown()
+    }
+
     func testConcurrentPreparationJoinsTheInFlightModelLoad() async {
         let started = expectation(description: "model preparation started")
         let gate = StartupModelPreparationGate(started: started)
