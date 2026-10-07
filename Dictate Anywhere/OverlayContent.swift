@@ -55,6 +55,7 @@ final class OverlayModel {
 struct OverlayContent: View {
     let model: OverlayModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var state: OverlayState { model.overlayState }
     private var isVisible: Bool { model.isVisible }
@@ -147,7 +148,7 @@ struct OverlayContent: View {
                 .scaleEffect(isVisible ? 1.0 : 0.95)
                 .opacity(isVisible ? 1.0 : 0)
                 .padding(.bottom, statusBottomInset)
-                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isVisible)
+                .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: isVisible)
         }
         .frame(width: OverlayMetrics.size(320), height: OverlayMetrics.size(200))
     }
@@ -156,12 +157,12 @@ struct OverlayContent: View {
         VStack(spacing: 0) {
             pillContent
                 .id(stateCategory)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: stateCategory)
+                .transition(reduceMotion ? .identity : .opacity)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: stateCategory)
         }
         .frame(width: pillWidth, height: pillHeight)
         .modifier(GlassPillModifier(isCircular: isCircularStatusState))
-        .animation(.spring(response: 0.42, dampingFraction: 0.82), value: isCircularStatusState)
+        .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82), value: isCircularStatusState)
     }
 
     @ViewBuilder
@@ -209,6 +210,7 @@ struct OverlayContent: View {
 
 /// Transcript observation is independent of the waveform level.
 struct ListeningOverlayContent: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let model: OverlayModel
     let showTextPreview: Bool
     let textColor: Color
@@ -228,7 +230,7 @@ struct ListeningOverlayContent: View {
                     }
                     .frame(height: OverlayMetrics.size(66))
                     .onChange(of: previewText) { _, _ in
-                        withAnimation(.easeOut(duration: 0.1)) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.1)) {
                             proxy.scrollTo("transcript", anchor: .bottom)
                         }
                     }
@@ -271,7 +273,7 @@ enum OverlayPreviewText {
             offsetBy: -maximumCharacters,
             limitedBy: transcript.startIndex
         ), start != transcript.startIndex else { return transcript }
-        return "..." + String(transcript[start...])
+        return "…" + String(transcript[start...])
     }
 }
 
@@ -329,6 +331,7 @@ private struct GlassPillModifier: ViewModifier {
 
 private struct ProcessingStatusView: View {
     let tint: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnimating = false
 
     private var ringSize: CGFloat {
@@ -358,15 +361,19 @@ private struct ProcessingStatusView: View {
         }
         .frame(width: ringSize, height: ringSize)
         .onAppear {
-            guard !isAnimating else { return }
+            guard !reduceMotion, !isAnimating else { return }
             withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
                 isAnimating = true
             }
+        }
+        .onChange(of: reduceMotion) { _, enabled in
+            if enabled { isAnimating = false }
         }
     }
 }
 
 private struct SuccessStatusView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isRevealed = false
 
     private var ringSize: CGFloat {
@@ -400,7 +407,7 @@ private struct SuccessStatusView: View {
         .frame(width: ringSize, height: ringSize)
         .onAppear {
             isRevealed = false
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.72)) {
                 isRevealed = true
             }
         }

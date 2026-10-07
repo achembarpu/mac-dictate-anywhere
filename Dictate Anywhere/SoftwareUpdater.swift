@@ -62,7 +62,7 @@ struct CheckForUpdatesView: View {
     let updater: SoftwareUpdater
 
     var body: some View {
-        Button("Check for Updates...") {
+        Button("Check for Updates…") {
             updater.checkForUpdates()
         }
     }

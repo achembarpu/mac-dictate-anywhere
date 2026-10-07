@@ -2,6 +2,8 @@ import SwiftUI
 
 /// Atom: primary (accent-filled) button style.
 struct DSPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(DS.Fonts.ui(13, .semibold))
@@ -12,7 +14,7 @@ struct DSPrimaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 14)
             .background(DS.Colors.accent, in: RoundedRectangle(cornerRadius: DS.Radius.control))
             .shadow(color: DS.Colors.accentDeep.opacity(0.2), radius: 2, x: 0, y: 1)
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.5)
             .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control))
     }
 }
@@ -20,6 +22,7 @@ struct DSPrimaryButtonStyle: ButtonStyle {
 /// Atom: secondary (white card) button style. `tint` colors the label
 /// (pass `DS.Colors.destructive` for destructive actions).
 struct DSSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
     var tint: Color = DS.Colors.ink
 
     func makeBody(configuration: Configuration) -> some View {
@@ -33,7 +36,7 @@ struct DSSecondaryButtonStyle: ButtonStyle {
             .background(DS.Colors.bgCard, in: RoundedRectangle(cornerRadius: DS.Radius.control))
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.control).strokeBorder(DS.Colors.border, lineWidth: 1))
             .shadow(color: Color.black.opacity(0.05), radius: 1, x: 0, y: 1)
-            .opacity(configuration.isPressed ? 0.7 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.5)
             .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control))
     }
 }
@@ -49,9 +52,10 @@ extension ButtonStyle where Self == DSSecondaryButtonStyle {
 
 /// Atom: 28×28 bordered icon button (trash, etc.).
 struct DSIconButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let systemImage: String
     var tint: Color = DS.Colors.textSecondary
-    var accessibilityLabel: String = ""
+    let accessibilityLabel: String
     let action: () -> Void
 
     var body: some View {
@@ -65,12 +69,14 @@ struct DSIconButton: View {
                 .contentShape(RoundedRectangle(cornerRadius: DS.Radius.small))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel.isEmpty ? systemImage : accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
+        .opacity(isEnabled ? 1 : 0.5)
     }
 }
 
 /// Atom: small inset "Copy"-style button with an icon and label.
 struct DSInsetButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let title: String
     var systemImage: String?
     let action: () -> Void
@@ -93,11 +99,13 @@ struct DSInsetButton: View {
             .contentShape(RoundedRectangle(cornerRadius: DS.Radius.small))
         }
         .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.5)
     }
 }
 
 /// Atom: full-width tinted "Add another …" button.
 struct DSAddButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let title: String
     let action: () -> Void
 
@@ -116,5 +124,6 @@ struct DSAddButton: View {
             .contentShape(RoundedRectangle(cornerRadius: DS.Radius.card))
         }
         .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.5)
     }
 }

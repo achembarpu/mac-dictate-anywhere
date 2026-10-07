@@ -38,6 +38,7 @@ struct DSSectionHeader: View {
             Text(title)
                 .font(DS.Fonts.display(27))
                 .foregroundStyle(DS.Colors.ink)
+                .accessibilityAddTraits(.isHeader)
             Text(subtitle)
                 .font(DS.Fonts.ui(13.5))
                 .foregroundStyle(DS.Colors.textSecondary)
@@ -62,5 +63,32 @@ struct DSPage<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(DS.Colors.bgWindow)
+    }
+}
+
+/// Shared empty state for panels and page cards.
+struct DSEmptyState: View {
+    let systemImage: String
+    let title: String
+    var message: String?
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 26))
+                .foregroundStyle(DS.Colors.textSecondary)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(DS.Fonts.ui(14, .semibold))
+                .foregroundStyle(DS.Colors.ink)
+            if let message {
+                Text(message)
+                    .font(DS.Fonts.ui(12.5))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
     }
 }

@@ -21,6 +21,8 @@ struct AttentionIssue: Identifiable, Equatable {
         case microphone
         case accessibility
         case speechSetup
+        case recovery
+        case recordingFailed
         case appleSpeechUnsupported
         case cleanup(CleanupProblem)
         case automation
@@ -41,6 +43,8 @@ struct AttentionIssue: Identifiable, Equatable {
         speechSetupNeeded: Bool,
         automationDenied: Bool,
         speechPreparationFailed: Bool = false,
+        recoveryError: String? = nil,
+        recordingError: String? = nil,
         legacyAppleSpeechMigrationPending: Bool = false,
         appleSpeechUnsupportedSelection: Bool = false,
         appleSpeechRequiresMacOS26: Bool = false,
@@ -91,6 +95,26 @@ struct AttentionIssue: Identifiable, Equatable {
                 title: "Dictation setup needed",
                 message: message,
                 actionTitle: "Set Up",
+                isOptional: false
+            ))
+        }
+
+        if let recoveryError, !recoveryError.isEmpty {
+            issues.append(AttentionIssue(
+                id: .recovery,
+                title: "Dictation recovery needs attention",
+                message: recoveryError,
+                actionTitle: "Dismiss",
+                isOptional: false
+            ))
+        }
+
+        if let recordingError, !recordingError.isEmpty, microphoneGranted {
+            issues.append(AttentionIssue(
+                id: .recordingFailed,
+                title: "Recording could not start",
+                message: recordingError,
+                actionTitle: "Dismiss",
                 isOptional: false
             ))
         }

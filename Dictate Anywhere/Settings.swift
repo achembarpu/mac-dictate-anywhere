@@ -821,7 +821,7 @@ private struct RawInputSourceMapping: Decodable {
     let language: String
 }
 
-struct TranscriptHistoryEntry: Identifiable, Codable, Equatable {
+nonisolated struct TranscriptHistoryEntry: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let text: String
     let createdAt: Date
@@ -913,6 +913,7 @@ final class Settings {
     private nonisolated static let openRouterAPIKeyKeychainAccount = "openrouter-api-key"
     private nonisolated static let openAICompatibleAPIKeyKeychainAccount = "openai-compatible-api-key"
     private nonisolated static let assemblyAIAPIKeyKeychainAccount = "assemblyai-api-key"
+    private nonisolated static let apiKeySaveError = "Could not save the API key to Keychain. Try entering it again."
 
     /// Background queue for sound playback
     private let soundQueue = DispatchQueue(label: "com.dictate-anywhere.sounds", qos: .userInteractive)
@@ -1080,8 +1081,12 @@ final class Settings {
     }
 
     var assemblyAIAPIKey: String {
-        didSet { Self.storeAssemblyAIAPIKey(assemblyAIAPIKey) }
+        didSet {
+            assemblyAIAPIKeyError = Self.storeAssemblyAIAPIKey(assemblyAIAPIKey)
+                ? nil : Self.apiKeySaveError
+        }
     }
+    var assemblyAIAPIKeyError: String?
 
     var assemblyAIRegion: AssemblyAIRegion {
         didSet { UserDefaults.standard.set(assemblyAIRegion.rawValue, forKey: Keys.assemblyAIRegion) }
@@ -1350,9 +1355,15 @@ final class Settings {
 
     var transcriptHistory: [TranscriptHistoryEntry] {
         didSet {
-            guard let data = try? JSONEncoder().encode(transcriptHistory) else { return }
-            UserDefaults.standard.set(data, forKey: Keys.transcriptHistory)
+            historyPersistence.save(transcriptHistory)
         }
+    }
+
+    @ObservationIgnored private let historyPersistence = TranscriptHistoryPersistence()
+
+    /// Delivery and shutdown join queued history writes without blocking UI work.
+    func flushTranscriptHistory() async {
+        await historyPersistence.flush()
     }
 
     var aiPostProcessingPrompt: String {
@@ -1402,9 +1413,12 @@ final class Settings {
             let saved = Self.storeOpenRouterAPIKey(openRouterAPIKey)
             openRouterAPIKeyError = saved ? nil : OpenRouterCredentialPreferences.saveError
             if saved { OpenRouterCredentialPreferences.removeLegacyKey(from: .standard) }
+            if oldValue != openRouterAPIKey { openRouterCredentialsRevision &+= 1 }
         }
     }
     var openRouterAPIKeyError: String?
+    /// Invalidates provider checks without putting credentials in their task identity.
+    private(set) var openRouterCredentialsRevision = 0
 
     var openRouterAPIKeyEnvironmentVariable: String {
         didSet {
@@ -1416,6 +1430,7 @@ final class Settings {
                 openRouterAPIKeyEnvironmentVariable,
                 forKey: Keys.openRouterAPIKeyEnvironmentVariable
             )
+            if oldValue != openRouterAPIKeyEnvironmentVariable { openRouterCredentialsRevision &+= 1 }
         }
     }
 
@@ -1433,9 +1448,13 @@ final class Settings {
 
     var openAICompatibleAPIKey: String {
         didSet {
-            Self.storeOpenAICompatibleAPIKey(openAICompatibleAPIKey)
+            openAICompatibleAPIKeyError = Self.storeOpenAICompatibleAPIKey(openAICompatibleAPIKey)
+                ? nil : Self.apiKeySaveError
+            if oldValue != openAICompatibleAPIKey { openAICompatibleCredentialsRevision &+= 1 }
         }
     }
+    var openAICompatibleAPIKeyError: String?
+    private(set) var openAICompatibleCredentialsRevision = 0
 
     var openAICompatiblePostProcessingPrompt: String {
         didSet {
@@ -1533,6 +1552,7 @@ final class Settings {
             updateLoginItem()
         }
     }
+    var launchAtLoginError: String?
 
     var appAppearanceMode: AppAppearanceMode {
         didSet {
@@ -2030,7 +2050,26 @@ final class Settings {
                 }
             }
         } catch {
-            print("Failed to update login item: \(error)")
+            launchAtLoginError = "Could not update Launch at Login. \(error.localizedDescription)"
+            return
+        }
+        refreshLoginItemStatus()
+    }
+
+    /// Read-only refresh after returning from System Settings.
+    func refreshLoginItemStatus() {
+        guard launchAtLogin else {
+            launchAtLoginError = nil
+            return
+        }
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtLoginError = nil
+        case .requiresApproval:
+            launchAtLoginError = "Allow Dictate Anywhere to launch at login in System Settings."
+        default:
+            launchAtLoginError = launchAtLoginError
+                ?? "Launch at Login is not active. Turn it off and on to retry."
         }
     }
 
@@ -2353,7 +2392,7 @@ final class Settings {
         )
     }
 
-    private nonisolated static func storeAssemblyAIAPIKey(_ value: String) {
+    private nonisolated static func storeAssemblyAIAPIKey(_ value: String) -> Bool {
         KeychainSecretStore.write(
             value,
             service: assemblyAIAPIKeyKeychainService,
@@ -2387,7 +2426,7 @@ final class Settings {
         )
     }
 
-    private nonisolated static func storeOpenAICompatibleAPIKey(_ value: String) {
+    private nonisolated static func storeOpenAICompatibleAPIKey(_ value: String) -> Bool {
         KeychainSecretStore.write(
             value,
             service: openAICompatibleAPIKeyKeychainService,

@@ -2,27 +2,39 @@ import SwiftUI
 
 /// Atom: pill toggle switch matching the design's Toggle On/Off components.
 struct DSToggleStyle: ToggleStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         Button {
             configuration.isOn.toggle()
         } label: {
-            HStack {
-                configuration.label
-                ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(configuration.isOn ? DS.Colors.accent : DS.Colors.toggleOff)
-                        .frame(width: 46, height: 28)
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 22, height: 22)
-                        .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
-                        .padding(3)
-                }
-                .animation(.spring(duration: 0.2), value: configuration.isOn)
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(configuration.isOn ? DS.Colors.accent : DS.Colors.toggleOff)
+                    .frame(width: 46, height: 28)
+                Circle()
+                    .fill(.white)
+                    .frame(width: 22, height: 22)
+                    .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
+                    .padding(3)
             }
+            .animation(reduceMotion ? nil : .spring(duration: 0.2), value: configuration.isOn)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
+    }
+}
+
+/// The design switch has no visible inline label; callers supply its accessible name.
+struct DSSwitch: View {
+    let accessibilityName: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle("", isOn: $isOn)
+            .toggleStyle(.dsSwitch)
+            .accessibilityLabel(accessibilityName)
     }
 }
 
@@ -34,6 +46,7 @@ extension ToggleStyle where Self == DSToggleStyle {
 struct DSSlider: View {
     @Binding var value: Double
     var range: ClosedRange<Double> = 0...1
+    let label: String
 
     private let knobSize: CGFloat = 16
     private let trackHeight: CGFloat = 5
@@ -63,6 +76,7 @@ struct DSSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
+                        guard width > knobSize else { return }
                         let fraction = ((drag.location.x - knobSize / 2) / (width - knobSize))
                             .clamped(to: 0...1)
                         value = range.lowerBound + fraction * (range.upperBound - range.lowerBound)
@@ -70,13 +84,21 @@ struct DSSlider: View {
             )
         }
         .frame(height: knobSize)
+        .focusable()
+        .onMoveCommand { direction in
+            switch direction {
+            case .left, .down: adjust(by: -1)
+            case .right, .up: adjust(by: 1)
+            default: break
+            }
+        }
         .accessibilityElement()
+        .accessibilityLabel(label)
         .accessibilityValue("\(Int(fractionOfRange * 100)) percent")
         .accessibilityAdjustableAction { direction in
-            let step = (range.upperBound - range.lowerBound) / 10
             switch direction {
-            case .increment: value = min(range.upperBound, value + step)
-            case .decrement: value = max(range.lowerBound, value - step)
+            case .increment: adjust(by: 1)
+            case .decrement: adjust(by: -1)
             @unknown default: break
             }
         }
@@ -85,6 +107,11 @@ struct DSSlider: View {
     private var fractionOfRange: Double {
         guard range.upperBound > range.lowerBound else { return 0 }
         return ((value - range.lowerBound) / (range.upperBound - range.lowerBound)).clamped(to: 0...1)
+    }
+
+    private func adjust(by steps: Double) {
+        let step = (range.upperBound - range.lowerBound) / 10
+        value = (value + steps * step).clamped(to: range)
     }
 }
 
@@ -100,6 +127,7 @@ struct DSDropdown<SelectionValue: Hashable>: View {
     @Binding var selection: SelectionValue
     let options: [SelectionValue]
     let title: (SelectionValue) -> String
+    let accessibilityName: String
     var isEnabled: Bool = true
 
     var body: some View {
@@ -120,9 +148,11 @@ struct DSDropdown<SelectionValue: Hashable>: View {
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.5)
+        .accessibilityLabel(accessibilityName)
+        .accessibilityValue(title(selection))
     }
 }
 
@@ -152,16 +182,34 @@ struct DSDropdownLabel: View {
 struct DSSearchField: View {
     let placeholder: String
     @Binding var text: String
+    let accessibilityName: String
+    @FocusState private var fieldIsFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(DS.Colors.textSecondary)
+                .accessibilityHidden(true)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(DS.Fonts.ui(13))
                 .foregroundStyle(DS.Colors.ink)
+                .accessibilityLabel(accessibilityName)
+                .focused($fieldIsFocused)
+                .onExitCommand { text = "" }
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                    fieldIsFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear \(accessibilityName)")
+                .help("Clear search")
+            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
@@ -175,13 +223,16 @@ struct DSTextField: View {
     let placeholder: String
     @Binding var text: String
     var isSecure: Bool = false
+    let accessibilityName: String
 
     var body: some View {
         Group {
             if isSecure {
                 SecureField(placeholder, text: $text)
+                    .accessibilityLabel(accessibilityName)
             } else {
                 TextField(placeholder, text: $text)
+                    .accessibilityLabel(accessibilityName)
             }
         }
         .textFieldStyle(.plain)

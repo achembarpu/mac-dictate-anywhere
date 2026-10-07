@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Molecule: static preview of the dictation overlay pill (Text & Overlay page).
-/// Bar heights and active range mirror the design exactly.
 struct DSWaveformPill: View {
+    var showsTextPreview = false
+
     /// (height, isActive) for each bar, as drawn in the design.
     static let bars: [(height: CGFloat, isActive: Bool)] = [
         (8, false), (14, false), (20, false), (12, false),
@@ -11,16 +12,33 @@ struct DSWaveformPill: View {
     ]
 
     var body: some View {
-        HStack(alignment: .center, spacing: 3) {
-            ForEach(Array(Self.bars.enumerated()), id: \.offset) { _, bar in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(bar.isActive ? DS.Colors.accent : DS.Colors.waveformBarInactive)
-                    .frame(width: 3.5, height: bar.height)
+        VStack(spacing: 8) {
+            if showsTextPreview {
+                Text("Your words appear here as you speak")
+                    .font(DS.Fonts.ui(12))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .multilineTextAlignment(.center)
+                    .frame(width: 180)
+            }
+
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(Array(Self.bars.enumerated()), id: \.offset) { _, bar in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(bar.isActive ? DS.Colors.accent : DS.Colors.waveformBarInactive)
+                        .frame(width: 3.5, height: bar.height)
+                }
             }
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 20)
-        .background(DS.Colors.waveformPillFill, in: Capsule())
+        .background(
+            DS.Colors.waveformPillFill,
+            in: RoundedRectangle(cornerRadius: showsTextPreview ? 18 : DS.Radius.capsule)
+        )
         .shadow(color: Color(hex: 0x3A2E20, opacity: 0.2), radius: 18, x: 0, y: 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(showsTextPreview
+            ? "Overlay preview with live text and waveform"
+            : "Waveform-only overlay preview")
     }
 }

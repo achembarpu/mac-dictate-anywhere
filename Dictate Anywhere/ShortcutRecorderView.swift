@@ -9,6 +9,7 @@ import SwiftUI
 import CoreGraphics
 
 struct ShortcutRecorderView: View {
+    let accessibilityName: String
     let displayName: String
     let onRecord: (UInt16?, HotkeyModifiers, String) -> Void
     let onClear: () -> Void
@@ -20,6 +21,7 @@ struct ShortcutRecorderView: View {
     @State private var recorder = ShortcutRecorder()
 
     init(
+        accessibilityName: String,
         displayName: String,
         onRecord: @escaping (UInt16?, HotkeyModifiers, String) -> Void,
         onClear: @escaping () -> Void,
@@ -27,6 +29,7 @@ struct ShortcutRecorderView: View {
         onRecordingStopped: @escaping () -> Void = {},
         allowsEscape: Bool = false
     ) {
+        self.accessibilityName = accessibilityName
         self.displayName = displayName
         self.onRecord = onRecord
         self.onClear = onClear
@@ -55,17 +58,21 @@ struct ShortcutRecorderView: View {
                         stopRecording()
                     }
                     .buttonStyle(.dsSecondary)
+                    .accessibilityLabel("Cancel recording \(accessibilityName)")
                 } else {
                     Button(displayName.isEmpty ? "Record Shortcut" : "Change") {
                         startRecording()
                     }
                     .buttonStyle(.dsPrimary)
+                    .accessibilityLabel(displayName.isEmpty
+                        ? "Record \(accessibilityName)" : "Change \(accessibilityName)")
 
                     if !displayName.isEmpty {
                         Button("Clear") {
                             onClear()
                         }
                         .buttonStyle(.dsSecondary)
+                        .accessibilityLabel("Clear \(accessibilityName)")
                     }
                 }
             }

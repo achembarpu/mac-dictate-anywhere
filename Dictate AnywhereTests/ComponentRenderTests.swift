@@ -22,11 +22,13 @@ final class ComponentRenderTests: XCTestCase {
     func testOverlineRenders() { assertRenders(DSOverline(text: "Startup")) }
     func testDividerRenders() { assertRenders(DSDivider()) }
     func testHintRenders() { assertRenders(DSHint(text: "Helpful hint text for the user.")) }
+    func testLoadingMessageRenders() { assertRenders(DSLoadingMessage(text: "Checking server…")) }
 
     func testChipRenders() {
         assertRenders(DSChip(text: "um"))
         assertRenders(DSChip(text: "removable", onRemove: {}))
         assertRenders(DSChip(text: "selected", isSelected: true))
+        assertRenders(DSChip(text: "selectable and removable", onSelect: {}, onRemove: {}))
     }
 
     func testStatusPillRenders() {
@@ -48,13 +50,14 @@ final class ComponentRenderTests: XCTestCase {
         assertRenders(Button("Change") {}.buttonStyle(.dsPrimary))
         assertRenders(Button("Clear") {}.buttonStyle(.dsSecondary))
         assertRenders(Button("Delete Model…") {}.buttonStyle(.dsDestructive))
-        assertRenders(DSIconButton(systemImage: "trash") {})
+        assertRenders(DSIconButton(systemImage: "trash", accessibilityLabel: "Delete") {})
         assertRenders(DSInsetButton(title: "Copy", systemImage: "doc.on.doc") {})
         assertRenders(DSAddButton(title: "Add another shortcut") {})
     }
 
     func testShortcutRecorderControlsStayOnOneLineWhenWidthIsConstrained() {
         let view = ShortcutRecorderView(
+            accessibilityName: "Shortcut 1",
             displayName: "L\u{2303}L\u{2325}L\u{2318}",
             onRecord: { _, _, _ in },
             onClear: {}
@@ -72,14 +75,14 @@ final class ComponentRenderTests: XCTestCase {
     }
 
     func testToggleRenders() {
-        assertRenders(Toggle("", isOn: .constant(true)).labelsHidden().toggleStyle(.dsSwitch))
-        assertRenders(Toggle("", isOn: .constant(false)).labelsHidden().toggleStyle(.dsSwitch))
+        assertRenders(DSSwitch(accessibilityName: "Prewarm models at startup", isOn: .constant(true)))
+        assertRenders(DSSwitch(accessibilityName: "Prewarm models at startup", isOn: .constant(false)))
     }
 
     func testSliderRenders() {
-        assertRenders(DSSlider(value: .constant(0.5)))
-        assertRenders(DSSlider(value: .constant(0)))
-        assertRenders(DSSlider(value: .constant(1)))
+        assertRenders(DSSlider(value: .constant(0.5), label: "Volume"))
+        assertRenders(DSSlider(value: .constant(0), label: "Volume"))
+        assertRenders(DSSlider(value: .constant(1), label: "Volume"))
     }
 
     func testDropdownLabelRenders() {
@@ -87,9 +90,17 @@ final class ComponentRenderTests: XCTestCase {
     }
 
     func testSearchAndTextFieldsRender() {
-        assertRenders(DSSearchField(placeholder: "Search your dictations", text: .constant("")))
-        assertRenders(DSTextField(placeholder: "Add word…", text: .constant("")))
-        assertRenders(DSTextField(placeholder: "API key", text: .constant("secret"), isSecure: true))
+        assertRenders(DSSearchField(
+            placeholder: "Search your dictations", text: .constant(""),
+            accessibilityName: "Search transcript history"
+        ))
+        assertRenders(DSTextField(
+            placeholder: "Add word…", text: .constant(""), accessibilityName: "Custom vocabulary word"
+        ))
+        assertRenders(DSTextField(
+            placeholder: "API key", text: .constant("secret"), isSecure: true,
+            accessibilityName: "API key"
+        ))
     }
 
     // MARK: - Molecules
@@ -103,12 +114,13 @@ final class ComponentRenderTests: XCTestCase {
 
     func testSectionHeaderRenders() {
         assertRenders(DSSectionHeader(title: "General", subtitle: "How Dictate Anywhere starts, sounds, and listens."))
+        assertRenders(DSEmptyState(systemImage: "text.book.closed", title: "No words added yet"))
     }
 
     func testRowsRender() {
         assertRenders(DSInfoRow(label: "Languages", value: "English only"))
         assertRenders(DSInfoRow(label: "Launch at login") {
-            Toggle("", isOn: .constant(true)).labelsHidden().toggleStyle(.dsSwitch)
+            DSSwitch(accessibilityName: "Launch at login", isOn: .constant(true))
         })
         assertRenders(DSDetailRow(label: "Variant", caption: "Streaming English dictation.") {
             DSDropdownLabel(text: "Nemotron Streaming (2240 ms)")
@@ -118,6 +130,7 @@ final class ComponentRenderTests: XCTestCase {
             caption: "When enabled, live transcription text appears next to the waveform.",
             isOn: .constant(false)
         ))
+        assertRenders(DSCardCaption(text: "Local processing keeps text on your Mac."))
     }
 
     func testBrandComponentsRender() {

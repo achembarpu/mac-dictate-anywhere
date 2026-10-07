@@ -7,11 +7,22 @@
 
 import SwiftUI
 
+private struct ShortcutFieldError {
+    enum Target: Equatable {
+        case binding(UUID)
+        case cancellation
+    }
+
+    let target: Target
+    let message: String
+}
+
 struct ShortcutsView: View {
     @Environment(AppState.self) private var appState
 
     @State private var shouldResumeMonitoringAfterRecording = false
-    @State private var shortcutError: String?
+    @State private var shortcutError: ShortcutFieldError?
+    @State private var activeRecorder: ShortcutFieldError.Target?
 
     private let maxBindings = 5
 
@@ -30,17 +41,25 @@ struct ShortcutsView: View {
                         DSDivider()
                     }
                     HotkeyBindingRow(
+                        number: index + 1,
                         binding: binding,
                         allBindings: settings.hotkeyBindings,
+                        validationError: shortcutError?.target == .binding(binding.id)
+                            ? shortcutError?.message : nil,
                         canDelete: settings.hotkeyBindings.count > 1,
+                        isRecording: activeRecorder == .binding(binding.id),
                         onRecord: { keyCode, modifiers, displayName in
                             var candidate = binding
                             candidate.keyCode = keyCode
                             candidate.modifiers = modifiers
                             if ConflictDetector.cancellationConflict(candidate, settings.cancelShortcut) {
-                                shortcutError = "Choose a different combination from the cancel shortcut."
+                                shortcutError = ShortcutFieldError(
+                                    target: .binding(binding.id),
+                                    message: "Choose a different combination from the cancel shortcut."
+                                )
                                 return
                             }
+                            if shortcutError?.target == .binding(binding.id) { shortcutError = nil }
                             settings.updateBindingHotkey(
                                 id: binding.id, keyCode: keyCode,
                                 modifiers: modifiers, displayName: displayName
@@ -49,6 +68,7 @@ struct ShortcutsView: View {
                             shouldResumeMonitoringAfterRecording = false
                         },
                         onClear: {
+                            if shortcutError?.target == .binding(binding.id) { shortcutError = nil }
                             settings.clearBindingHotkey(id: binding.id)
                             if !settings.hasHotkey {
                                 appState.hotkeyService.stopMonitoring()
@@ -63,6 +83,7 @@ struct ShortcutsView: View {
                             appState.hotkeyService.restartMonitoring()
                         },
                         onDelete: {
+                            if shortcutError?.target == .binding(binding.id) { shortcutError = nil }
                             settings.removeBinding(id: binding.id)
                             if !settings.hasHotkey {
                                 appState.hotkeyService.stopMonitoring()
@@ -71,10 +92,12 @@ struct ShortcutsView: View {
                             }
                         },
                         onRecordingStarted: {
+                            activeRecorder = .binding(binding.id)
                             shouldResumeMonitoringAfterRecording = appState.hotkeyService.isMonitoring
                             appState.hotkeyService.stopMonitoring()
                         },
                         onRecordingStopped: {
+                            activeRecorder = nil
                             guard shouldResumeMonitoringAfterRecording else { return }
                             if settings.hasHotkey {
                                 appState.hotkeyService.restartMonitoring()
@@ -82,6 +105,7 @@ struct ShortcutsView: View {
                             shouldResumeMonitoringAfterRecording = false
                         }
                     )
+                    .disabled(activeRecorder != nil && activeRecorder != .binding(binding.id))
                 }
             }
 
@@ -89,6 +113,7 @@ struct ShortcutsView: View {
                 DSAddButton(title: "Add another shortcut") {
                     _ = settings.addBinding()
                 }
+                .disabled(activeRecorder != nil)
             }
 
             DSSection(overline: "Cancellation") {
@@ -97,6 +122,7 @@ struct ShortcutsView: View {
                     caption: "Choose a shortcut you won't use in other apps. Clear it to cancel only from the menu bar."
                 ) {
                     ShortcutRecorderView(
+                        accessibilityName: "Cancel shortcut",
                         displayName: settings.cancelShortcut.displayName,
                         onRecord: { keyCode, modifiers, displayName in
                             var candidate = settings.cancelShortcut
@@ -104,26 +130,33 @@ struct ShortcutsView: View {
                             candidate.modifiers = modifiers
                             candidate.displayName = displayName
                             if settings.hotkeyBindings.contains(where: { ConflictDetector.cancellationConflict($0, candidate) }) {
-                                shortcutError = "The cancel shortcut overlaps a start/stop shortcut. Choose another combination."
+                                shortcutError = ShortcutFieldError(
+                                    target: .cancellation,
+                                    message: "The cancel shortcut overlaps a start/stop shortcut. Choose another combination."
+                                )
                                 return
                             }
                             if let warning = ConflictDetector.systemConflict(for: candidate) {
-                                shortcutError = warning
+                                shortcutError = ShortcutFieldError(target: .cancellation, message: warning)
                                 return
                             }
+                            if shortcutError?.target == .cancellation { shortcutError = nil }
                             settings.cancelShortcut = candidate
                         },
                         onClear: {
+                            if shortcutError?.target == .cancellation { shortcutError = nil }
                             settings.cancelShortcut.keyCode = nil
                             settings.cancelShortcut.modifiers = []
                             settings.cancelShortcut.displayName = ""
                             appState.hotkeyService.restartMonitoring()
                         },
                         onRecordingStarted: {
+                            activeRecorder = .cancellation
                             shouldResumeMonitoringAfterRecording = appState.hotkeyService.isMonitoring
                             appState.hotkeyService.stopMonitoring()
                         },
                         onRecordingStopped: {
+                            activeRecorder = nil
                             if shouldResumeMonitoringAfterRecording || appState.permissions.accessibilityGranted {
                                 appState.hotkeyService.restartMonitoring()
                             }
@@ -131,6 +164,12 @@ struct ShortcutsView: View {
                         },
                         allowsEscape: true
                     )
+                    .disabled(activeRecorder != nil && activeRecorder != .cancellation)
+                }
+                if shortcutError?.target == .cancellation, let message = shortcutError?.message {
+                    DSFieldMessage(text: message, tone: .error)
+                        .padding(.horizontal, DS.Spacing.rowHorizontal)
+                        .padding(.bottom, 10)
                 }
                 DSDivider()
                 DSStackedRow(
@@ -138,6 +177,7 @@ struct ShortcutsView: View {
                     caption: "Hold the full cancel shortcut for one second. Releasing early keeps dictation running.",
                     isOn: $settings.holdToCancel
                 )
+                .disabled(activeRecorder != nil)
                 .onChange(of: settings.holdToCancel) { _, _ in
                     appState.hotkeyService.restartMonitoring()
                 }
@@ -154,20 +194,18 @@ struct ShortcutsView: View {
                 icon: "keyboard"
             )
         }
-        .alert("Shortcut unavailable", isPresented: Binding(
-            get: { shortcutError != nil }, set: { if !$0 { shortcutError = nil } }
-        )) {
-            Button("OK") { shortcutError = nil }
-        } message: { Text(shortcutError ?? "") }
     }
 }
 
 // MARK: - Hotkey Binding Row
 
 private struct HotkeyBindingRow: View {
+    let number: Int
     let binding: HotkeyBinding
     let allBindings: [HotkeyBinding]
+    let validationError: String?
     let canDelete: Bool
+    let isRecording: Bool
     let onRecord: (UInt16?, HotkeyModifiers, String) -> Void
     let onClear: () -> Void
     let onModeChanged: (HotkeyMode) -> Void
@@ -205,6 +243,7 @@ private struct HotkeyBindingRow: View {
                 Spacer(minLength: 0)
 
                 ShortcutRecorderView(
+                    accessibilityName: "Shortcut \(number)",
                     displayName: binding.displayName,
                     onRecord: onRecord,
                     onClear: onClear,
@@ -213,23 +252,23 @@ private struct HotkeyBindingRow: View {
                 )
 
                 if canDelete {
-                    DSIconButton(systemImage: "trash", accessibilityLabel: "Remove shortcut", action: onDelete)
-                        .help("Remove shortcut")
+                    DSIconButton(systemImage: "trash", accessibilityLabel: "Remove shortcut \(number)", action: onDelete)
+                        .help("Remove shortcut \(number)")
+                        .disabled(isRecording)
                 }
             }
             .padding(16)
 
+            if let validationError {
+                DSFieldMessage(text: validationError, tone: .error)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
+
             ForEach(conflictMessages, id: \.self) { message in
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(DS.Colors.accentDeep)
-                    Text(message)
-                        .font(DS.Fonts.ui(12))
-                        .foregroundStyle(DS.Colors.panelText)
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
+                DSFieldMessage(text: message, tone: .warning)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
             }
 
             DSDivider()
@@ -241,7 +280,9 @@ private struct HotkeyBindingRow: View {
                         set: { onModeChanged($0) }
                     ),
                     options: HotkeyMode.allCases,
-                    title: \.displayName
+                    title: \.displayName,
+                    accessibilityName: "Activation mode for shortcut \(number)",
+                    isEnabled: !isRecording
                 )
             }
         }
