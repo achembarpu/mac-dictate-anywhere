@@ -320,7 +320,7 @@ extension AppDelegate: NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        for device in AudioDeviceManager.enumerateInputDevices() {
+        for device in appState.audioDeviceManager.availableInputDevices {
             let item = NSMenuItem(title: device.name, action: #selector(selectMicrophone(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = device.uid
