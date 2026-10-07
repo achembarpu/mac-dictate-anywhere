@@ -2,6 +2,14 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class TranscriptCleanupPlanTests: XCTestCase {
+    func testShortInputUsesOneFitCheckAndKeepsSeparators() async throws {
+        var calls = 0
+        let input = "  Keep 43.\n"
+        let chunks = try await TranscriptCleanupPlan.chunks(input) { _ in calls += 1; return true }
+        XCTAssertEqual(chunks.map(\.original).joined(), input)
+        XCTAssertEqual(calls, 1)
+    }
+
     func testSourceParagraphsKeepEverySeparatorAndRepeatedRecord() {
         for text in ["", "  ", "\n\nFirst.\n\n\n\nFirst.\n\n", "甲。\n\n乙。  "] {
             let paragraphs = TranscriptCleanupPlan.paragraphs(text)
@@ -70,5 +78,30 @@ final class TranscriptCleanupPlanTests: XCTestCase {
             let response = try JSONDecoder().decode(CleanupChatCompletion.self, from: Data(json.utf8))
             XCTAssertEqual(try response.completeText(), "Complete.")
         }
+    }
+}
+
+extension TranscriptCleanupPlanTests {
+    func testLongPlanningBoundsTokenizerWorkInsteadOfScanningEverySuffix() async throws {
+        let text = String(repeating: "Please keep invoice 42 and send the report tomorrow.\n", count: 2_600)
+        var traversed = 0
+        var largest = 0
+        let chunks = try await TranscriptCleanupPlan.chunks(text) { candidate in
+            traversed += candidate.utf8.count
+            largest = max(largest, candidate.utf8.count)
+            return candidate.utf8.count <= 4_096
+        }
+        XCTAssertEqual(chunks.map(\.original).joined(), text)
+        XCTAssertTrue(chunks.allSatisfy { $0.original.utf8.count <= 4_096 })
+        XCTAssertLessThanOrEqual(largest, 8_192)
+        XCTAssertLessThan(traversed, text.utf8.count * 20, "Sizing must scale with chunks, not all remaining suffixes")
+    }
+
+    func testNonmonotonicSelectedBoundariesStayWithinBackendBudget() async throws {
+        let text = "Alpha. Beta. Gamma. Delta. Epsilon. Zeta."
+        let fits: (String) async -> Bool = { $0.count <= 23 && !$0.hasSuffix("Beta. ") }
+        let chunks = try await TranscriptCleanupPlan.chunks(text, fits: fits)
+        XCTAssertEqual(chunks.map(\.original).joined(), text)
+        for chunk in chunks { let accepted = await fits(chunk.original); XCTAssertTrue(accepted) }
     }
 }

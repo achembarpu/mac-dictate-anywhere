@@ -247,7 +247,7 @@ actor S1MiniInferenceEngine {
         )
     }
 
-    func transcriptChunks(_ text: String, modelURL: URL) throws -> [String] {
+    func transcriptChunks(_ text: String, modelURL: URL) throws -> [S1MiniTranscriptChunk] {
         let model = try loadModelIfNeeded(from: modelURL)
         guard let vocabulary = llama_model_get_vocab(model) else {
             throw S1MiniServiceError.modelLoadFailed
@@ -260,7 +260,8 @@ actor S1MiniInferenceEngine {
     func generate(
         prompt: String,
         transcript: String,
-        modelURL: URL
+        modelURL: URL,
+        knownTranscriptTokenCount: Int? = nil
     ) throws -> String {
         let trace = PerfTrace.begin("cleanup.generate")
         defer { trace.end() }
@@ -273,7 +274,8 @@ actor S1MiniInferenceEngine {
         let (transcriptTokenCount, initialPromptTokens) = try tokenizeInputs(
             transcript: transcript,
             prompt: prompt,
-            vocabulary: vocabulary
+            vocabulary: vocabulary,
+            knownTranscriptTokenCount: knownTranscriptTokenCount
         )
         var promptTokens = initialPromptTokens
         let maximumOutputTokens = max(32, Int(ceil(Double(transcriptTokenCount) * 1.3)) + 32)
@@ -387,11 +389,14 @@ actor S1MiniInferenceEngine {
     private func tokenizeInputs(
         transcript: String,
         prompt: String,
-        vocabulary: OpaquePointer
+        vocabulary: OpaquePointer,
+        knownTranscriptTokenCount: Int?
     ) throws -> (transcriptTokenCount: Int, promptTokens: [llama_token]) {
         let trace = PerfTrace.begin("cleanup.tokenize")
         defer { trace.end() }
-        let transcriptTokenCount = try tokenize(
+        // A planned chunk carries its exact count from this GGUF tokenizer.
+        // The complete prompt below is always tokenized across all boundaries.
+        let transcriptTokenCount = try knownTranscriptTokenCount ?? tokenize(
             transcript,
             vocabulary: vocabulary,
             addSpecial: false,
@@ -586,8 +591,9 @@ enum S1MiniPostProcessingService {
             do {
                 for chunk in chunks {
                     try Task.checkCancellation()
-                    results.append(try await processChunk(chunk, modelURL: modelURL, styling: styling,
-                                                         structure: structure, context: resolvedContext))
+                    results.append(try await processChunk(chunk.text, modelURL: modelURL, styling: styling,
+                                                         structure: structure, context: resolvedContext,
+                                                         knownTranscriptTokenCount: chunk.tokenCount))
                 }
             } catch S1MiniServiceError.outputLimitReached {
                 trace.end(outcome: "output_limit_fallback")
@@ -602,7 +608,7 @@ enum S1MiniPostProcessingService {
 
     private static func processChunk(
         _ text: String, modelURL: URL, styling: S1MiniStyling,
-        structure: S1MiniStructure, context: String
+        structure: S1MiniStructure, context: String, knownTranscriptTokenCount: Int? = nil
     ) async throws -> String {
         let prompt = S1MiniPromptBuilder.prompt(
             transcript: text,
@@ -613,7 +619,8 @@ enum S1MiniPostProcessingService {
         let output = try await S1MiniInferenceEngine.shared.generate(
             prompt: prompt,
             transcript: text,
-            modelURL: modelURL
+            modelURL: modelURL,
+            knownTranscriptTokenCount: knownTranscriptTokenCount
         )
 
         guard !output.contains("<think>"), !output.contains("<|im_") else {
@@ -658,45 +665,70 @@ enum S1MiniPostProcessingService {
     }
 }
 
+/// A lossless input chunk and its exact count from the installed tokenizer.
+nonisolated struct S1MiniTranscriptChunk: Equatable, Sendable {
+    let text: String
+    let tokenCount: Int
+}
+
 /// Preserve every input character and prefer sentence boundaries. The supplied
 /// counter is the installed model's tokenizer, not a word-count approximation.
 nonisolated enum S1MiniTranscriptChunker {
-    static func chunks(_ text: String, maximumTokens: Int, tokenCount: (String) throws -> Int) throws -> [String] {
+    static func chunks(_ text: String, maximumTokens: Int,
+                       tokenCount: (String) throws -> Int) throws -> [S1MiniTranscriptChunk] {
         precondition(maximumTokens > 0)
-        var remaining = text
-        var result: [String] = []
-        while !remaining.isEmpty {
+        let characters = Array(text)
+        if !characters.isEmpty, characters.count <= 4_096 {
             try Task.checkCancellation()
-            let count = try tokenCount(remaining)
-            if count <= maximumTokens { result.append(remaining); break }
-            let characters = Array(remaining)
-            var low = 0, high = characters.count
-            // Tokenization can merge a suffix. Every selected boundary is
-            // checked again below; binary search only finds a useful bound.
+            let count = try tokenCount(text)
+            if count <= maximumTokens { return [S1MiniTranscriptChunk(text: text, tokenCount: count)] }
+        }
+        var offset = 0
+        var result: [S1MiniTranscriptChunk] = []
+        var probeHint = 512
+        while offset < characters.count {
+            try Task.checkCancellation()
+            let remainingCount = characters.count - offset
+            var counts: [Int: Int] = [:]
+            func count(_ length: Int) throws -> Int {
+                try Task.checkCancellation()
+                if let cached = counts[length] { return cached }
+                let measured = try tokenCount(String(characters[offset..<(offset + length)]))
+                counts[length] = measured
+                return measured
+            }
+            var low = 0, high = min(probeHint, remainingCount)
+            while try count(high) <= maximumTokens {
+                low = high
+                if low == remainingCount { break }
+                high = high > remainingCount / 2 ? remainingCount : high * 2
+            }
+            if low == remainingCount {
+                result.append(S1MiniTranscriptChunk(text: String(characters[offset...]), tokenCount: try count(low)))
+                break
+            }
             while low + 1 < high {
-                let middle = (low + high) / 2
-                if try tokenCount(String(characters.prefix(middle))) <= maximumTokens { low = middle }
+                let middle = low + (high - low) / 2
+                if try count(middle) <= maximumTokens { low = middle }
                 else { high = middle }
             }
-            let boundaries = (1...max(1, low)).filter { characters[$0 - 1].isWhitespace }
-            let sentences = boundaries.filter { index in
-                characters[index - 1].isNewline || (index > 1 && ".!?".contains(characters[index - 2]))
+            probeHint = max(1, low)
+            let boundaries = (1...max(1, low)).filter { characters[offset + $0 - 1].isWhitespace }
+            let sentences = boundaries.filter { end in
+                characters[offset + end - 1].isNewline
+                    || (end > 1 && ".!?".contains(characters[offset + end - 2]))
             }
-            let preferred = sentences.last(where: { $0 >= low / 2 }) ?? boundaries.last
-            guard var end = preferred else {
-                // Do not insert a space into an unbroken word that cannot fit.
-                throw S1MiniServiceError.transcriptTooLong(actual: count, maximum: maximumTokens)
+            var end = sentences.last(where: { $0 >= low / 2 }) ?? boundaries.last
+            while let candidate = end {
+                if try count(candidate) <= maximumTokens { break }
+                end = boundaries.last(where: { $0 < candidate })
             }
-            var chunk = String(characters.prefix(end))
-            while try tokenCount(chunk) > maximumTokens {
-                guard let earlier = boundaries.last(where: { $0 < end }) else {
-                    throw S1MiniServiceError.transcriptTooLong(actual: count, maximum: maximumTokens)
-                }
-                end = earlier
-                chunk = String(characters.prefix(end))
+            guard let end, end > 0 else {
+                // Only an error needs the full remaining count for its message.
+                throw S1MiniServiceError.transcriptTooLong(actual: try count(remainingCount), maximum: maximumTokens)
             }
-            result.append(chunk)
-            remaining = String(characters.dropFirst(end))
+            result.append(S1MiniTranscriptChunk(text: String(characters[offset..<(offset + end)]), tokenCount: try count(end)))
+            offset += end
         }
         return result
     }

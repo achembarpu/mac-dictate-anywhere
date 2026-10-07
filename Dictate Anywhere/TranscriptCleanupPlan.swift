@@ -55,22 +55,43 @@ nonisolated enum TranscriptCleanupPlan {
     ) async throws -> [TranscriptCleanupChunk] {
         guard !text.isEmpty else { return [] }
         let characters = Array(text)
+        if characters.count <= 4_096 {
+            try Task.checkCancellation()
+            if try await fits(text) { return [TranscriptCleanupChunk(text)] }
+        }
         var offset = 0
         var result: [TranscriptCleanupChunk] = []
+        var probeHint = 512
         while offset < characters.count {
             try Task.checkCancellation()
-            let remaining = String(characters[offset...])
-            if try await fits(remaining) {
-                result.append(TranscriptCleanupChunk(remaining))
+            let remainingCount = characters.count - offset
+            var measurements: [Int: Bool] = [:]
+            func fitsLength(_ length: Int) async throws -> Bool {
+                try Task.checkCancellation()
+                if let cached = measurements[length] { return cached }
+                let accepted = try await fits(String(characters[offset..<(offset + length)]))
+                measurements[length] = accepted
+                return accepted
+            }
+            // Find a bounded bracket before binary search. Never tokenize the
+            // entire remaining recording just to discover another small chunk.
+            var low = 0
+            var high = min(probeHint, remainingCount)
+            while try await fitsLength(high) {
+                low = high
+                if low == remainingCount { break }
+                high = high > remainingCount / 2 ? remainingCount : high * 2
+            }
+            if low == remainingCount {
+                result.append(TranscriptCleanupChunk(String(characters[offset...])))
                 break
             }
-            var low = 0
-            var high = characters.count - offset
             while low + 1 < high {
-                let middle = (low + high) / 2
-                if try await fits(String(characters[offset..<(offset + middle)])) { low = middle }
+                let middle = low + (high - low) / 2
+                if try await fitsLength(middle) { low = middle }
                 else { high = middle }
             }
+            probeHint = max(1, low)
             let boundaries = (1...max(1, low)).filter { end in
                 let previous = characters[offset + end - 1]
                 return previous.isWhitespace || "。！？".contains(previous)
@@ -82,8 +103,7 @@ nonisolated enum TranscriptCleanupPlan {
             }
             var end = sentences.last(where: { $0 >= low / 2 }) ?? boundaries.last
             while let candidate = end {
-                let raw = String(characters[offset..<(offset + candidate)])
-                if try await fits(raw) { break }
+                if try await fitsLength(candidate) { break }
                 end = boundaries.last(where: { $0 < candidate })
             }
             guard let end, end > 0 else { throw CleanupResponseError.inputCannotFit }

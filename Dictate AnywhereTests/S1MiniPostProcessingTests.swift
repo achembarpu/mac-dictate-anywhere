@@ -147,20 +147,20 @@ final class S1MiniPostProcessingTests: XCTestCase {
         let chunks = try S1MiniTranscriptChunker.chunks(text, maximumTokens: 7) {
             $0.split(whereSeparator: \.isWhitespace).count
         }
-        XCTAssertEqual(chunks.joined(), text)
+        XCTAssertEqual(chunks.map(\.text).joined(), text)
         XCTAssertGreaterThan(chunks.count, 1)
-        XCTAssertTrue(chunks[0].hasSuffix(".\n"))
-        XCTAssertTrue(chunks.allSatisfy { $0.split(whereSeparator: \.isWhitespace).count <= 7 })
+        XCTAssertTrue(chunks[0].text.hasSuffix(".\n"))
+        XCTAssertTrue(chunks.allSatisfy { $0.tokenCount <= 7 })
     }
 
     func testLongSentenceChunksAtWordBoundariesAndShortTextStaysWhole() throws {
         let text = "one two three four five six seven eight nine ten"
         let count: (String) -> Int = { $0.split(whereSeparator: \.isWhitespace).count }
         let chunks = try S1MiniTranscriptChunker.chunks(text, maximumTokens: 4, tokenCount: count)
-        XCTAssertEqual(chunks.joined(), text)
-        XCTAssertTrue(chunks.dropLast().allSatisfy { $0.last?.isWhitespace == true })
-        XCTAssertTrue(chunks.allSatisfy { count($0) <= 4 })
-        XCTAssertEqual(try S1MiniTranscriptChunker.chunks("Keep 43.", maximumTokens: 4, tokenCount: count), ["Keep 43."])
+        XCTAssertEqual(chunks.map(\.text).joined(), text)
+        XCTAssertTrue(chunks.dropLast().allSatisfy { $0.text.last?.isWhitespace == true })
+        XCTAssertTrue(chunks.allSatisfy { $0.tokenCount == count($0.text) && $0.tokenCount <= 4 })
+        XCTAssertEqual(try S1MiniTranscriptChunker.chunks("Keep 43.", maximumTokens: 4, tokenCount: count).map(\.text), ["Keep 43."])
         XCTAssertThrowsError(try S1MiniTranscriptChunker.chunks("unbroken", maximumTokens: 3, tokenCount: { $0.count }))
     }
 
@@ -170,7 +170,7 @@ final class S1MiniPostProcessingTests: XCTestCase {
         let url = URL(fileURLWithPath: path)
         let chunks = try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: url)
         XCTAssertGreaterThan(chunks.count, 1)
-        XCTAssertEqual(chunks.joined(), text)
+        XCTAssertEqual(chunks.map(\.text).joined(), text)
         let output = try await process(text, modelURL: url)
         XCTAssertFalse(output.isEmpty)
         XCTAssertTrue(output.lowercased().contains("invoice"))
@@ -499,6 +499,17 @@ final class S1MiniPostProcessingTests: XCTestCase {
         await S1MiniPostProcessingService.unload()
     }
 
+    func testShortTranscriptSizingUsesOneExactCount() throws {
+        var calls = 0
+        let chunks = try S1MiniTranscriptChunker.chunks("Keep 43.", maximumTokens: 20) {
+            calls += 1
+            return $0.count
+        }
+        XCTAssertEqual(chunks, [S1MiniTranscriptChunk(text: "Keep 43.", tokenCount: 8)])
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(try S1MiniTranscriptChunker.chunks("", maximumTokens: 20) { $0.count }, [])
+    }
+
     private func realModelPath() -> String? {
         let temporaryGatePath = "/private/tmp/dictate-anywhere-s1-mini-q4_k_m.gguf"
         return ProcessInfo.processInfo.environment["S1_MINI_MODEL_PATH"]
@@ -579,5 +590,22 @@ private nonisolated final class S1ValidationGate: @unchecked Sendable {
     func release() {
         releaseSemaphore.signal()
         releaseSemaphore.signal()
+    }
+}
+
+extension S1MiniPostProcessingTests {
+    func testLongPlanningBoundsSizingWorkAndRetainsExactAcceptedCounts() throws {
+        let text = String(repeating: "Please keep invoice 42 and send the report tomorrow.\n", count: 2_600)
+        var traversed = 0
+        var largest = 0
+        let chunks = try S1MiniTranscriptChunker.chunks(text, maximumTokens: 1_024) { candidate in
+            traversed += candidate.utf8.count
+            largest = max(largest, candidate.utf8.count)
+            return (candidate.utf8.count + 3) / 4
+        }
+        XCTAssertEqual(chunks.map(\.text).joined(), text)
+        XCTAssertTrue(chunks.allSatisfy { $0.tokenCount == ($0.text.utf8.count + 3) / 4 && $0.tokenCount <= 1_024 })
+        XCTAssertLessThanOrEqual(largest, 8_192)
+        XCTAssertLessThan(traversed, text.utf8.count * 20)
     }
 }
