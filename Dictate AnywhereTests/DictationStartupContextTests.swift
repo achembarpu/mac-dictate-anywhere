@@ -137,6 +137,107 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testRecordingJoinsMatchingIdleCleanupPreparation() async {
+        let settings = Settings.shared
+        let savedModel = settings.ollamaModel
+        defer { settings.ollamaModel = savedModel }
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .ollama
+        settings.ollamaModel = "test-model"
+        settings.prewarmEnginesAtStartup = true
+        let started = expectation(description: "idle cleanup started")
+        let gate = StartupModelPreparationGate(started: started)
+        var calls = 0
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: { _ in
+            calls += 1
+            if calls == 1 { await gate.wait() }
+            return true
+        })
+        let idle = Task { await app.prepareCleanupEngineIfNeeded() }
+        await fulfillment(of: [started], timeout: 2)
+        await app.startDictation()
+        XCTAssertEqual(app.status, .recording)
+        // Allow the recording wrapper to join before releasing the owned task.
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(calls, 1)
+        await gate.release()
+        await idle.value
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(calls, 1, "Busy eligibility must not start a duplicate backend load")
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        await app.cancelDictation()
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        await app.shutdown()
+    }
+
+    func testCredentialRevisionInvalidatesPreparationDuringAnInFlightLoad() async {
+        let settings = Settings.shared
+        let savedModel = settings.openRouterModel
+        let savedEnvironment = settings.openRouterAPIKeyEnvironmentVariable
+        defer {
+            settings.openRouterModel = savedModel
+            settings.openRouterAPIKeyEnvironmentVariable = savedEnvironment
+        }
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .openRouter
+        settings.openRouterModel = "test/model"
+        settings.openRouterAPIKeyEnvironmentVariable = "TEST_PREPARATION_CREDENTIAL_A"
+        settings.prewarmEnginesAtStartup = true
+        let started = expectation(description: "first credential revision started")
+        let gate = StartupModelPreparationGate(started: started)
+        var calls = 0
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: { _ in
+            calls += 1
+            if calls == 1 { await gate.wait() }
+            return true
+        })
+        let firstKey = app.cleanupPreparationKey
+        let first = Task { await app.prepareCleanupEngineIfNeeded() }
+        await fulfillment(of: [started], timeout: 2)
+        settings.openRouterAPIKeyEnvironmentVariable = "TEST_PREPARATION_CREDENTIAL_B"
+        XCTAssertNotEqual(firstKey, app.cleanupPreparationKey)
+        await gate.release()
+        await first.value
+        XCTAssertEqual(calls, 2)
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        await app.shutdown()
+    }
+
+    func testAppleContextArrivalReplacesContextFreePreparation() async {
+        guard #available(macOS 26, *) else { return }
+        let settings = Settings.shared
+        let savedContextAwareness = settings.dictationContextAwarenessEnabled
+        defer { settings.dictationContextAwarenessEnabled = savedContextAwareness }
+        settings.dictationContextAwarenessEnabled = true
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .appleIntelligence
+        settings.prewarmEnginesAtStartup = true
+        let captured = expectation(description: "context capture started")
+        let contextGate = StartupContextGate(started: captured)
+        let preparing = expectation(description: "context-free preparation started")
+        let preparationGate = StartupModelPreparationGate(started: preparing)
+        var calls = 0
+        let app = app(engine: StartupContextEngine(), capture: { _ in await contextGate.capture() },
+                      cleanupPreparation: { _ in
+            calls += 1
+            if calls == 1 { await preparationGate.wait() }
+            return true
+        })
+        await app.startDictation()
+        await fulfillment(of: [captured, preparing], timeout: 2)
+        XCTAssertNil(app.cleanupPreparationKey.context)
+        await contextGate.resolve(Self.context(pid: 1, word: "Quilter"))
+        let deadline = ContinuousClock.now + .seconds(2)
+        while app.cleanupPreparationKey.context == nil, ContinuousClock.now < deadline { await Task.yield() }
+        XCTAssertNotNil(app.cleanupPreparationKey.context)
+        await preparationGate.release()
+        while (calls < 2 || app.isPreparingCleanupEngine), ContinuousClock.now < deadline { await Task.yield() }
+        XCTAssertEqual(calls, 2)
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        await app.cancelDictation()
+        await app.shutdown()
+    }
+
     func testConcurrentCleanupPreparationsJoinAndShutdownWaitsForTheLoad() async {
         let settings = Settings.shared
         settings.engineChoice = .parakeet
@@ -311,7 +412,7 @@ final class DictationStartupContextTests: XCTestCase {
         await app.prepareCleanupEngineIfNeeded(force: true)
         XCTAssertTrue(app.isCleanupEnginePrepared)
         XCTAssertEqual(app.cleanupReadiness, .configured, "Remote discovery is not proof of an inference-ready local model")
-        XCTAssertFalse(app.canPrepareCleanupEngine, "A completed matching preparation does not need another Prepare action")
+        XCTAssertTrue(app.canPrepareCleanupEngine, "Manual preparation must remain available to refresh remote state")
         await app.shutdown()
     }
 
@@ -333,7 +434,12 @@ final class DictationStartupContextTests: XCTestCase {
         let first = Task { await app.prepareCleanupEngineIfNeeded() }
         await fulfillment(of: [started], timeout: 5)
         settings.transcriptPostProcessingMode = .fluidAudioVocabulary
-        let changed = Task { await app.prepareCleanupEngineIfNeeded() }
+        let joining = expectation(description: "changed choice joins the active load")
+        let changed = Task {
+            joining.fulfill()
+            await app.prepareCleanupEngineIfNeeded()
+        }
+        await fulfillment(of: [joining], timeout: 2)
         await gate.release()
         await first.value
         await changed.value

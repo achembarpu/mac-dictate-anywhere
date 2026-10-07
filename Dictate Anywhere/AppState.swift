@@ -152,6 +152,8 @@ final class AppState {
         let vocabulary: [String]
         let providerURL: String
         let providerModel: String
+        let credentialsRevision: Int
+        let context: DictationPostProcessingContext?
     }
 
     private struct CleanupPreparation {
@@ -586,7 +588,12 @@ final class AppState {
                 : (settings.transcriptPostProcessingMode == .openAICompatible ? settings.openAICompatibleBaseURL : ""),
             providerModel: settings.transcriptPostProcessingMode == .ollama ? settings.ollamaModel
                 : (settings.transcriptPostProcessingMode == .openRouter ? settings.openRouterModel
-                    : (settings.transcriptPostProcessingMode == .openAICompatible ? settings.openAICompatibleModel : ""))
+                    : (settings.transcriptPostProcessingMode == .openAICompatible ? settings.openAICompatibleModel : "")),
+            credentialsRevision: settings.transcriptPostProcessingMode == .openAICompatible
+                ? settings.openAICompatibleCredentialsRevision
+                : (settings.transcriptPostProcessingMode == .openRouter ? settings.openRouterCredentialsRevision : 0),
+            context: settings.transcriptPostProcessingMode == .appleIntelligence
+                ? postProcessingContext(includeCapturedText: true) : nil
         )
     }
 
@@ -604,6 +611,7 @@ final class AppState {
             && prepared.runtimeRevision == current.runtimeRevision
             && prepared.prompt == current.prompt && prepared.vocabulary == current.vocabulary
             && prepared.providerURL == current.providerURL && prepared.providerModel == current.providerModel
+            && prepared.credentialsRevision == current.credentialsRevision && prepared.context == current.context
     }
 
     var cleanupReadiness: ModelReadiness {
@@ -662,8 +670,6 @@ final class AppState {
     var canPrepareCleanupEngine: Bool {
         guard status == .idle, !isPreparingCleanupEngine, !isShuttingDown,
               settings.engineChoice != .assemblyAI else { return false }
-        if [.ollama, .openRouter, .openAICompatible].contains(settings.transcriptPostProcessingMode),
-           isCleanupEnginePrepared { return false }
         switch cleanupReadiness {
         case .notDownloaded, .needsSetup, .unavailable, .ready, .downloading, .verifying, .preparing, .deleting: return false
         default: return true
@@ -671,7 +677,8 @@ final class AppState {
     }
 
     private func recordCleanupPreparation(_ ready: Bool, key: CleanupPreparationKey) {
-        guard !isShuttingDown else { return }
+        guard !isShuttingDown, !isCancelling,
+              cleanupConfigurationMatches(key, cleanupPreparationKey) else { return }
         if ready {
             preparedCleanupKey = key
             cleanupPreparationFailure = nil
@@ -698,26 +705,36 @@ final class AppState {
     /// if preferences changed during loading, prepare the new choice afterward.
     /// Failure retains lazy first-use loading. Tests inject a bounded operation.
     func prepareCleanupEngineIfNeeded(force: Bool = false) async {
+        await prepareCleanupEngineIfNeeded(force: force, allowRecording: false)
+    }
+
+    private func prepareCleanupEngineIfNeeded(force: Bool, allowRecording: Bool) async {
         guard !AppDelegate.isRunningTests || cleanupModelPreparation != nil else { return }
+        guard !Task.isCancelled, !isShuttingDown, !isCancelling else { return }
         while let inFlight = cleanupPreparation {
             let ready = await inFlight.task.value
             if cleanupPreparation?.id == inFlight.id {
                 cleanupPreparation = nil
                 isPreparingCleanupEngine = false
-                recordCleanupPreparation(ready, key: inFlight.key)
+                if !inFlight.task.isCancelled { recordCleanupPreparation(ready, key: inFlight.key) }
             }
-            if inFlight.key == cleanupPreparationKey { return }
+            guard !Task.isCancelled, !isShuttingDown, !isCancelling else { return }
+            if cleanupConfigurationMatches(inFlight.key, cleanupPreparationKey) || isCleanupEnginePrepared { return }
         }
         if force, settings.transcriptPostProcessingMode == .fluidAudioVocabulary,
            settings.engineChoice == .parakeet, !parakeetEngine.isReady {
             await prepareActiveEngine()
+            if cleanupPreparation != nil {
+                await prepareCleanupEngineIfNeeded(force: force, allowRecording: allowRecording)
+                return
+            }
         }
         let key = cleanupPreparationKey
         if key.mode == .s1Mini, isCleanupEnginePrepared { return }
-        if #available(macOS 26, *), (!key.enabled && !force && !isCleanupEnginePrepared) || key.mode != .appleIntelligence {
-            await AIPostProcessingService.discardPreparedSession()
-        }
-        guard !isShuttingDown, key.enabled || force, key.idle, key.engine != .assemblyAI else { return }
+        let canPrepareWhileRecording = allowRecording && status == .recording
+            && [.appleIntelligence, .ollama, .openRouter, .openAICompatible].contains(key.mode)
+        guard !Task.isCancelled, !isShuttingDown, !isCancelling, key.enabled || force,
+              key.idle || canPrepareWhileRecording, key.engine != .assemblyAI else { return }
         switch key.mode {
         case .s1Mini:
             guard S1MiniPrewarmPolicy.shouldPrewarm(
@@ -735,24 +752,31 @@ final class AppState {
         default: return
         }
         let id = UUID()
+        let portableAPIKey = settings.openAICompatibleAPIKey
         preparedCleanupKey = nil
         cleanupPreparationFailure = nil
         isPreparingCleanupEngine = true
         let task = Task(priority: .utility) { [weak self] in
-            guard let self, !self.isShuttingDown else { return false }
+            guard let self, !self.isShuttingDown, !Task.isCancelled else { return false }
+            // Reserve the owner before this actor hop; concurrent callers must
+            // join it rather than create another task while discard suspends.
+            if key.mode != .appleIntelligence, #available(macOS 26, *) {
+                await AIPostProcessingService.discardPreparedSession()
+            }
+            guard !self.isShuttingDown, !Task.isCancelled else { return false }
             if let prepare = self.cleanupModelPreparation { return await prepare(key.mode) }
             if key.mode == .appleIntelligence, #available(macOS 26, *) {
-                return await AIPostProcessingService.prewarm(prompt: key.prompt, vocabulary: key.vocabulary)
+                return await AIPostProcessingService.prewarm(prompt: key.prompt, vocabulary: key.vocabulary, context: key.context)
             }
             if key.mode == .ollama {
-                return await OllamaPostProcessingService.prewarm(baseURL: key.providerURL, model: key.providerModel)
+                return await OllamaPostProcessingService.prewarm(baseURL: key.providerURL, model: key.providerModel, refresh: force)
             }
             if key.mode == .openRouter {
-                return await OpenRouterPostProcessingService.prewarm(model: key.providerModel)
+                return await OpenRouterPostProcessingService.prewarm(model: key.providerModel, refresh: force)
             }
             if key.mode == .openAICompatible {
                 return await OpenAICompatiblePostProcessingService.prewarm(
-                    baseURL: key.providerURL, model: key.providerModel, apiKey: self.settings.openAICompatibleAPIKey)
+                    baseURL: key.providerURL, model: key.providerModel, apiKey: portableAPIKey, refresh: force)
             }
             if key.mode == .fluidAudioVocabulary {
                 return await self.parakeetEngine.prepareVocabularyIfNeeded()
@@ -766,7 +790,11 @@ final class AppState {
         if cleanupPreparation?.id == id {
             cleanupPreparation = nil
             isPreparingCleanupEngine = false
-            recordCleanupPreparation(ready, key: key)
+            if !task.isCancelled { recordCleanupPreparation(ready, key: key) }
+        }
+        if !Task.isCancelled, !isShuttingDown, !isCancelling,
+           !cleanupConfigurationMatches(key, cleanupPreparationKey), !isCleanupEnginePrepared {
+            await prepareCleanupEngineIfNeeded(force: force, allowRecording: allowRecording)
         }
     }
 
@@ -1495,28 +1523,10 @@ final class AppState {
         guard key.enabled, key.engine != .assemblyAI else { return }
         guard key.mode == .appleIntelligence || key.mode == .ollama
             || key.mode == .openRouter || key.mode == .openAICompatible else { return }
-        let prompt = settings.aiPostProcessingPrompt
-        let vocabulary = settings.customVocabulary
-        let context = postProcessingContext(for: .appleIntelligence)
-        let apiKey = settings.openAICompatibleAPIKey
         recordingCleanupPreparation?.cancel()
-        let prepare = cleanupModelPreparation
-        recordingCleanupPreparation = Task(priority: .utility) {
-            guard !Task.isCancelled else { return }
-            if let prepare { _ = await prepare(key.mode); return }
-            switch key.mode {
-            case .appleIntelligence:
-                if #available(macOS 26, *) {
-                    _ = await AIPostProcessingService.prewarm(prompt: prompt, vocabulary: vocabulary, context: context)
-                }
-            case .ollama:
-                _ = await OllamaPostProcessingService.prewarm(baseURL: key.providerURL, model: key.providerModel)
-            case .openRouter:
-                _ = await OpenRouterPostProcessingService.prewarm(model: key.providerModel)
-            case .openAICompatible:
-                _ = await OpenAICompatiblePostProcessingService.prewarm(baseURL: key.providerURL, model: key.providerModel, apiKey: apiKey)
-            default: break
-            }
+        recordingCleanupPreparation = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            await self.prepareCleanupEngineIfNeeded(force: false, allowRecording: true)
         }
     }
 
@@ -1641,6 +1651,9 @@ final class AppState {
             if #available(macOS 26, *) {
                 if case .available = AIPostProcessingService.availability {
                     do {
+                        await recordingCleanupPreparation?.value
+                        try Task.checkCancellation()
+                        preparedCleanupKey = nil // Apple consumes the prepared session on use.
                         processedText = try await AIPostProcessingService.process(
                             text: finalText,
                             prompt: settings.aiPostProcessingPrompt,
@@ -1878,6 +1891,8 @@ final class AppState {
         recordingCleanupPreparation?.cancel()
         let cancelledPreparation = recordingCleanupPreparation
         recordingCleanupPreparation = nil
+        let cancelledCleanup = cleanupPreparation
+        cancelledCleanup?.task.cancel()
         updateCancellationAvailability()
         let preview = currentTranscript
         processingTask?.cancel()
@@ -1901,7 +1916,13 @@ final class AppState {
         // Stop microphone capture before joining a network/model preload.
         // Join before allowing another recording, so a stale preparation
         // cannot overwrite its new session.
+        _ = await cancelledCleanup?.task.value
+        if cleanupPreparation?.id == cancelledCleanup?.id {
+            cleanupPreparation = nil
+            isPreparingCleanupEngine = false
+        }
         await cancelledPreparation?.value
+        preparedCleanupKey = nil
         if #available(macOS 26, *) { await AIPostProcessingService.discardPreparedSession() }
         if let capture = recoveryCapture, preserveSessionOnCancellation {
             do {
