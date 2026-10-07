@@ -31,7 +31,7 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **Local-First Speech Recognition** - FluidAudio and Apple Speech run on-device; AssemblyAI is available as an explicit cloud option
 - **Language-aware Model Choices** - Choose by language, download size, accuracy or live preview. Parakeet v3/Ultra cover 25 European languages including Maltese; SenseVoice offers Mandarin with English, and multilingual Nemotron adds Norwegian on Apple Silicon.
 - **Hands-Free Mode** - Tap to start, tap again to stop
-- **Live Preview** - See your transcription in real-time with animated waveform
+- **Live Preview** - See your transcription with an animated waveform. Batch Parakeet previews target one-second updates, then two-second updates after eight seconds of audio; initial text can appear earlier. Native streaming models keep their own cadence, and Stop uses the authoritative final decode.
 - **Filler Word Removal** - Automatically removes "um", "uh", and other filler words
 - **Custom Vocabulary** - Preserve product names, people names, and domain-specific terms during transcript cleanup
 - **Context Awareness** - Detect the active app or supported website, read a bounded snapshot around the cursor, and apply separate styles for email, work chat, personal chat, and other apps
@@ -42,6 +42,8 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **Optional Transcript Cleanup** - Post-process the final transcript with S1-mini by Superwhisper, Apple Intelligence, Ollama, or OpenRouter for punctuation, grammar, formatting, and wording cleanup
 - **Safe Fallbacks** - If AI cleanup fails or returns unusable output, the original local transcript is pasted instead
 - **Menu Bar App** - Runs quietly in your menu bar
+
+Startup preparation resolves the selected speech language and model before loading. Independent speech and cleanup engines prepare together; vocabulary preparation waits for speech weights. Disabling automatic preparation keeps lazy first-use loading available. Remote preparation shares brief metadata/preload results, and explicit Prepare or Refresh actions check current state.
 
 ## Installation
 
@@ -82,7 +84,7 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 - Downloads a pinned Q4_K_M model directly from Hugging Face and verifies its exact size and SHA-256 before installation
 - Runs through the embedded llama.cpp runtime, with Metal acceleration on Apple Silicon and CPU inference on Intel
 - Provides the model's trained styling, structure, and context controls instead of an arbitrary prompt
-- Supports English transcripts up to approximately 1,000 model tokens; unsupported languages or failed cleanup preserve the original transcript
+- Splits longer English transcripts into lossless chunks of approximately 1,000 model tokens; unsupported languages or a failed chunk preserve the entire original transcript
 - Can be removed from the Transcript Cleanup page, including its locally stored license file
 
 ### Ollama
