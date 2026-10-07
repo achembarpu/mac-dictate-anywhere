@@ -63,6 +63,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
     #endif
 
     private(set) var isReady = false
+    var requiresContextBeforeFinalization: Bool { true }
     var currentTranscript: String {
         stateLock.withLock { transcript }
     }
@@ -421,10 +422,12 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
     private let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
     private let analyzerFormat: AVAudioFormat
+    private let inputConverter: PCMStreamConverter
     private let onTranscript: @Sendable (String, Bool) -> Void
     private let inputStream: AsyncStream<AnalyzerInput>
     private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
     private let conversionLock = NSLock()
+    private var inputClosed = false
     private var inputBufferCount = 0
     private var convertedBufferCount = 0
     private var inputSampleCount = 0
@@ -481,6 +484,7 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
         self.transcriber = transcriber
         self.analyzer = analyzer
         self.analyzerFormat = analyzerFormat
+        self.inputConverter = try PCMStreamConverter(from: sourceFormat, to: analyzerFormat)
         self.onTranscript = onTranscript
         self.inputStream = stream
         self.inputContinuation = continuation
@@ -522,14 +526,12 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
     }
 
     func transcribeFile(at url: URL) async throws -> String {
-        let reader = try RecoveryAudioReader(url: url)
+        let reader = try ConvertedRecoveryAudioReader(url: url, outputFormat: analyzerFormat)
         // Pull audio only when the analyzer requests the next chunk. The live
         // microphone's push stream would otherwise buffer the entire file.
-        let stream = AsyncThrowingStream<AnalyzerInput, Error>(unfolding: { [self] in
+        let stream = AsyncThrowingStream<AnalyzerInput, Error>(unfolding: {
             try Task.checkCancellation()
-            guard let samples = try reader.nextSamples() else { return nil }
-            let source = try makePCMBuffer(from: samples)
-            let buffer = try conversionLock.withLock { try convertIfNeeded(source) }
+            guard let buffer = try reader.nextBuffer() else { return nil }
             return AnalyzerInput(buffer: buffer)
         })
         startResults()
@@ -551,36 +553,24 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
 
     func append(samples: [Float]) {
         guard !samples.isEmpty else { return }
-        var countedInput = false
-        do {
-            let sourceBuffer = try makePCMBuffer(from: samples)
-            let buffer = try conversionLock.withLock {
-                inputBufferCount += 1
-                inputSampleCount += samples.count
-                countedInput = true
-                let converted = try convertIfNeeded(sourceBuffer)
-                if sourceBuffer.format != analyzerFormat { convertedBufferCount += 1 }
-                return converted
-            }
-            if case .enqueued = inputContinuation.yield(AnalyzerInput(buffer: buffer)) {
-                // The unbounded stream accepted this buffer.
-            } else {
-                conversionLock.withLock { rejectedInputBufferCount += 1 }
-            }
-        } catch {
-            conversionLock.withLock {
-                if !countedInput {
-                    inputBufferCount += 1
-                    inputSampleCount += samples.count
-                }
+        conversionLock.withLock {
+            guard !inputClosed else { return }
+            inputBufferCount += 1
+            inputSampleCount += samples.count
+            do {
+                let source = try makePCMBuffer(from: samples)
+                if source.format != analyzerFormat { convertedBufferCount += 1 }
+                enqueue(try inputConverter.convert(source))
+            } catch {
                 rejectedInputBufferCount += 1
+                inputClosed = true
+                inputContinuation.finish()
             }
-            inputContinuation.finish()
         }
     }
 
     func finish() async -> String {
-        inputContinuation.finish()
+        closeInput(flushTail: true)
         let counts = conversionLock.withLock {
             ["input_buffers": inputBufferCount, "converted_buffers": convertedBufferCount,
              "rejected_input_buffers": rejectedInputBufferCount, "input_samples": inputSampleCount]
@@ -607,7 +597,7 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
     }
 
     func cancel() async {
-        inputContinuation.finish()
+        closeInput(flushTail: false)
         analysisTask?.cancel()
         resultTask?.cancel()
         await analyzer.cancelAndFinishNow()
@@ -615,34 +605,25 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
         resultTask = nil
     }
 
-    private func convertIfNeeded(_ source: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
-        if source.format == analyzerFormat {
-            return source
-        }
-
-        guard let converter = AVAudioConverter(from: source.format, to: analyzerFormat) else {
-            throw TranscriptionError.audioFormatError
-        }
-        let ratio = analyzerFormat.sampleRate / source.format.sampleRate
-        let capacity = AVAudioFrameCount(ceil(Double(source.frameLength) * ratio)) + 8
-        guard let output = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity) else {
-            throw TranscriptionError.audioFormatError
-        }
-
-        var suppliedInput = false
-        var conversionError: NSError?
-        let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
-            if suppliedInput {
-                outStatus.pointee = .noDataNow
-                return nil
+    // Both helpers run under conversionLock, keeping final tail delivery after
+    // the last append and before stream termination, including concurrent Stop.
+    private func enqueue(_ buffers: [AVAudioPCMBuffer]) {
+        for buffer in buffers {
+            if case .enqueued = inputContinuation.yield(AnalyzerInput(buffer: buffer)) {} else {
+                rejectedInputBufferCount += 1
             }
-            suppliedInput = true
-            outStatus.pointee = .haveData
-            return source
         }
-        guard status != .error, conversionError == nil else {
-            throw conversionError ?? TranscriptionError.audioFormatError
+    }
+
+    private func closeInput(flushTail: Bool) {
+        conversionLock.withLock {
+            guard !inputClosed else { return }
+            inputClosed = true
+            if flushTail {
+                do { enqueue(try inputConverter.finish()) }
+                catch { rejectedInputBufferCount += 1 }
+            }
+            inputContinuation.finish()
         }
-        return output
     }
 }
