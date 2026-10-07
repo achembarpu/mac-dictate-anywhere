@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class AudioPipelineBufferTests: XCTestCase {
-    func testStreamingCaptureDoesNotRetainAnUnusedFullRecording() {
+    func testCaptureRetainsOriginalAudioOnlyForDecodersThatConsumeIt() {
         let block = [Float](repeating: 0.125, count: 16_000)
         for model in ParakeetModelChoice.allCases {
             let engine = ParakeetEngine()
@@ -11,8 +11,19 @@ final class AudioPipelineBufferTests: XCTestCase {
             let counts = engine.capturedSampleCountsForTesting
             XCTAssertEqual(counts.total, 960_000, model.rawValue)
             XCTAssertEqual(counts.pending, counts.total, "All audio still reaches recognition")
-            XCTAssertEqual(counts.retained, model.usesTrueStreaming ? 0 : counts.total,
-                "Batch finalization and vocabulary keep their original audio")
+            XCTAssertEqual(counts.retained, model == .englishOnly ? counts.total : 0,
+                "Only v2 needs original audio without vocabulary")
+        }
+    }
+
+    func testVocabularyKeepsOriginalAudioOnlyForSupportedBatchModels() {
+        let block = [Float](repeating: 0.125, count: 16_000)
+        for model in ParakeetModelChoice.allCases {
+            let engine = ParakeetEngine()
+            for _ in 0..<60 { engine.captureSamplesForTesting(block, model: model, vocabularyTerms: ["Zephyr"]) }
+            XCTAssertEqual(engine.capturedSampleCountsForTesting.retained,
+                           [.multilingual, .multilingualUltra, .englishOnly, .compactEnglish].contains(model) ? 960_000 : 0,
+                           model.rawValue)
         }
     }
 

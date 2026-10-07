@@ -482,6 +482,8 @@ final class ParakeetEngine: TranscriptionEngine {
     private var sampleBuffer: [Float] = []
     private var levelSampleBuffer = AudioLevelSampleBuffer()
     private var fullRecordingSamples: [Float] = []
+    private var volumeGate = AudioVolumeGate()
+    private var retainsOriginalAudio = false
     private var totalSampleCount: Int = 0
     private var droppedPendingSamples: Int = 0
     private let sampleLock = NSLock()
@@ -521,11 +523,7 @@ final class ParakeetEngine: TranscriptionEngine {
     /// recording start so it fires exactly once per dictation session.
     private var firstPartialEmitted = false
 
-    private let minAudioEnergy: Float = 0.005
-    private let minimumSpeechPeak: Float = 0.02
-    private let minimumSpeechSampleRatio: Float = 0.015
     private let sampleRate: Int = BatchTranscriptionPolicy.sampleRate
-    private let speechCheckWindowSamples: Int = 8_000
 
     /// File I/O size for native recovery; recognition is fed in one-second blocks.
     nonisolated private static let recoveryReadBlockSamples = BatchTranscriptionPolicy.sampleRate * 20
@@ -1066,6 +1064,8 @@ final class ParakeetEngine: TranscriptionEngine {
             sampleBuffer.removeAll(keepingCapacity: true)
             levelSampleBuffer.reset(keepingCapacity: true)
             fullRecordingSamples.removeAll(keepingCapacity: true)
+            volumeGate = AudioVolumeGate()
+            retainsOriginalAudio = Self.needsOriginalAudio(model: modelChoice, vocabularyTerms: vocabularyTerms)
             totalSampleCount = 0
             droppedPendingSamples = 0
         }
@@ -1187,6 +1187,8 @@ final class ParakeetEngine: TranscriptionEngine {
             sampleBuffer.removeAll(keepingCapacity: false)
             levelSampleBuffer.reset(keepingCapacity: false)
             fullRecordingSamples.removeAll(keepingCapacity: false)
+            volumeGate = AudioVolumeGate()
+            retainsOriginalAudio = false
             totalSampleCount = 0
         }
 
@@ -1277,7 +1279,7 @@ final class ParakeetEngine: TranscriptionEngine {
             let shouldPreview = BatchTranscriptionPolicy.shouldPreview(
                 totalSamples: total, lastPreviewSamples: lastBatchPreviewSampleCount,
                 hasVisibleText: !currentTranscript.isEmpty)
-            let recent = shouldPreview ? Array(fullRecordingSamples.suffix(speechCheckWindowSamples)) : []
+            let recent = shouldPreview ? volumeGate.recentSamples : []
             return (pending, total, recent, shouldPreview)
         }
         try await asrCoordinator.appendBatchAudio(pending)
@@ -1312,14 +1314,14 @@ final class ParakeetEngine: TranscriptionEngine {
         lastBatchPreviewSampleCount = 0
         isRecordingActive = true
         currentTranscript = ""
+        sampleLock.withLock {
+            volumeGate = AudioVolumeGate()
+            retainsOriginalAudio = Self.needsOriginalAudio(model: model, vocabularyTerms: vocabularyTerms)
+        }
     }
 
     func replayBatchAudioForTesting(_ samples: [Float]) async throws {
-        sampleLock.withLock {
-            sampleBuffer.append(contentsOf: samples)
-            fullRecordingSamples.append(contentsOf: samples)
-            totalSampleCount += samples.count
-        }
+        appendCapturedSamples(samples, model: recordingModelChoice ?? selectedModelChoice)
         try await processBatchAudio()
     }
 
@@ -1354,9 +1356,12 @@ final class ParakeetEngine: TranscriptionEngine {
         containsSignificantAudio(samples)
     }
 
-    func captureSamplesForTesting(_ samples: [Float], model: ParakeetModelChoice) {
+    func captureSamplesForTesting(_ samples: [Float], model: ParakeetModelChoice, vocabularyTerms: [String] = []) {
+        sampleLock.withLock { retainsOriginalAudio = Self.needsOriginalAudio(model: model, vocabularyTerms: vocabularyTerms) }
         appendCapturedSamples(samples, model: model)
     }
+
+    var retainedVolumeSampleCountForTesting: Int { sampleLock.withLock { volumeGate.retainedSampleCount } }
 
     var capturedSampleCountsForTesting: (pending: Int, retained: Int, total: Int) {
         sampleLock.withLock { (sampleBuffer.count, fullRecordingSamples.count, totalSampleCount) }
@@ -1431,7 +1436,7 @@ final class ParakeetEngine: TranscriptionEngine {
         let recorded = sampleLock.withLock { fullRecordingSamples }
         do {
             try await asrCoordinator.appendBatchAudio(pending)
-            var hasSpeech = containsSignificantAudio(recorded)
+            var hasSpeech = sampleLock.withLock { volumeGate.containsSignificantAudio }
             if !hasSpeech { hasSpeech = try await asrCoordinator.containsBatchSpeech() }
             guard hasSpeech else {
                 await asrCoordinator.cancelBatch()
@@ -1490,6 +1495,8 @@ final class ParakeetEngine: TranscriptionEngine {
             sampleBuffer.removeAll(keepingCapacity: false)
             levelSampleBuffer.reset(keepingCapacity: false)
             fullRecordingSamples.removeAll(keepingCapacity: false)
+            volumeGate = AudioVolumeGate()
+            retainsOriginalAudio = false
             totalSampleCount = 0
         }
 
@@ -1500,48 +1507,17 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     private func hasSignificantAudio(_ samples: [Float]) -> Bool {
-        audioLooksNonEmpty(samples.suffix(speechCheckWindowSamples))
+        AudioVolumeGate.qualifies(samples.suffix(AudioVolumeGate.windowSamples))
     }
 
     private func containsSignificantAudio(_ samples: [Float]) -> Bool {
-        guard !samples.isEmpty else { return false }
-        guard samples.count > speechCheckWindowSamples else {
-            return audioLooksNonEmpty(samples[...])
-        }
-
-        let hopSize = max(1, speechCheckWindowSamples / 2)
-        var startIndex = 0
-        while startIndex < samples.count {
-            let endIndex = min(startIndex + speechCheckWindowSamples, samples.count)
-            if audioLooksNonEmpty(samples[startIndex..<endIndex]) {
-                return true
-            }
-            if endIndex == samples.count {
-                break
-            }
-            startIndex += hopSize
-        }
-
-        return false
+        var gate = AudioVolumeGate()
+        gate.append(samples)
+        return gate.containsSignificantAudio
     }
 
-    private func audioLooksNonEmpty(_ samples: ArraySlice<Float>) -> Bool {
-        guard !samples.isEmpty else { return false }
-        var rms: Float = 0
-        samples.withUnsafeBufferPointer { vDSP_rmsqv($0.baseAddress!, 1, &rms, vDSP_Length($0.count)) }
-        if rms > minAudioEnergy { return true }
-
-        var peak: Float = 0
-        samples.withUnsafeBufferPointer { vDSP_maxmgv($0.baseAddress!, 1, &peak, vDSP_Length($0.count)) }
-        guard peak >= minimumSpeechPeak else { return false }
-        let voicedSamples = samples.reduce(into: 0) { count, sample in
-            if abs(sample) >= minimumSpeechPeak {
-                count += 1
-            }
-        }
-
-        let voicedRatio = Float(voicedSamples) / Float(samples.count)
-        return voicedRatio >= minimumSpeechSampleRatio
+    nonisolated private static func needsOriginalAudio(model: ParakeetModelChoice, vocabularyTerms: [String]) -> Bool {
+        model.tdtModelVersion == .v2 || (model.tdtModelVersion != nil && !vocabularyTerms.isEmpty)
     }
 
     private func appendCapturedSamples(_ samples: [Float], model: ParakeetModelChoice) {
@@ -1551,9 +1527,10 @@ final class ParakeetEngine: TranscriptionEngine {
             if dropped > 0 { sampleBuffer.removeFirst(min(dropped, sampleBuffer.count)) }
             sampleBuffer.append(contentsOf: samples.suffix(hardPendingSampleCap))
             levelSampleBuffer.append(samples)
-            // Native streaming already owns recognition history. Recovery is
-            // persisted independently, so a second unbounded PCM array is unused.
-            if !model.usesTrueStreaming { fullRecordingSamples.append(contentsOf: samples) }
+            if !model.usesTrueStreaming {
+                volumeGate.append(samples)
+                if retainsOriginalAudio { fullRecordingSamples.append(contentsOf: samples) }
+            }
             totalSampleCount += samples.count
             return dropped
         }
