@@ -249,6 +249,8 @@ protocol TranscriptionEngine: AnyObject {
     var isReady: Bool { get }
     var currentTranscript: String { get }
     var audioSamples: [Float] { get }
+    /// Whether late destination context must be applied before final decoding.
+    var requiresContextBeforeFinalization: Bool { get }
     /// Thread-safe snapshot of recent audio samples for level visualization.
     func levelSamples(count: Int) -> [Float]
     func prepare() async throws
@@ -271,6 +273,7 @@ protocol TranscriptionEngine: AnyObject {
 }
 
 extension TranscriptionEngine {
+    var requiresContextBeforeFinalization: Bool { false }
     func setSessionContextualVocabulary(_ terms: [String]) {}
     func updateSessionContextualVocabulary(_ terms: [String]) async {
         setSessionContextualVocabulary(terms)

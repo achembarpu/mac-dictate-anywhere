@@ -63,6 +63,7 @@ final class AppleSpeechEngine: TranscriptionEngine {
     #endif
 
     private(set) var isReady = false
+    var requiresContextBeforeFinalization: Bool { true }
     var currentTranscript: String {
         stateLock.withLock { transcript }
     }

@@ -85,6 +85,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
 
     var recoveryCapture: RecoveryAudioCapture?
     var isReady: Bool { !Settings.shared.resolvedAssemblyAIAPIKey.isEmpty }
+    var requiresContextBeforeFinalization: Bool { true }
     var currentTranscript: String { stateLock.withLock { transcript } }
     var audioSamples: [Float] { stateLock.withLock { levelSampleBuffer.samples } }
     private(set) var lastTranscriptionError: String?
