@@ -1029,6 +1029,12 @@ struct AIPostProcessingView: View {
                 )
             }
             DSDivider()
+            if let error = settings.openRouterAPIKeyError {
+                Text(error)
+                    .font(DS.Fonts.ui(12.5))
+                    .foregroundStyle(DS.Colors.destructive)
+                    .padding(.horizontal, DS.Spacing.rowHorizontal)
+            }
             fieldRow(label: "API Key Environment Variable (Optional)") {
                 DSTextField(
                     placeholder: OpenRouterPostProcessingService.defaultAPIKeyEnvironmentVariable,

@@ -1552,11 +1552,10 @@ final class AppState {
         if let transcriptDeliveryOverride {
             result = await transcriptDeliveryOverride(processedText)
         } else {
-            // A continued session with no usable original destination must not
-            // paste into History or an unrelated app that happens to be frontmost.
-            let canPaste = continuingEntryID == nil || (insertionTargetApp != nil
+            // Every session must still own its destination, including ordinary dictation.
+            let canPaste = insertionTargetApp != nil
                 && insertionTargetApp?.isTerminated == false
-                && NSWorkspace.shared.frontmostApplication?.processIdentifier == insertionTargetApp?.processIdentifier)
+                && NSWorkspace.shared.frontmostApplication?.processIdentifier == insertionTargetApp?.processIdentifier
             result = await textInserter.insertText(
                 processedText, context: insertionContext, style: insertionStyle,
                 knownTerms: settings.customVocabulary,

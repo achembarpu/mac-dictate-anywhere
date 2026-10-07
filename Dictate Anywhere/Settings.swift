@@ -31,7 +31,7 @@ private enum KeychainSecretStore {
         return value
     }
 
-    nonisolated static func write(_ value: String, service: String, account: String) {
+    nonisolated static func write(_ value: String, service: String, account: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -40,8 +40,8 @@ private enum KeychainSecretStore {
 
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedValue.isEmpty {
-            SecItemDelete(query as CFDictionary)
-            return
+            let status = SecItemDelete(query as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
         }
 
         let data = Data(trimmedValue.utf8)
@@ -50,8 +50,9 @@ private enum KeychainSecretStore {
         if updateStatus == errSecItemNotFound {
             var createQuery = query
             createQuery[kSecValueData as String] = data
-            SecItemAdd(createQuery as CFDictionary, nil)
+            return SecItemAdd(createQuery as CFDictionary, nil) == errSecSuccess
         }
+        return updateStatus == errSecSuccess
     }
 }
 
@@ -1398,12 +1399,19 @@ final class Settings {
 
     var openRouterAPIKey: String {
         didSet {
-            Self.storeOpenRouterAPIKey(openRouterAPIKey)
+            let saved = Self.storeOpenRouterAPIKey(openRouterAPIKey)
+            openRouterAPIKeyError = saved ? nil : OpenRouterCredentialPreferences.saveError
+            if saved { OpenRouterCredentialPreferences.removeLegacyKey(from: .standard) }
         }
     }
+    var openRouterAPIKeyError: String?
 
     var openRouterAPIKeyEnvironmentVariable: String {
         didSet {
+            openRouterAPIKeyEnvironmentVariable = OpenRouterCredentialPreferences.environmentName(
+                for: openRouterAPIKeyEnvironmentVariable,
+                storeKey: { openRouterAPIKey = $0 }
+            )
             UserDefaults.standard.set(
                 openRouterAPIKeyEnvironmentVariable,
                 forKey: Keys.openRouterAPIKeyEnvironmentVariable
@@ -1746,24 +1754,15 @@ final class Settings {
         ) ?? .disabled
         ollamaPostProcessingPrompt = defaults.string(forKey: Keys.ollamaPostProcessingPrompt)
             ?? Self.recommendedTranscriptCleanupPrompt
-        let storedOpenRouterAPIKey = Self.storedOpenRouterAPIKey()
-        openRouterAPIKey = storedOpenRouterAPIKey
+        let credentials = OpenRouterCredentialPreferences.migrate(
+            defaults: defaults, storedKey: Self.storedOpenRouterAPIKey(), writeKey: Self.storeOpenRouterAPIKey
+        )
+        openRouterAPIKey = credentials.apiKey
+        openRouterAPIKeyError = credentials.error
+        openRouterAPIKeyEnvironmentVariable = credentials.environmentName
         openRouterModel = defaults.string(forKey: Keys.openRouterModel) ?? ""
         openRouterPostProcessingPrompt = defaults.string(forKey: Keys.openRouterPostProcessingPrompt)
             ?? Self.recommendedTranscriptCleanupPrompt
-        let storedOpenRouterCredentialHint = defaults.string(forKey: Keys.openRouterAPIKeyEnvironmentVariable)
-            ?? OpenRouterPostProcessingService.defaultAPIKeyEnvironmentVariable
-        if storedOpenRouterAPIKey.isEmpty,
-           Self.looksLikeOpenRouterAPIKey(storedOpenRouterCredentialHint) {
-            openRouterAPIKey = storedOpenRouterCredentialHint
-            openRouterAPIKeyEnvironmentVariable = OpenRouterPostProcessingService.defaultAPIKeyEnvironmentVariable
-            defaults.set(
-                OpenRouterPostProcessingService.defaultAPIKeyEnvironmentVariable,
-                forKey: Keys.openRouterAPIKeyEnvironmentVariable
-            )
-        } else {
-            openRouterAPIKeyEnvironmentVariable = storedOpenRouterCredentialHint
-        }
         openAICompatibleBaseURL = defaults.string(forKey: Keys.openAICompatibleBaseURL)
             ?? OpenAICompatiblePostProcessingService.defaultBaseURL
         openAICompatibleModel = defaults.string(forKey: Keys.openAICompatibleModel) ?? ""
@@ -2369,7 +2368,7 @@ final class Settings {
         )
     }
 
-    private nonisolated static func storeOpenRouterAPIKey(_ value: String) {
+    private nonisolated static func storeOpenRouterAPIKey(_ value: String) -> Bool {
         KeychainSecretStore.write(
             value,
             service: openRouterAPIKeyKeychainService,
@@ -2396,9 +2395,7 @@ final class Settings {
         )
     }
 
-    private nonisolated static func looksLikeOpenRouterAPIKey(_ value: String) -> Bool {
-        value.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("sk-or-")
-    }
+
 }
 
 // MARK: - Notification Names
