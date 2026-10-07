@@ -1422,10 +1422,12 @@ final class Settings {
 
     var openRouterAPIKeyEnvironmentVariable: String {
         didSet {
-            openRouterAPIKeyEnvironmentVariable = OpenRouterCredentialPreferences.environmentName(
-                for: openRouterAPIKeyEnvironmentVariable,
-                storeKey: { openRouterAPIKey = $0 }
-            )
+            if OpenRouterCredentialPreferences.isKey(openRouterAPIKeyEnvironmentVariable) {
+                openRouterAPIKeyEnvironmentVariable = OpenRouterCredentialPreferences.environmentName(
+                    for: openRouterAPIKeyEnvironmentVariable,
+                    storeKey: { openRouterAPIKey = $0 }
+                )
+            }
             UserDefaults.standard.set(
                 openRouterAPIKeyEnvironmentVariable,
                 forKey: Keys.openRouterAPIKeyEnvironmentVariable
