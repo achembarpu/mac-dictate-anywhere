@@ -32,11 +32,14 @@ actor BatchTranscriptionSession {
         self.language = language
     }
 
-    static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager, language: Language?) async throws -> BatchTranscriptionSession {
-        if models.version == .v2 {
+    static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager, language: Language?,
+                         requiresWholeRecordingFinal: Bool) async throws -> BatchTranscriptionSession {
+        if models.version == .v2 || requiresWholeRecordingFinal {
             // The SDK batch path preserves v2 mel context and repairs gaps.
             // Its live overlap path drops clear speech in shifted-seam goldens.
-            return BatchTranscriptionSession(backend: .parakeetBatch(previewManager), vad: vad)
+            // Vocabulary uses a whole-recording final too, so its previews do
+            // not need a second overlap decoder whose result would be discarded.
+            return BatchTranscriptionSession(backend: .parakeetBatch(previewManager), vad: vad, language: language)
         }
         let overlapping = SlidingWindowAsrManager(config: .streaming.applying(language: language))
         try await overlapping.loadModels(models)
@@ -47,6 +50,11 @@ actor BatchTranscriptionSession {
 
     static func senseVoice(manager: SenseVoiceManager, vad: VadManager) -> BatchTranscriptionSession {
         BatchTranscriptionSession(backend: .senseVoice(manager), vad: vad)
+    }
+
+    var usesOverlapDecoder: Bool {
+        if case .parakeet = backend { return true }
+        return false
     }
 
     private func start() async throws {
@@ -164,7 +172,7 @@ actor BatchTranscriptionSession {
         }
     }
 
-    /// V2's batch decoder consumes the engine's already-retained original audio.
+    /// Whole-recording decoders consume the engine's retained original audio.
     /// Other backends have received every sample incrementally and ignore it.
     func finish(recordedSamples: [Float] = []) async throws -> String {
         let trace = PerfTrace.begin("stt.batchFinish", counts: ["retained_samples": samples.count])
@@ -172,7 +180,7 @@ actor BatchTranscriptionSession {
         switch backend {
         case .parakeetBatch(let manager):
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-            return try await manager.transcribe(recordedSamples, decoderState: &state).text
+            return try await manager.transcribe(recordedSamples, decoderState: &state, language: language).text
         case .parakeet(_, let overlapping):
             do {
                 let text = try await overlapping.finish()

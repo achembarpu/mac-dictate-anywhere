@@ -103,6 +103,70 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
         #endif
     }
 
+    func testVocabularyPreviewAvoidsDiscardedOverlapDecoder() async throws {
+        #if !PIPELINE_BENCHMARK
+        throw XCTSkip("Use tdt-vocabulary for production preview/finalization checks")
+        #else
+        let settings = Settings.shared
+        let saved = (settings.parakeetModelChoice, settings.transcriptPostProcessingMode,
+                     settings.customVocabulary, settings.selectedLanguage)
+        defer {
+            settings.parakeetModelChoice = saved.0; settings.transcriptPostProcessingMode = saved.1
+            settings.customVocabulary = saved.2; settings.selectedLanguage = saved.3
+        }
+        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
+        settings.selectedLanguage = .english
+        let fixture = try XCTUnwrap(GoldenSpeechFixture.all().first { $0.id == "golden-en-fleurs-2" })
+        let reader = try RecoveryAudioReader(url: fixture.audioURL)
+        var audio: [Float] = []
+        while let chunk = try reader.nextSamples() { audio.append(contentsOf: chunk) }
+        let terms = ["Chandra Shekhar Solanki"]
+        let versions: [(ParakeetModelChoice, AsrModelVersion)] = [
+            (.multilingual, .v3), (.multilingualUltra, .ultra), (.englishOnly, .v2), (.compactEnglish, .tdtCtc110m)
+        ]
+        let requested = ProcessInfo.processInfo.environment["PIPELINE_BENCHMARK_MODEL"] ?? "all"
+        var ran = 0
+        for (choice, version) in versions where requested == "all" || requested == choice.rawValue {
+            let engine = ParakeetEngine()
+            guard engine.checkModelOnDisk(for: choice) else { continue }
+            settings.parakeetModelChoice = choice
+            settings.customVocabulary = terms
+            try await engine.prepare()
+            try await engine.beginBatchReplayForTesting()
+            let overlap = await engine.batchReplayUsesOverlapDecoderForTesting()
+            XCTAssertFalse(overlap, "Vocabulary finalization must not start discarded overlap work")
+            let start = ContinuousClock.now
+            for offset in stride(from: 0, to: audio.count, by: 8_000) {
+                try await engine.replayBatchAudioForTesting(Array(audio[offset..<min(offset + 8_000, audio.count)]))
+            }
+            XCTAssertFalse(engine.currentTranscript.isEmpty, "Batch-only previews must stay visible")
+            let output = await engine.stopRecording()
+            let elapsed = BenchmarkStatistics.elapsedMilliseconds(from: start)
+            XCTAssertEqual(engine.capturedSampleCountsForTesting.retained, 0, "Stop releases retained PCM")
+            // The same accurate whole-recording decoder/CTC path is the reference.
+            let models = try await AsrModels.loadFromCache(version: version)
+            let manager = AsrManager(config: BatchTranscriptionPolicy.asrConfig)
+            try await manager.loadModels(models)
+            var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
+            let original = try await manager.transcribe(audio, decoderState: &state,
+                language: BatchTranscriptionPolicy.scriptLanguage(for: choice, selected: .english))
+            let vocabulary = try await PreparedTDTVocabulary.prepare(models: models, terms: terms, cachedCTCModels: nil)
+            let expected = try await vocabulary.rescore(original, samples: audio)
+            XCTAssertEqual(output, expected.trimmingCharacters(in: .whitespacesAndNewlines))
+            BenchmarkStatistics([elapsed]).report(component: "vocabulary_live_without_overlap",
+                details: "model=\(choice.rawValue) fixture=\(fixture.id) error=\(try fixture.errorRate(hypothesis: output))")
+            await manager.cleanup()
+            settings.customVocabulary = []
+            try await engine.beginBatchReplayForTesting()
+            let ordinaryOverlap = await engine.batchReplayUsesOverlapDecoderForTesting()
+            XCTAssertEqual(ordinaryOverlap, choice != .englishOnly)
+            await engine.cancel()
+            ran += 1
+        }
+        try XCTSkipUnless(ran > 0, "Install a selected TDT model and vocabulary assets")
+        #endif
+    }
+
     func testVocabularyPoliciesAndSharedHead() async throws {
         #if !PIPELINE_BENCHMARK
         throw XCTSkip("Use --only tdt-vocabulary for paired installed-model vocabulary checks")

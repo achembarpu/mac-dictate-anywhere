@@ -1044,7 +1044,7 @@ final class ParakeetEngine: TranscriptionEngine {
             do { try await prepareVocabulary(terms: vocabularyTerms, model: modelChoice) }
             catch { logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)") }
         }
-        try await asrCoordinator.resetSession(for: modelChoice, language: language)
+        try await asrCoordinator.resetSession(for: modelChoice, language: language, requiresWholeRecordingFinal: !vocabularyTerms.isEmpty)
         recordingModelChoice = modelChoice
         recordingScriptLanguage = language
         recordingVocabularyTerms = vocabularyTerms
@@ -1307,7 +1307,7 @@ final class ParakeetEngine: TranscriptionEngine {
         let vocabularyTerms = activeVocabularyTerms
         if model.supportsFluidAudioVocabulary { try await prepareVocabulary(terms: vocabularyTerms, model: model) }
         let language = scriptLanguage(for: model)
-        try await asrCoordinator.resetSession(for: model, language: language)
+        try await asrCoordinator.resetSession(for: model, language: language, requiresWholeRecordingFinal: !vocabularyTerms.isEmpty)
         recordingModelChoice = model
         recordingScriptLanguage = language
         recordingVocabularyTerms = vocabularyTerms
@@ -1318,6 +1318,10 @@ final class ParakeetEngine: TranscriptionEngine {
             volumeGate = AudioVolumeGate()
             retainsOriginalAudio = Self.needsOriginalAudio(model: model, vocabularyTerms: vocabularyTerms)
         }
+    }
+
+    func batchReplayUsesOverlapDecoderForTesting() async -> Bool {
+        await asrCoordinator.batchUsesOverlapDecoder()
     }
 
     func replayBatchAudioForTesting(_ samples: [Float]) async throws {
@@ -1933,7 +1937,7 @@ private actor AsrManagerCoordinator {
         }
     }
 
-    func resetSession(for modelChoice: ParakeetModelChoice, language: Language?) async throws {
+    func resetSession(for modelChoice: ParakeetModelChoice, language: Language?, requiresWholeRecordingFinal: Bool = false) async throws {
         guard isInitialized(for: modelChoice) else { throw TranscriptionError.engineNotReady }
         if !modelChoice.usesTrueStreaming {
             await cancelBatch()
@@ -1942,7 +1946,7 @@ private actor AsrManagerCoordinator {
                 batchSession = BatchTranscriptionSession.senseVoice(manager: senseVoiceManager, vad: batchVad)
             } else {
                 guard let manager, let models, let batchVad else { throw TranscriptionError.engineNotReady }
-                batchSession = try await BatchTranscriptionSession.parakeet(models: models, previewManager: manager, vad: batchVad, language: language)
+                batchSession = try await BatchTranscriptionSession.parakeet(models: models, previewManager: manager, vad: batchVad, language: language, requiresWholeRecordingFinal: requiresWholeRecordingFinal)
             }
             return
         }
@@ -1964,6 +1968,10 @@ private actor AsrManagerCoordinator {
     func appendBatchAudio(_ samples: [Float]) async throws {
         guard let batchSession else { throw TranscriptionError.engineNotReady }
         try await batchSession.append(samples)
+    }
+
+    func batchUsesOverlapDecoder() async -> Bool {
+        await batchSession?.usesOverlapDecoder ?? false
     }
 
     func batchPreview() async throws -> String {
