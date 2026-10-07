@@ -29,14 +29,14 @@ A native macOS app for voice dictation anywhere. Press and hold Fn (or a custom 
 - **Safer Cancellation** - Rebind or clear the cancel shortcut in Shortcuts. Optional one-second hold-to-cancel is enabled by default; a quick Escape tap keeps dictation running.
 - **Continue Cancelled Sessions** - Cancelled dictations are saved locally for 24 hours by default. Continue in History restores your words using the selected speech model and language, then restarts the microphone. Stop to insert one combined dictation into the original app, or copy it if that app is unavailable. Recover text saves words to History without recording or pasting.
 - **Local-First Speech Recognition** - FluidAudio and Apple Speech run on-device; AssemblyAI is available as an explicit cloud option
-- **26 Languages** - English, German, French, Spanish and 21 more European languages, plus Mandarin Chinese (Simplified) via the SenseVoice and Nemotron multilingual models (Nemotron multilingual requires Apple Silicon; SenseVoice also runs on Intel)
+- **Language-aware Model Choices** - Choose by language, download size, accuracy or live preview. Parakeet v3/Ultra cover 25 European languages including Maltese; SenseVoice offers Mandarin with English, and multilingual Nemotron adds Norwegian on Apple Silicon.
 - **Hands-Free Mode** - Tap to start, tap again to stop
 - **Live Preview** - See your transcription in real-time with animated waveform
 - **Filler Word Removal** - Automatically removes "um", "uh", and other filler words
 - **Custom Vocabulary** - Preserve product names, people names, and domain-specific terms during transcript cleanup
 - **Context Awareness** - Detect the active app or supported website, read a bounded snapshot around the cursor, and apply separate styles for email, work chat, personal chat, and other apps
 - **S1-mini by Superwhisper** - Download or delete a compact English transcript normalizer and run it fully on-device without a separate model server
-- **Ollama Integration** - Connect to a local or remote Ollama server, refresh installed models, and manage recommended local models from the app
+- **Ollama Integration** - Connect to a local or remote Ollama server and choose an installed cleanup model by its exact ID
 - **OpenRouter Integration** - Use hosted models through OpenRouter with model search, structured-output-aware selection, and secure API key storage
 - **AssemblyAI Dictation** - Optional cloud speech model with transcription, self-correction cleanup, keyterms, context, and output instructions in one request; installed Apple Speech assets provide an on-device live preview while recording
 - **Optional Transcript Cleanup** - Post-process the final transcript with S1-mini by Superwhisper, Apple Intelligence, Ollama, or OpenRouter for punctuation, grammar, formatting, and wording cleanup
@@ -68,8 +68,8 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 
 | Provider | Runs Where | Best For | Benefits |
 |----------|------------|----------|----------|
-| None | Nowhere | Fastest raw dictation | Uses the local FluidAudio transcript as-is |
-| FluidAudio Vocabulary | On-device | Lightweight terminology correction | Applies vocabulary rescoring to Parakeet TDT final transcripts without an LLM |
+| Off | On-device filler removal if enabled | Raw dictation | Retains the speech result after optional filler removal |
+| Vocabulary correction only | On-device | Domain terms without a cleanup LLM | Parakeet TDT rescoring or native Nemotron/Apple Speech vocabulary hints, where available |
 | Apple Intelligence | On-device | Native macOS cleanup | On-device cleanup on supported Macs |
 | S1-mini by Superwhisper | On-device | Compact English transcript normalization | One-click 462 MB download, fixed style/structure/context controls, and no separate server |
 | Ollama | Local or self-hosted server | Privacy-first LLM cleanup | Local model choice, optional reasoning controls, and in-app model management for local Ollama setups |
@@ -89,15 +89,12 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 
 Use Ollama when you want transcript cleanup with a local model or your own hosted Ollama server.
 
-Recommended models:
-
-- `gpt-oss:120b-cloud` for the best cleanup quality when you have access to a large hosted/self-hosted Ollama-backed model
-- `mistral-nemo:12b` as the recommended local model when you want a much lighter on-device setup
+Choose an installed model by its exact **Model ID**. Ollama is the provider;
+cleanup quality depends on the model and prompt you configure. This app does
+not bundle an Ollama cleanup model.
 
 - Runs cleanup against the configured Ollama server URL, with `http://127.0.0.1:11434` as the default local address
 - Lets you enter any installed model manually or select from detected installed models
-- Shows recommended models in the app, including size guidance and quality/latency tradeoffs
-- Can download recommended models directly from the app when the Ollama CLI is installed and the server is local
 - Can delete installed models from the app through the Ollama CLI
 - Exposes reasoning controls for models that report Ollama thinking support
 - Supports provider-specific cleanup prompts and shared custom vocabulary
@@ -172,6 +169,11 @@ Getting started with OpenRouter:
 
 ## Supported Languages
 
+Coverage depends on the selected model and hardware. Norwegian requires
+multilingual Nemotron on Apple Silicon; Maltese is available through Parakeet
+v3/Ultra. The model chooser shows each checkpoint’s supported languages and
+download size.
+
 | Germanic | Romance | Slavic | Other | Sino-Tibetan |
 |----------|---------|--------|-------|--------------|
 | English | Spanish | Polish | Hungarian | Mandarin Chinese (Simplified) |
@@ -180,7 +182,7 @@ Getting started with OpenRouter:
 | Swedish | Portuguese | Slovenian | Latvian | |
 | Danish | Romanian | Croatian | Lithuanian | |
 | Norwegian | | Bulgarian | Estonian | |
-| | | Ukrainian | | |
+| | | Ukrainian | Maltese | |
 | | | Russian | | |
 
 ## Building from Source

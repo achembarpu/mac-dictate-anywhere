@@ -447,6 +447,8 @@ final class AppleSpeechSession: @unchecked Sendable, AppleSpeechSessionProtocol 
             throw TranscriptionError.appleSpeechLanguageUnsupported
         }
 
+        // Apple's preset supplies volatile previews plus authoritative final
+        // results. Keep its decoder/compute policy under framework control.
         let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
         if let installationRequest = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             guard allowsAssetInstallation else {
