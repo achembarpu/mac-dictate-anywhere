@@ -1637,17 +1637,14 @@ final class AppState {
         clearEndOfUtteranceHandler(for: engine)
         sessionHotkeyMode = nil
 
-        // AssemblyAI already returns the user-selected polished or verbatim
-        // result. Local engines retain the existing filler/live-preview path.
+        // Engines own decoder fallback. A provisional preview can be longer
+        // because it contains repetitions or words rejected by final decoding.
         let normalizeTrace = PerfTrace.begin("transcript.normalize")
         let finalText: String
         if usesAssemblyAI {
             finalText = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
-            let cleaned = settings.removeFillerWords(from: transcript).trimmingCharacters(in: .whitespacesAndNewlines)
-            let liveFallback = settings.removeFillerWords(from: currentTranscript).trimmingCharacters(
-                in: .whitespacesAndNewlines)
-            finalText = liveFallback.count > cleaned.count ? liveFallback : cleaned
+            finalText = settings.removeFillerWords(from: transcript).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         normalizeTrace.end()
 
