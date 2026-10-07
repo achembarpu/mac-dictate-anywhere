@@ -230,6 +230,11 @@ actor S1MiniInferenceEngine {
         warmedModelPath = nil
     }
 
+    func isPrepared(for modelURL: URL) -> Bool {
+        model != nil && inferenceContext != nil
+            && warmedModelPath == modelURL.standardizedFileURL.path
+    }
+
     /// Exercise context creation, prompt evaluation and generation, not just
     /// weight loading. Retain the allocations but clear synthetic request data.
     func prewarm(from url: URL) throws {
@@ -658,6 +663,10 @@ enum S1MiniPostProcessingService {
         let trace = PerfTrace.begin("cleanup.unload")
         defer { trace.end() }
         await S1MiniInferenceEngine.shared.unload()
+    }
+
+    static func isPrepared(modelURL: URL) async -> Bool {
+        await S1MiniInferenceEngine.shared.isPrepared(for: modelURL)
     }
 
     /// Loads the model outside the dictation path so the first cleanup is

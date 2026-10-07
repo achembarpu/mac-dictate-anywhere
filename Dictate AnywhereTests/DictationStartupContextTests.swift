@@ -157,6 +157,7 @@ final class DictationStartupContextTests: XCTestCase {
         let first = Task { await app.prepareCleanupEngineIfNeeded() }
         await fulfillment(of: [started], timeout: 5)
         XCTAssertTrue(app.isPreparingCleanupEngine)
+        XCTAssertEqual(app.cleanupReadiness, .preparing)
         let second = Task { await app.prepareCleanupEngineIfNeeded() }
         let stopping = Task { await app.shutdown() }
         await Task.yield()
@@ -209,6 +210,91 @@ final class DictationStartupContextTests: XCTestCase {
         XCTAssertEqual(AppState.appleCleanupReadiness(availability: .unavailable(.modelNotReady), isPrepared: true), .preparing)
         XCTAssertEqual(AppState.appleCleanupReadiness(availability: .available, isPrepared: false), .available)
         XCTAssertEqual(AppState.appleCleanupReadiness(availability: .available, isPrepared: true), .ready)
+    }
+
+    func testFirstUseRuntimeReadinessRespectsOptOutAndInvalidatesLostContext() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.selectedLanguage = .english
+        settings.prewarmEnginesAtStartup = false
+        var preparations = 0
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: { _ in
+            preparations += 1
+            return true
+        })
+        let key = app.cleanupPreparationKey
+        let installationStatus = app.cleanupReadiness
+        XCTAssertFalse(installationStatus.isReady)
+        app.recordS1MiniRuntimeReadiness(false, for: key)
+        XCTAssertEqual(app.cleanupReadiness, installationStatus, "A transcript fallback must not claim runtime preparation")
+        app.recordS1MiniRuntimeReadiness(true, for: key)
+        XCTAssertEqual(app.cleanupReadiness, .ready)
+        app.status = .recording
+        XCTAssertEqual(app.cleanupReadiness, .ready)
+        app.status = .idle
+        await app.prepareCleanupEngineIfNeeded(force: true)
+        XCTAssertEqual(preparations, 0, "A resident model does not need synthetic preparation after first use")
+        app.recordS1MiniRuntimeReadiness(false, for: key)
+        XCTAssertEqual(app.cleanupReadiness, installationStatus, "Discarding a failed inference context clears Ready")
+        await app.shutdown()
+        app.recordS1MiniRuntimeReadiness(true, for: key)
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+    }
+
+    func testFirstUseReadinessCannotAttachToAChangedCleanupSelection() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.selectedLanguage = .english
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil })
+        let oldKey = app.cleanupPreparationKey
+        settings.selectedLanguage = .german
+        app.recordS1MiniRuntimeReadiness(true, for: oldKey)
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        guard case .unavailable = app.cleanupReadiness else { return XCTFail("Unsupported cleanup language must remain unavailable") }
+        settings.selectedLanguage = .english
+        settings.transcriptPostProcessingMode = .none
+        app.recordS1MiniRuntimeReadiness(true, for: oldKey)
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        await app.shutdown()
+    }
+
+    func testCancelledFirstUseCannotPublishReadyButCanClearLostContext() async {
+        Settings.shared.engineChoice = .parakeet
+        Settings.shared.transcriptPostProcessingMode = .s1Mini
+        Settings.shared.selectedLanguage = .english
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil })
+        let key = app.cleanupPreparationKey
+        await Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            app.recordS1MiniRuntimeReadiness(true, for: key)
+        }.value
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        app.recordS1MiniRuntimeReadiness(true, for: key)
+        await Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            app.recordS1MiniRuntimeReadiness(false, for: key)
+        }.value
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        await app.shutdown()
+    }
+
+    func testS1ReadinessUsesTheActiveAppleSpeechLanguage() async {
+        let settings = Settings.shared
+        let previousAppleLanguage = settings.appleSpeechLanguage
+        defer { settings.appleSpeechLanguage = previousAppleLanguage }
+        settings.engineChoice = .appleSpeech
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.selectedLanguage = .german
+        settings.appleSpeechLanguage = .english
+        let app = app(engine: StartupContextEngine(), capture: { _ in nil }, cleanupPreparation: { _ in true })
+        await app.prepareCleanupEngineIfNeeded(force: true)
+        XCTAssertEqual(app.cleanupReadiness, .ready, "The inactive Parakeet language must not block English cleanup")
+        settings.appleSpeechLanguage = .german
+        guard case .unavailable = app.cleanupReadiness else { return XCTFail("The active unsupported language must override cached readiness") }
+        XCTAssertFalse(app.canPrepareCleanupEngine)
+        await app.shutdown()
     }
 
     func testRemotePreparationShowsConfiguredWithoutClaimingLocalReadiness() async {

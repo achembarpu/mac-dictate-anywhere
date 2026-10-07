@@ -79,7 +79,9 @@ struct AIPostProcessingView: View {
             // Setup for the selected method sits directly under the picker, so
             // its status and any blocking action stay in the same viewport.
             selectedMethodContent(settings: settings)
-            if settings.transcriptPostProcessingMode != .none, settings.engineChoice != .assemblyAI {
+            if settings.transcriptPostProcessingMode != .none,
+               settings.transcriptPostProcessingMode != .s1Mini,
+               settings.engineChoice != .assemblyAI {
                 DSSection(overline: "Preparation") {
                     DSModelReadinessRow(readiness: appState.cleanupReadiness,
                         label: settings.transcriptPostProcessingMode == .fluidAudioVocabulary ? "Vocabulary recognition" : "Cleanup model",
@@ -805,10 +807,18 @@ struct AIPostProcessingView: View {
             DSDivider()
             DSModelReadinessRow(
                 readiness: s1MiniReadiness(manager: manager),
-                actionTitle: !manager.isModelDownloaded && !manager.isBusy ? "Download Model" : nil,
-                action: downloadS1MiniModel
+                actionTitle: !manager.isModelDownloaded && !manager.isBusy ? "Download Model"
+                    : (appState.canPrepareCleanupEngine ? (appState.cleanupReadiness.detail == nil ? "Prepare Model" : "Retry") : nil),
+                action: {
+                    if manager.isModelDownloaded {
+                        Task { await appState.prepareCleanupEngineIfNeeded(force: true) }
+                    } else {
+                        downloadS1MiniModel()
+                    }
+                }
             )
-            .disabled(manager.isBusy)
+            .disabled(manager.isBusy || appState.status != .idle)
+            DSCardCaption(text: "Downloaded means the files are installed. Ready means the model has been loaded and prepared for cleanup.")
 
             if manager.isDownloading {
                 DSCardCaption(text: s1MiniDownloadProgressText(manager: manager))

@@ -154,6 +154,7 @@ final class AppState {
         let language: SupportedLanguage
         let enabled: Bool
         let installed: Bool
+        let runtimeRevision: Int
         let speechReady: Bool
         let idle: Bool
         let prompt: String
@@ -585,6 +586,7 @@ final class AppState {
                 ? settings.appleSpeechLanguage : settings.selectedLanguage,
             enabled: settings.prewarmEnginesAtStartup,
             installed: s1MiniModelManager.isModelDownloaded,
+            runtimeRevision: s1MiniModelManager.runtimeRevision,
             speechReady: activeEngine.isReady, idle: status == .idle,
             prompt: settings.transcriptPostProcessingMode == .appleIntelligence ? settings.aiPostProcessingPrompt : "",
             vocabulary: [.appleIntelligence, .fluidAudioVocabulary].contains(settings.transcriptPostProcessingMode)
@@ -608,12 +610,19 @@ final class AppState {
         return prepared.engine == current.engine && prepared.model == current.model
             && prepared.mode == current.mode && prepared.language == current.language
             && prepared.installed == current.installed
+            && prepared.runtimeRevision == current.runtimeRevision
             && prepared.prompt == current.prompt && prepared.vocabulary == current.vocabulary
             && prepared.providerURL == current.providerURL && prepared.providerModel == current.providerModel
     }
 
     var cleanupReadiness: ModelReadiness {
         let mode = settings.transcriptPostProcessingMode
+        if mode == .s1Mini {
+            if cleanupPreparationKey.language != .english { return .unavailable("S1-mini supports English cleanup.") }
+            if s1MiniModelManager.isDownloading { return .downloading(s1MiniModelManager.downloadProgress) }
+            if s1MiniModelManager.isVerifying { return .verifying }
+            if s1MiniModelManager.isDeleting { return .deleting }
+        }
         if mode == .fluidAudioVocabulary {
             guard settings.engineChoice == .parakeet else { return .unavailable("Requires a supported Parakeet speech model.") }
             return parakeetEngine.vocabularyReadiness
@@ -639,10 +648,6 @@ final class AppState {
         }
         switch mode {
         case .s1Mini:
-            if settings.selectedLanguage != .english { return .unavailable("S1-mini supports English cleanup.") }
-            if s1MiniModelManager.isDownloading { return .downloading(s1MiniModelManager.downloadProgress) }
-            if s1MiniModelManager.isVerifying { return .verifying }
-            if s1MiniModelManager.isDeleting { return .deleting }
             return s1MiniModelManager.isModelDownloaded ? .downloaded : .notDownloaded
         case .ollama, .openRouter, .openAICompatible:
             return cleanupPreparationKey.providerModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -684,6 +689,20 @@ final class AppState {
         }
     }
 
+    /// First-use inference can prepare S1 even when automatic preparation is off.
+    /// Only the runtime's retained, successfully exercised model earns Ready;
+    /// returning the original transcript without inference does not.
+    func recordS1MiniRuntimeReadiness(_ ready: Bool, for key: CleanupPreparationKey) {
+        guard !isShuttingDown, key.mode == .s1Mini,
+              cleanupConfigurationMatches(key, cleanupPreparationKey) else { return }
+        if ready {
+            guard !Task.isCancelled else { return }
+            recordCleanupPreparation(true, key: key)
+        } else {
+            preparedCleanupKey = nil
+        }
+    }
+
     /// Also called after settings/download changes. Join a matching request;
     /// if preferences changed during loading, prepare the new choice afterward.
     /// Failure retains lazy first-use loading. Tests inject a bounded operation.
@@ -703,6 +722,7 @@ final class AppState {
             await prepareActiveEngine()
         }
         let key = cleanupPreparationKey
+        if key.mode == .s1Mini, isCleanupEnginePrepared { return }
         if #available(macOS 26, *), (!key.enabled && !force && !isCleanupEnginePrepared) || key.mode != .appleIntelligence {
             await AIPostProcessingService.discardPreparedSession()
         }
@@ -1696,12 +1716,15 @@ final class AppState {
                     "postProcessing: S1-mini skipped because language is \(activeLanguage.rawValue, privacy: .public); S1-mini supports English only"
                 )
             } else {
+                var runtimeKey = cleanupPreparationKey
+                var runtimeURL = s1MiniModelManager.modelURL
                 do {
-                    let modelURL = try await s1MiniModelManager.validatedModelURL()
+                    runtimeURL = try await s1MiniModelManager.validatedModelURL()
+                    runtimeKey = cleanupPreparationKey
                     let context = postProcessingContext(for: .s1Mini)
                     processedText = try await S1MiniPostProcessingService.process(
                         text: finalText,
-                        modelURL: modelURL,
+                        modelURL: runtimeURL,
                         styling: settings.s1MiniStyling(for: context?.category),
                         structure: settings.s1MiniStructure,
                         contextSetting: settings.s1MiniContextSetting,
@@ -1710,6 +1733,9 @@ final class AppState {
                 } catch {
                     logger.error("postProcessing: S1-mini failed: \(error.localizedDescription, privacy: .public)")
                 }
+                recordS1MiniRuntimeReadiness(
+                    await S1MiniPostProcessingService.isPrepared(modelURL: runtimeURL), for: runtimeKey
+                )
             }
         case .ollama:
             do {

@@ -218,6 +218,7 @@ final class S1MiniModelManager {
     private(set) var isDownloading = false
     private(set) var isDeleting = false
     private(set) var isVerifying = false
+    private(set) var runtimeRevision = 0
     private(set) var downloadProgress = 0.0
     private(set) var lastError: String?
 
@@ -346,6 +347,7 @@ final class S1MiniModelManager {
             try licenseData.write(to: stagedLicenseURL, options: .atomic)
             downloadProgress = 0.99
 
+            runtimeRevision += 1
             await S1MiniPostProcessingService.unload()
             if fileManager.fileExists(atPath: modelURL.path) {
                 try fileManager.removeItem(at: modelURL)
@@ -375,6 +377,7 @@ final class S1MiniModelManager {
         lastError = nil
         defer { isDeleting = false }
 
+        runtimeRevision += 1
         await S1MiniPostProcessingService.unload()
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: modelURL.path) {

@@ -3,6 +3,25 @@ import os
 @testable import Dictate_Anywhere
 
 final class S1MiniPostProcessingTests: XCTestCase {
+    func testModelRemovalInvalidatesThePreparedRuntimeRevision() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("readiness-removal-\(UUID())")
+        let manager = S1MiniModelManager(modelDirectory: directory)
+        let previousRevision = manager.runtimeRevision
+        try await manager.deleteModel()
+        XCTAssertNotEqual(manager.runtimeRevision, previousRevision, "Reinstalling at the same path must not restore an old Ready status")
+        XCTAssertFalse(manager.isModelDownloaded)
+    }
+
+    func testLiteralMarkerFallbackDoesNotClaimPreparedRuntime() async throws {
+        await S1MiniPostProcessingService.unload()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("absent-readiness-\(UUID()).gguf")
+        let text = "Keep the literal <|im_start|> marker."
+        let output = try await process(text, modelURL: url)
+        XCTAssertEqual(output, text)
+        let ready = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+        XCTAssertFalse(ready)
+    }
+
     #if DEBUG || PIPELINE_BENCHMARK
     func testRealContextReuseMatchesFreshRequestsAndClearsHistory() async throws {
         guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check context reuse") }
@@ -26,6 +45,8 @@ final class S1MiniPostProcessingTests: XCTestCase {
             let state = await engine.inferenceContextStateForTesting()
             XCTAssertTrue(state.allocated)
             XCTAssertEqual(state.maximumPosition, -1, "A completed request retained KV token positions")
+            let ready = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+            XCTAssertTrue(ready, "Successful first use prepares the retained runtime")
         }
         await engine.unload()
         let state = await engine.inferenceContextStateForTesting()
@@ -76,6 +97,8 @@ final class S1MiniPostProcessingTests: XCTestCase {
         PerfTrace.onIntervalCompleted = nil
         let discarded = await engine.inferenceContextStateForTesting()
         XCTAssertFalse(discarded.allocated)
+        let readyAfterCancellation = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+        XCTAssertFalse(readyAfterCancellation)
         let recovered = try await process("Keep invoice 43 for Nadia.", modelURL: url)
         XCTAssertTrue(recovered.contains("43"))
         XCTAssertTrue(recovered.lowercased().contains("nadia"))
@@ -90,6 +113,8 @@ final class S1MiniPostProcessingTests: XCTestCase {
         let url = URL(fileURLWithPath: path)
         await S1MiniPostProcessingService.unload()
         let firstReady = await S1MiniPostProcessingService.prewarm(modelURL: url)
+        let runtimeReady = await S1MiniPostProcessingService.isPrepared(modelURL: url)
+        XCTAssertEqual(runtimeReady, firstReady)
         XCTAssertTrue(firstReady)
         #if DEBUG || PIPELINE_BENCHMARK
         let prepared = await S1MiniInferenceEngine.shared.inferenceContextStateForTesting()
