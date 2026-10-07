@@ -44,6 +44,18 @@ final class TimedRequestCacheTests: XCTestCase {
         XCTAssertEqual(calls.withLock { $0 }, 1)
     }
 
+    func testFailedForcedRefreshDiscardsOldSnapshotAndRetries() async throws {
+        let cache = TimedRequestCache<String, Int>()
+        let initial = try await cache.value(for: "model") { 1 }
+        XCTAssertEqual(initial, 1)
+        do {
+            _ = try await cache.value(for: "model", refresh: true) { throw URLError(.cannotConnectToHost) }
+            XCTFail("Refresh failure must propagate")
+        } catch let error as URLError { XCTAssertEqual(error.code, .cannotConnectToHost) }
+        let retry = try await cache.value(for: "model") { 2 }
+        XCTAssertEqual(retry, 2, "A failed explicit refresh must not serve the old snapshot")
+    }
+
     func testInvalidationRejectsNonCooperativeOldLoad() async throws {
         let started = expectation(description: "old loader started")
         let continuation = OSAllocatedUnfairLock<CheckedContinuation<Int, Never>?>(initialState: nil)

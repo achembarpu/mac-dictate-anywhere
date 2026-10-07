@@ -78,13 +78,20 @@ final class CleanupProviderContractTests: XCTestCase {
             let count = calls.withLock { $0 += 1; return $0 }
             return count == 1 ? (503, Data()) : (200, Data(#"{"data":[{"id":"model"}]}"#.utf8))
         } }
-        let cache = TimedRequestCache<OpenAICompatiblePostProcessingService.DiscoveryKey, [String]>(lifetime: .zero)
+        let clock = OSAllocatedUnfairLock(initialState: ContinuousClock.now)
+        let cache = TimedRequestCache<OpenAICompatiblePostProcessingService.DiscoveryKey, [String]>(
+            lifetime: .seconds(60), now: { clock.withLock { $0 } })
         var readiness: [Bool] = []
         for _ in 0..<3 {
             readiness.append(await OpenAICompatiblePostProcessingService.prewarm(baseURL: "http://cleanup.test", model: "model",
                 apiKey: "", session: session, cache: cache))
         }
         XCTAssertEqual(readiness, [false, true, true])
+        XCTAssertEqual(calls.withLock { $0 }, 2, "Failure must retry while success remains fresh")
+        clock.withLock { $0 = $0.advanced(by: .seconds(61)) }
+        let expired = await OpenAICompatiblePostProcessingService.prewarm(baseURL: "http://cleanup.test", model: "model",
+            apiKey: "", session: session, cache: cache)
+        XCTAssertTrue(expired)
         XCTAssertEqual(calls.withLock { $0 }, 3)
     }
 
@@ -148,7 +155,9 @@ final class CleanupProviderContractTests: XCTestCase {
             return (200, Data((fail.withLock { $0 } ? #"{"done":false}"# : #"{"done":true}"#).utf8))
         } }
         let details = TimedRequestCache<OllamaPostProcessingService.DetailsKey, OllamaModelDetails>()
-        let preloads = TimedRequestCache<OllamaPostProcessingService.PreloadKey, Bool>(lifetime: .zero)
+        let clock = OSAllocatedUnfairLock(initialState: ContinuousClock.now)
+        let preloads = TimedRequestCache<OllamaPostProcessingService.PreloadKey, Bool>(
+            lifetime: .seconds(60), now: { clock.withLock { $0 } })
         for _ in 0..<2 {
             let ready = await OllamaPostProcessingService.prewarm(baseURL: "http://cleanup.test", model: "model",
                 session: session, detailsCache: details, preloadCache: preloads)
@@ -160,6 +169,11 @@ final class CleanupProviderContractTests: XCTestCase {
                 session: session, detailsCache: details, preloadCache: preloads)
             XCTAssertTrue(ready)
         }
+        XCTAssertEqual(calls.withLock { $0 }, 3, "Failed preload retries; successful residency is shared")
+        clock.withLock { $0 = $0.advanced(by: .seconds(61)) }
+        let expired = await OllamaPostProcessingService.prewarm(baseURL: "http://cleanup.test", model: "model",
+            session: session, detailsCache: details, preloadCache: preloads)
+        XCTAssertTrue(expired)
         XCTAssertEqual(calls.withLock { $0 }, 4)
     }
 
