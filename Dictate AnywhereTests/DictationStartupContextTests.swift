@@ -478,6 +478,41 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testAppleLanguageFallbackResolvesBeforeIndependentCleanupEligibility() async {
+        let settings = Settings.shared
+        let savedAppleLanguage = settings.appleSpeechLanguage
+        defer { settings.appleSpeechLanguage = savedAppleLanguage }
+        settings.engineChoice = .appleSpeech
+        settings.appleSpeechLanguage = .german
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.prewarmEnginesAtStartup = true
+        let engine = StartupContextEngine()
+        engine.isReady = false
+        var cleanupCalls = 0
+        var assetSnapshots = 0
+        let app = AppState(
+            permissions: Permissions(statusProvider: { (true, false) }),
+            recoveryStore: DictationRecoveryStore(directory: directory),
+            engine: engine,
+            appleSpeechAssetSnapshot: {
+                assetSnapshots += 1
+                return ([.english], [])
+            },
+            cleanupModelPreparation: { _ in
+                cleanupCalls += 1
+                XCTAssertEqual(settings.appleSpeechLanguage, .english)
+                return true
+            }
+        )
+        await app.prepareSelectedEngines()
+        XCTAssertEqual(settings.appleSpeechLanguage, .english)
+        XCTAssertEqual(cleanupCalls, 1, "English-only cleanup must see the resolved speech language")
+        XCTAssertEqual(assetSnapshots, 1, "Resolve configuration once before loading both engines")
+        XCTAssertEqual(engine.prepareCount, 1)
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        await app.shutdown()
+    }
+
     func testVocabularyPreparationWaitsForSpeechAndOptOutDoesNotLoadCleanup() async {
         let settings = Settings.shared
         settings.engineChoice = .parakeet

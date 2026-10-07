@@ -824,17 +824,26 @@ final class AppState {
     /// loads. Vocabulary preparation needs the selected speech weights resident.
     func prepareSelectedEngines(prewarmModel: Bool = true) async {
         guard !isShuttingDown, !Task.isCancelled else { return }
-        if !prewarmModel || settings.transcriptPostProcessingMode == .fluidAudioVocabulary {
-            await prepareActiveEngine(prewarmModel: prewarmModel)
-            if prewarmModel, !Task.isCancelled { await prepareCleanupEngineIfNeeded() }
+        // Configuration may select an available Apple Speech language. Resolve
+        // that fallback before cleanup evaluates its language/model eligibility.
+        await prepareActiveEngine(prewarmModel: false)
+        guard prewarmModel, !isShuttingDown, !Task.isCancelled else { return }
+        let resolvedConfiguration = enginePreparationKey(prewarmModel: true)
+        if settings.transcriptPostProcessingMode == .fluidAudioVocabulary {
+            await prepareActiveEngine(prewarmModel: true, resolvedConfiguration: resolvedConfiguration)
+            if !Task.isCancelled { await prepareCleanupEngineIfNeeded() }
             return
         }
-        async let speech: Void = prepareActiveEngine(prewarmModel: prewarmModel)
+        async let speech: Void = prepareActiveEngine(prewarmModel: true, resolvedConfiguration: resolvedConfiguration)
         async let cleanup: Void = prepareCleanupEngineIfNeeded()
         _ = await (speech, cleanup)
     }
 
     func prepareActiveEngine(prewarmModel: Bool = true) async {
+        await prepareActiveEngine(prewarmModel: prewarmModel, resolvedConfiguration: nil)
+    }
+
+    private func prepareActiveEngine(prewarmModel: Bool, resolvedConfiguration: EnginePreparationKey?) async {
         defer { rearmResolvedBlockingAttentionIssues() }
         while let inFlight = enginePreparation {
             await inFlight.task.value
@@ -849,7 +858,7 @@ final class AppState {
         let id = UUID()
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performPrepareActiveEngine(prewarmModel: prewarmModel)
+            await self.performPrepareActiveEngine(prewarmModel: prewarmModel, resolvedConfiguration: resolvedConfiguration)
         }
         enginePreparation = EnginePreparation(
             id: id, key: enginePreparationKey(prewarmModel: prewarmModel), task: task
@@ -870,7 +879,7 @@ final class AppState {
         )
     }
 
-    private func performPrepareActiveEngine(prewarmModel: Bool) async {
+    private func performPrepareActiveEngine(prewarmModel: Bool, resolvedConfiguration: EnginePreparationKey?) async {
         let trace = PerfTrace.begin("stt.prepare")
         defer { trace.end() }
         guard !isShuttingDown else { return }
@@ -879,34 +888,10 @@ final class AppState {
         if case .processing = status { return }
         if case .error = status { status = .idle }
 
-        switch settings.engineChoice {
-        case .parakeet:
-            // Auto-default: if the user hasn't explicitly chosen an engine and
-            // a speech model is downloaded, ensure FluidAudio is selected.
-            await parakeetEngine.recheckAllModelsOnDisk()
-            guard !isShuttingDown else { return }
-            await parakeetEngine.handleSelectedModelChange()
-            guard !isShuttingDown else { return }
-            let hasSpeechModel = parakeetEngine.checkAnyModelOnDisk()
-            if !settings.userHasChosenEngine, hasSpeechModel {
-                settings.engineChoice = .parakeet
-            }
-            if hasSpeechModel {
-                settings.legacyAppleSpeechMigrationPending = false
-            }
-        case .appleSpeech:
-            if !appleSpeechAssetsRefreshedDuringStartup {
-                await refreshAppleSpeechAssetState()
-            }
-            guard !isShuttingDown else { return }
-            if !appleSpeechSupportedLanguages.contains(settings.appleSpeechLanguage),
-               let fallback = appleSpeechSupportedLanguages.first {
-                settings.appleSpeechLanguage = fallback
-            }
-            settings.legacyAppleSpeechMigrationPending = false
-        case .assemblyAI:
-            settings.legacyAppleSpeechMigrationPending = false
+        if resolvedConfiguration != enginePreparationKey(prewarmModel: prewarmModel) {
+            await resolveActiveEngineConfiguration()
         }
+        guard !isShuttingDown else { return }
 
         let ready = activeEngine.isReady
         logger.info("prepareActiveEngine: activeEngine.isReady=\(ready, privacy: .public), willCallPrepare=\(!ready && prewarmModel, privacy: .public)")
@@ -945,6 +930,38 @@ final class AppState {
             guard !isShuttingDown else { return }
         }
         isPreparingEngine = false
+    }
+
+    private func resolveActiveEngineConfiguration() async {
+        switch settings.engineChoice {
+        case .parakeet:
+            // Auto-default: if the user hasn't explicitly chosen an engine and
+            // a speech model is downloaded, ensure FluidAudio is selected.
+            await parakeetEngine.recheckAllModelsOnDisk()
+            guard !isShuttingDown else { return }
+            await parakeetEngine.handleSelectedModelChange()
+            guard !isShuttingDown else { return }
+            let hasSpeechModel = parakeetEngine.checkAnyModelOnDisk()
+            if !settings.userHasChosenEngine, hasSpeechModel {
+                settings.engineChoice = .parakeet
+            }
+            if hasSpeechModel {
+                settings.legacyAppleSpeechMigrationPending = false
+            }
+        case .appleSpeech:
+            if !appleSpeechAssetsRefreshedDuringStartup {
+                await refreshAppleSpeechAssetState()
+            }
+            guard !isShuttingDown else { return }
+            if !appleSpeechSupportedLanguages.contains(settings.appleSpeechLanguage),
+               let fallback = appleSpeechSupportedLanguages.first {
+                settings.appleSpeechLanguage = fallback
+            }
+            settings.legacyAppleSpeechMigrationPending = false
+        case .assemblyAI:
+            settings.legacyAppleSpeechMigrationPending = false
+        }
+
     }
 
     func handleParakeetModelSelectionChange(userInitiated: Bool, prewarmModel: Bool = true) async {
