@@ -1683,11 +1683,9 @@ final class AppState {
         case .none:
             break
         case .fluidAudioVocabulary:
-            if settings.parakeetModelChoice.usesTrueStreaming {
-                logger.warning(
-                    "postProcessing: FluidAudio Vocabulary is not available for true streaming model \(self.settings.parakeetModelChoice.rawValue, privacy: .public)"
-                )
-            }
+            // Vocabulary is already applied during native Nemotron decoding
+            // or the TDT final pass; neither needs another cleanup operation.
+            break
         case .appleIntelligence:
             let context = postProcessingContext(for: .appleIntelligence)
             if #available(macOS 26, *) {

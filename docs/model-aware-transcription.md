@@ -17,7 +17,7 @@ avoiding intermediate PCM-to-array-to-PCM copies.
 
 | Model | Recording and finalization policy |
 | --- | --- |
-| Parakeet v3, Ultra and TDT-CTC 110M | Fresh SDK overlap session per recording, reused loaded weights; 11-second center with 2 seconds of left/right context. SDK token timings merge the result and finalization flushes the tail. |
+| Parakeet v3, Ultra and TDT-CTC 110M | Without vocabulary terms, a fresh SDK overlap session per recording reuses loaded weights; an 11-second center has 2 seconds of left/right context. SDK token timings merge the result and finalization flushes the tail. With vocabulary terms, bounded batch previews precede one whole-recording final decode and rescoring. |
 | Parakeet v2 | Bounded previews followed by one authoritative whole-recording SDK batch decode. Vocabulary mode applies matching against that final decode's timings and original audio. |
 | SenseVoice | Silero pause boundaries target 15-second segments and cap them at 30 seconds. Preserve all captured samples, quiet gaps and the final short tail. Use automatic language detection and normalized text. Recovery uses the same segmentation. |
 | Parakeet EOU and English Nemotron | Native streaming sessions use the selected latency tier and native finish output. |
@@ -35,8 +35,10 @@ starting another provisional decode before authoritative finalization.
 Recent volume windows are copied only for eligible previews; volume tests use
 array slices and stop after the RMS threshold qualifies speech. Native streaming
 retains bounded pending/level audio and the independent recovery file, without
-an unused second in-memory recording. Batch models retain original audio for
-authoritative final decoding and vocabulary matching.
+an unused second in-memory recording. Parakeet v2 and vocabulary-enabled TDT
+sessions retain original audio for whole-recording final decoding. Other TDT
+sessions retain only the bounded preview window outside the SDK overlap decoder;
+SenseVoice retains audio until each disjoint segment is committed.
 
 Each batch recording has independent Silero state. The volume gate qualifies
 normal speech; VAD can additionally qualify quiet speech. Recent eligibility
@@ -47,7 +49,9 @@ Cancellation joins an in-flight iteration before clearing buffers.
 
 CTC vocabulary matching is offered for TDT batch models. It decodes the complete
 recording once, then applies the SDK's matching session to the corresponding
-timings/audio. The unboosted overlap session is cancelled before that pass.
+timings/audio. Vocabulary sessions use bounded batch previews, without starting
+an overlap decoder whose final output would be discarded. The preview session
+is cancelled before the whole-recording vocabulary pass.
 Native streaming finalization does not use this CTC vocabulary path.
 
 Multilingual v3/Ultra recordings capture the selected script hint at start and
@@ -143,7 +147,7 @@ processing if the field is cleared while the app is running.
 | Provider | Request and preparation policy |
 | --- | --- |
 | S1-mini | English-only trained control prompt, empty thinking prefix and greedy sampling. Q4_K_M weights and a 4,096-token context. Metal uses FP16 KV; Intel uses Q8 KV and up to eight physical cores. Tokenizer-aware chunks stay within 1,000 input tokens; output budget is `ceil(inputTokens * 1.3) + 32`. EOS is required; an incomplete response cannot replace the original. |
-| Apple Intelligence | Greedy guided action/text output, fresh sessions and a single-use prepared prefix. Context planning reserves instruction/schema/output space and limits each input to 1,024 tokens. Source paragraphs over 1,024 UTF-8 bytes use independent sessions; lost numeric literals/counts preserve the passage. |
+| Apple Intelligence | Greedy guided action/text output, fresh sessions and a single-use prepared prefix. Context planning reserves instruction/schema/output space and limits each input to 1,024 tokens. When the complete transcript exceeds 1,024 UTF-8 bytes, its source paragraphs use independent sessions; lost numeric literals/counts preserve the passage. |
 | Ollama | Inspect `/api/show` capabilities, preserve server sampling/reasoning defaults and use strict structured output. Working context is bounded to 8,192 tokens or the smaller model limit. Explicit non-thinking capabilities permit an input-derived output ceiling; unknown/thinking models retain natural EOS. Empty generation preloads the same model/context for ten minutes. |
 | OpenRouter | Catalog capabilities supply context/output limits and supported parameters. Preserve declared sampling/reasoning defaults; schema requests require schema-capable routing. Preparation refreshes catalog/connection without a billable completion. |
 | OpenAI-compatible | Preserve server defaults and request a strict schema. Adapt only to explicit unsupported-parameter errors; model names alone do not prove capabilities. Preparation discovers models/opens the connection. |

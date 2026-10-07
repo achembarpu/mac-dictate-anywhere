@@ -174,9 +174,17 @@ assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelineWorkloadBenchm
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/PipelinePerformanceBenchmarkTests/testS1MiniPrewarmBenchmark'
 
 "$SCRIPT" benchmark >/dev/null
-assert_benchmark_selector_count 48
+assert_benchmark_selector_count 49
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark'
 assert_benchmark_arg '-only-testing:Dictate AnywhereTests/ModelSwitchBenchmarkTests/testModelSwitchTimings'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPreviewAvoidsDiscardedOverlapDecoder'
+
+"$SCRIPT" benchmark --only tdt-vocabulary >/dev/null
+assert_benchmark_selector_count 4
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPoliciesAndSharedHead'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testPreparedVocabularyProductionSessions'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testAuxiliaryHeadInstallationAndRepair'
+assert_benchmark_arg '-only-testing:Dictate AnywhereTests/TDTVocabularyBenchmarkTests/testVocabularyPreviewAvoidsDiscardedOverlapDecoder'
 
 "$SCRIPT" benchmark --only s1-context >/dev/null
 assert_benchmark_selector_count 1

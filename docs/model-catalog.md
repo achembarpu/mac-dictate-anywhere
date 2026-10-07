@@ -48,8 +48,8 @@ fine-tune. **Apple Intelligence** uses macOS-managed Foundation Models.
 **Vocabulary correction only** corrects recognition without a cleanup LLM;
 availability follows the speech model. Ollama, OpenRouter and OpenAI-compatible
 are providers: the visible **Model ID** identifies the model you configured.
-The provider/server determines where cleanup runs. MLX and GGUF describe S1's
-runtime packages, not separate cleanup models.
+The provider/server determines where cleanup runs. S1-mini uses the pinned GGUF
+package through llama.cpp: Metal on Apple Silicon and CPU on Intel or Rosetta.
 
 See the [runtime policy](model-aware-transcription.md) for preparation and
 finalization behavior, and the [benchmark guide](performance-benchmarking.md)
