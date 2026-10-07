@@ -821,7 +821,7 @@ private struct RawInputSourceMapping: Decodable {
     let language: String
 }
 
-struct TranscriptHistoryEntry: Identifiable, Codable, Equatable {
+nonisolated struct TranscriptHistoryEntry: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let text: String
     let createdAt: Date
@@ -1355,9 +1355,15 @@ final class Settings {
 
     var transcriptHistory: [TranscriptHistoryEntry] {
         didSet {
-            guard let data = try? JSONEncoder().encode(transcriptHistory) else { return }
-            UserDefaults.standard.set(data, forKey: Keys.transcriptHistory)
+            historyPersistence.save(transcriptHistory)
         }
+    }
+
+    @ObservationIgnored private let historyPersistence = TranscriptHistoryPersistence()
+
+    /// Delivery and shutdown join queued history writes without blocking UI work.
+    func flushTranscriptHistory() async {
+        await historyPersistence.flush()
     }
 
     var aiPostProcessingPrompt: String {

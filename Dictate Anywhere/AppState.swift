@@ -483,6 +483,7 @@ final class AppState {
         isCancelling = false
         isTransitioning = false
         status = .idle
+        await settings.flushTranscriptHistory()
         volumeController.restoreMicrophoneVolume()
         volumeController.restoreAfterRecording()
         overlay.hide(afterDelay: 0)
@@ -1561,6 +1562,9 @@ final class AppState {
         await reactivateInsertionTargetIfNeeded()
         let insertionContext = await insertionContextForDelivery()
         let insertionStyle = insertionContext.map { settings.dictationWritingStyle(for: $0.category) }
+        // Encoding overlaps target/context preparation, but history is saved
+        // before delivery can discard the recording's recovery copy.
+        await settings.flushTranscriptHistory()
         let result: TextInsertionResult
         if let transcriptDeliveryOverride {
             result = await transcriptDeliveryOverride(processedText)
@@ -1788,6 +1792,7 @@ final class AppState {
                 return
             }
             settings.addTranscriptHistoryEntry(cleaned)
+            await settings.flushTranscriptHistory()
             lastTranscript = cleaned
             Self.lastTranscriptForMenuBar = cleaned
             recoveryStore.release(id: entry.id)
