@@ -34,8 +34,7 @@ enum OpenRouterPostProcessingService {
         }
     }
 
-    private static var catalog: [Model] = []
-    private static var catalogDate: Date?
+    private static let catalog = TimedRequestCache<URL, [Model]>(lifetime: .seconds(900), capacity: 1)
 
     struct Model: Identifiable, Hashable, Sendable {
         let id: String
@@ -211,9 +210,12 @@ enum OpenRouterPostProcessingService {
 
     /// Catalog/connection preparation only. Cloud weights are provider-managed;
     /// never send a billable dummy completion merely to warm a selected model.
-    static func prewarm(model: String) async -> Bool {
+    static func prewarm(model: String, refresh: Bool = false, session: URLSession = .shared,
+                        cache: TimedRequestCache<URL, [Model]>? = nil) async -> Bool {
         guard !Task.isCancelled else { return false }
-        return (try? await fetchModels())?.contains { $0.id == catalogLookupModelID(for: model) } ?? false
+        return (try? await fetchModels(refresh: refresh, session: session, cache: cache))?.contains {
+            $0.id == catalogLookupModelID(for: model)
+        } ?? false
     }
 
     private struct ModelsResponse: Decodable {
@@ -258,10 +260,15 @@ enum OpenRouterPostProcessingService {
         let message: String?
     }
 
-    private static func fetchModels(session: URLSession = .shared, refresh: Bool = false) async throws -> [Model] {
-        // A custom transport must not read or populate another client's cache.
-        let cachesCatalog = session === URLSession.shared
-        if cachesCatalog, !refresh, let catalogDate, Date().timeIntervalSince(catalogDate) < 900 { return catalog }
+    private static func fetchModels(refresh: Bool = false, session: URLSession = .shared,
+                                    cache: TimedRequestCache<URL, [Model]>? = nil) async throws -> [Model] {
+        let cache = cache ?? (session === URLSession.shared ? catalog : TimedRequestCache())
+        return try await cache.value(for: endpointURL(path: "models"), refresh: refresh) {
+            try await fetchModelsUncached(session: session)
+        }
+    }
+
+    private static func fetchModelsUncached(session: URLSession) async throws -> [Model] {
         var request = URLRequest(url: endpointURL(path: "models"))
         request.timeoutInterval = 5
         let (data, response) = try await session.data(for: request)
@@ -295,7 +302,6 @@ enum OpenRouterPostProcessingService {
             }
             return $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending
         }
-        if cachesCatalog { catalog = models; catalogDate = Date() }
         return models
     }
 

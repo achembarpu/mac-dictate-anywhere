@@ -1,21 +1,6 @@
 import Foundation
 import os
 
-fileprivate actor OllamaModelDetailsCache {
-    static let shared = OllamaModelDetailsCache()
-
-    private var values: [String: (date: Date, details: OllamaModelDetails)] = [:]
-
-    func value(for key: String) -> OllamaModelDetails? {
-        guard let cached = values[key], Date().timeIntervalSince(cached.date) < 300 else { return nil }
-        return cached.details
-    }
-
-    func set(_ value: OllamaModelDetails, for key: String) {
-        values[key] = (Date(), value)
-    }
-}
-
 // MARK: - Service
 
 enum OllamaPostProcessingService {
@@ -24,6 +9,21 @@ enum OllamaPostProcessingService {
         subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
         category: "OllamaPostProcessing"
     )
+    nonisolated struct DetailsKey: Hashable, Sendable {
+        let endpoint: URL
+        let model: String
+    }
+
+    nonisolated struct PreloadKey: Hashable, Sendable {
+        let details: DetailsKey
+        let contextLength: Int
+    }
+
+    private static let detailsCache = TimedRequestCache<DetailsKey, OllamaModelDetails>()
+    // A short interval avoids redundant empty generation while still checking
+    // residency well before the server's ten-minute keep_alive expires.
+    private static let preloadCache = TimedRequestCache<PreloadKey, Bool>(lifetime: .seconds(60))
+
     struct CLIAvailability: Sendable {
         let executablePath: String?
 
@@ -151,24 +151,40 @@ enum OllamaPostProcessingService {
     /// Empty generation loads weights without sending transcript/context text.
     /// Respect the server's offload strategy and use the same bounded context
     /// as the following cleanup request, avoiding a context-size reload.
-    static func prewarm(baseURL: String, model: String, session: URLSession = .shared) async -> Bool {
+    static func prewarm(baseURL: String, model: String, refresh: Bool = false,
+                        session: URLSession = .shared,
+                        detailsCache: TimedRequestCache<DetailsKey, OllamaModelDetails>? = nil,
+                        preloadCache: TimedRequestCache<PreloadKey, Bool>? = nil) async -> Bool {
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty, !Task.isCancelled else { return false }
         do {
-            let details = try await modelDetails(baseURL: baseURL, model: model, session: session)
-            var request = URLRequest(url: try endpointURL(baseURL: baseURL, endpoint: .generate))
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.timeoutInterval = 120
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "model": model, "stream": false, "keep_alive": "10m",
-                "options": ["num_ctx": details.cleanupContextLength]
-            ])
-            let (data, response) = try await session.data(for: request)
-            try validate(response: response, data: data)
-            let loaded = try JSONDecoder().decode(GenerateResponse.self, from: data)
-            return loaded.error == nil && loaded.done == true
+            let details = try await modelDetails(baseURL: baseURL, model: model, refresh: refresh,
+                                                 session: session, cache: detailsCache)
+            let key = PreloadKey(details: try detailsKey(baseURL: baseURL, model: model),
+                                 contextLength: details.cleanupContextLength)
+            let cache = preloadCache ?? (session === URLSession.shared ? self.preloadCache : TimedRequestCache())
+            return try await cache.value(for: key, refresh: refresh) {
+                try await performPreload(baseURL: baseURL, model: model,
+                                         contextLength: key.contextLength, session: session)
+            }
         } catch { return false }
+    }
+
+    private static func performPreload(baseURL: String, model: String, contextLength: Int,
+                                       session: URLSession) async throws -> Bool {
+        var request = URLRequest(url: try endpointURL(baseURL: baseURL, endpoint: .generate))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": model, "stream": false, "keep_alive": "10m",
+            "options": ["num_ctx": contextLength]
+        ])
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        let loaded = try JSONDecoder().decode(GenerateResponse.self, from: data)
+        guard loaded.error == nil, loaded.done == true else { throw ServiceError.invalidResponse }
+        return true
     }
 
     static func cliAvailability() -> CLIAvailability {
@@ -250,6 +266,9 @@ enum OllamaPostProcessingService {
                 throw ServiceError.serverMessage(message)
             }
         }.value
+        let key = try detailsKey(baseURL: baseURL, model: trimmedModel)
+        await detailsCache.invalidate(key)
+        await preloadCache.invalidate { $0.details == key }
     }
 
     private enum Endpoint {
@@ -481,26 +500,23 @@ enum OllamaPostProcessingService {
     ) async -> OllamaReasoningCapability {
         let lookupModel = (resolvedSelectedModel ?? selectedModel).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !lookupModel.isEmpty else { return .unsupported }
-        return await reasoningCapability(baseURL: baseURL, model: lookupModel)
+        return (try? await modelDetails(baseURL: baseURL, model: lookupModel, refresh: true))?.reasoningCapability ?? .unsupported
     }
 
-    private static func modelDetails(baseURL: String, model: String, session: URLSession = .shared) async throws -> OllamaModelDetails {
-        let key = reasoningCapabilityCacheKey(baseURL: baseURL, model: model)
-        // Injected transports must not consume or populate production metadata.
-        let cachesDetails = session === URLSession.shared
-        if cachesDetails, let cached = await OllamaModelDetailsCache.shared.value(for: key) { return cached }
-        let details = try await fetchModelDetails(baseURL: baseURL, model: model, session: session)
-        if cachesDetails { await OllamaModelDetailsCache.shared.set(details, for: key) }
-        return details
+    private static func modelDetails(baseURL: String, model: String, refresh: Bool = false,
+                                     session: URLSession = .shared,
+                                     cache: TimedRequestCache<DetailsKey, OllamaModelDetails>? = nil) async throws -> OllamaModelDetails {
+        let key = try detailsKey(baseURL: baseURL, model: model)
+        // Injected transports stay isolated unless their caller supplies a cache.
+        let cache = cache ?? (session === URLSession.shared ? detailsCache : TimedRequestCache())
+        return try await cache.value(for: key, refresh: refresh) {
+            try await fetchModelDetails(baseURL: baseURL, model: model, session: session)
+        }
     }
 
-    private static func reasoningCapability(baseURL: String, model: String) async -> OllamaReasoningCapability {
-        (try? await modelDetails(baseURL: baseURL, model: model))?.reasoningCapability ?? .unsupported
-    }
-
-    private static func reasoningCapabilityCacheKey(baseURL: String, model: String) -> String {
-        let normalizedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        return "\(normalizedBaseURL)|\(normalizedModel)"
+    private static func detailsKey(baseURL: String, model: String) throws -> DetailsKey {
+        var canonicalModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if canonicalModel.hasSuffix(":latest") { canonicalModel.removeLast(":latest".count) }
+        return DetailsKey(endpoint: try endpointURL(baseURL: baseURL, endpoint: .show), model: canonicalModel)
     }
 }

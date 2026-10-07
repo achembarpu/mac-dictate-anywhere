@@ -103,6 +103,87 @@ final class CleanupProviderContractTests: XCTestCase {
         XCTAssertEqual(calls.withLock { $0 }, 1)
     }
 
+    func testOllamaSharesMetadataAndPreloadAcrossLatestAliasAndForcesRefresh() async throws {
+        let requests = OSAllocatedUnfairLock(initialState: [String: Int]())
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            let path = try XCTUnwrap(request.url?.path)
+            requests.withLock { $0[path, default: 0] += 1 }
+            if path.hasSuffix("show") {
+                return (200, Data(#"{"model_info":{"llama.context_length":131072}}"#.utf8))
+            }
+            let payload = try Self.payload(request)
+            XCTAssertNil(payload["prompt"])
+            XCTAssertNil(payload["system"])
+            XCTAssertEqual((payload["options"] as? [String: Int])?["num_ctx"], 8_192)
+            return (200, Data(#"{"done":true}"#.utf8))
+        } }
+        let details = TimedRequestCache<OllamaPostProcessingService.DetailsKey, OllamaModelDetails>()
+        let preloads = TimedRequestCache<OllamaPostProcessingService.PreloadKey, Bool>()
+        for model in ["model", "model:latest", "model"] {
+            let ready = await OllamaPostProcessingService.prewarm(baseURL: "http://cleanup.test", model: model,
+                session: session, detailsCache: details, preloadCache: preloads)
+            XCTAssertTrue(ready)
+        }
+        XCTAssertEqual(requests.withLock { $0["/api/show"] }, 1)
+        XCTAssertEqual(requests.withLock { $0["/api/generate"] }, 1)
+        let refreshed = await OllamaPostProcessingService.prewarm(baseURL: "http://cleanup.test", model: "model",
+            refresh: true, session: session, detailsCache: details, preloadCache: preloads)
+        XCTAssertTrue(refreshed)
+        XCTAssertEqual(requests.withLock { $0["/api/show"] }, 2)
+        XCTAssertEqual(requests.withLock { $0["/api/generate"] }, 2)
+        for (base, model) in [("http://other.test", "model"), ("http://cleanup.test", "other")] {
+            let ready = await OllamaPostProcessingService.prewarm(baseURL: base, model: model,
+                session: session, detailsCache: details, preloadCache: preloads)
+            XCTAssertTrue(ready)
+        }
+        XCTAssertEqual(requests.withLock { $0["/api/generate"] }, 4)
+    }
+
+    func testOllamaPreloadFailuresAreRetriedAndExpiredResidencyIsReloaded() async throws {
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let fail = OSAllocatedUnfairLock(initialState: true)
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            if request.url?.path.hasSuffix("show") == true { return (200, Data(#"{}"#.utf8)) }
+            calls.withLock { $0 += 1 }
+            return (200, Data((fail.withLock { $0 } ? #"{"done":false}"# : #"{"done":true}"#).utf8))
+        } }
+        let details = TimedRequestCache<OllamaPostProcessingService.DetailsKey, OllamaModelDetails>()
+        let preloads = TimedRequestCache<OllamaPostProcessingService.PreloadKey, Bool>(lifetime: .zero)
+        for _ in 0..<2 {
+            let ready = await OllamaPostProcessingService.prewarm(baseURL: "http://cleanup.test", model: "model",
+                session: session, detailsCache: details, preloadCache: preloads)
+            XCTAssertFalse(ready)
+        }
+        fail.withLock { $0 = false }
+        for _ in 0..<2 {
+            let ready = await OllamaPostProcessingService.prewarm(baseURL: "http://cleanup.test", model: "model",
+                session: session, detailsCache: details, preloadCache: preloads)
+            XCTAssertTrue(ready)
+        }
+        XCTAssertEqual(calls.withLock { $0 }, 4)
+    }
+
+    func testOpenRouterCatalogSharesPrewarmAndRefreshesWithoutGenerating() async throws {
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/models")
+            XCTAssertNil(request.httpBody)
+            calls.withLock { $0 += 1 }
+            return (200, Data(#"{"data":[{"id":"test/model"}]}"#.utf8))
+        } }
+        let cache = TimedRequestCache<URL, [OpenRouterPostProcessingService.Model]>()
+        for _ in 0..<3 {
+            let ready = await OpenRouterPostProcessingService.prewarm(model: "test/model",
+                session: session, cache: cache)
+            XCTAssertTrue(ready)
+        }
+        XCTAssertEqual(calls.withLock { $0 }, 1)
+        let refreshed = await OpenRouterPostProcessingService.prewarm(model: "test/model",
+            refresh: true, session: session, cache: cache)
+        XCTAssertTrue(refreshed)
+        XCTAssertEqual(calls.withLock { $0 }, 2)
+    }
+
     func testOllamaPreloadContainsNoTranscriptAndGenerationKeepsModelPreset() async throws {
         let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
         CleanupHTTPStub.handler.withLock { callback in
