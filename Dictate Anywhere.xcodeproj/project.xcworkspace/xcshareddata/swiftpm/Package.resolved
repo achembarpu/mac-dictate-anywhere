@@ -4,10 +4,9 @@
     {
       "identity" : "fluidaudio",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/FluidInference/FluidAudio.git",
+      "location" : "https://github.com/achembarpu/FluidAudio.git",
       "state" : {
-        "revision" : "0b1f46289fe27d95b5e66ad8be46e64f5ee02ae7",
-        "version" : "0.17.5"
+        "revision" : "3a53fb52be18c0e86c9ec44de7f0aa9cd59d9d89"
       }
     },
     {

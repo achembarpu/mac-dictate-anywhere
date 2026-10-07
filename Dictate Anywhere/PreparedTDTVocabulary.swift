@@ -31,9 +31,25 @@ nonisolated enum PreparedTDTVocabulary: Sendable {
         switch self {
         case .shared(let session): return try await session.rescore(original, samples: samples)
         case .separate(let session, _):
+            guard session.hasCTCRescoringCandidates(text: original.text, tokenTimings: original.tokenTimings ?? []) else {
+                return original.text
+            }
             let output = await session.rescore(text: original.text, tokenTimings: original.tokenTimings ?? [], audioSamples: samples)
             try Task.checkCancellation()
             return output?.wasModified == true ? output!.text : original.text
         }
     }
+    #if PIPELINE_BENCHMARK
+    func rescoreWithoutCandidateDiscoveryForTesting(_ original: ASRResult, samples: [Float]) async throws -> String {
+        switch self {
+        case .shared(let session):
+            return try await session.rescoreWithoutCandidateDiscoveryForTesting(original, samples: samples)
+        case .separate(let session, _):
+            let output = await session.rescore(text: original.text, tokenTimings: original.tokenTimings ?? [], audioSamples: samples)
+            try Task.checkCancellation()
+            return output?.wasModified == true ? output!.text : original.text
+        }
+    }
+    #endif
+
 }

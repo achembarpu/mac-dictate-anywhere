@@ -289,3 +289,11 @@ installation check. Set `PIPELINE_BENCHMARK_DOWNLOAD_MODELS=1` to validate the
 application cache, cold targeted download, offline reuse and repair of a corrupt
 local head. Temporary repair copies are discarded; the normal application cache
 retains the installed head. No separate encoder is downloaded by this path.
+
+The `tdt-vocabulary` group includes a paired candidate-discovery check. It
+alternates the original acoustic path and the production candidate-gated path
+on the same installed model and human speech fixture, and requires identical
+final text. Set `PIPELINE_BENCHMARK_MODEL=all` to cover all four TDT models;
+`PIPELINE_BENCHMARK_FIXTURE` accepts comma-separated golden IDs. The benchmark
+reports both eligible terms and irrelevant terms so a skipped pass is not
+confused with faster acoustic inference.

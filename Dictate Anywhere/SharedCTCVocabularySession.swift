@@ -56,6 +56,14 @@ nonisolated struct SharedCTCVocabularySession: Sendable {
     func rescore(_ original: ASRResult, samples: [Float]) async throws -> String {
         guard !vocabulary.terms.isEmpty, let timings = original.tokenTimings, !timings.isEmpty,
               !samples.isEmpty else { return original.text }
+        guard rescorer.hasCTCRescoringCandidates(transcript: original.text, tokenTimings: timings,
+            minSimilarity: max(thresholds.minSimilarity, vocabulary.minSimilarity)) else {
+            return original.text
+        }
+        return try await rescoreWithAcousticEvidence(original, timings: timings, samples: samples)
+    }
+
+    private func rescoreWithAcousticEvidence(_ original: ASRResult, timings: [TokenTiming], samples: [Float]) async throws -> String {
         let evidence = try await logProbabilities(samples: samples)
         try Task.checkCancellation()
         let result = rescorer.ctcTokenRescore(transcript: original.text, tokenTimings: timings,
@@ -64,6 +72,15 @@ nonisolated struct SharedCTCVocabularySession: Sendable {
             minSimilarity: max(thresholds.minSimilarity, vocabulary.minSimilarity))
         return result.wasModified ? result.text : original.text
     }
+
+    #if PIPELINE_BENCHMARK
+    /// Paired reference: the production acoustic path before candidate discovery.
+    func rescoreWithoutCandidateDiscoveryForTesting(_ original: ASRResult, samples: [Float]) async throws -> String {
+        guard !vocabulary.terms.isEmpty, let timings = original.tokenTimings, !timings.isEmpty,
+              !samples.isEmpty else { return original.text }
+        return try await rescoreWithAcousticEvidence(original, timings: timings, samples: samples)
+    }
+    #endif
 
     func warm() async throws {
         _ = try await logProbabilities(samples: [Float](repeating: 0, count: 16_000))

@@ -167,6 +167,67 @@ final class TDTVocabularyBenchmarkTests: XCTestCase {
         #endif
     }
 
+    func testCandidateDiscoveryPreservesQualityAndAvoidsAcousticWork() async throws {
+        #if !PIPELINE_BENCHMARK
+        throw XCTSkip("Use tdt-vocabulary for paired candidate discovery")
+        #else
+        let env = ProcessInfo.processInfo.environment
+        let requested = env["PIPELINE_BENCHMARK_MODEL"] ?? "all"
+        let iterations = max(1, min(10, Int(env["PIPELINE_BENCHMARK_ITERATIONS"] ?? "3") ?? 3))
+        let fixtures = try GoldenSpeechFixture.all()
+        let ids = (env["PIPELINE_BENCHMARK_FIXTURE"] ?? "golden-en-1,golden-en-fleurs-2").split(separator: ",").map(String.init)
+        let versions: [(ParakeetModelChoice, AsrModelVersion)] = [
+            (.multilingual, .v3), (.multilingualUltra, .ultra), (.englishOnly, .v2), (.compactEnglish, .tdtCtc110m)
+        ]
+        var ran = 0
+        for (choice, version) in versions where requested == "all" || requested == choice.rawValue {
+            guard ParakeetEngine().checkModelOnDisk(for: choice) else { continue }
+            let models = try await AsrModels.loadFromCache(version: version)
+            let manager = AsrManager(config: BatchTranscriptionPolicy.asrConfig)
+            try await manager.loadModels(models)
+            for id in ids {
+                let fixture = try XCTUnwrap(fixtures.first { $0.id == id })
+                let reader = try RecoveryAudioReader(url: fixture.audioURL)
+                var audio: [Float] = []
+                while let chunk = try reader.nextSamples() { audio.append(contentsOf: chunk) }
+                var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
+                let original = try await manager.transcribe(audio, decoderState: &state)
+                let genuine = id == "golden-en-fleurs-2" ? ["Chandra Shekhar Solanki"] : ["Quilter"]
+                for (list, terms) in [("genuine", genuine), ("irrelevant", ["Czechoslovakia", "photosynthesis"])] {
+                    let prepared = try await PreparedTDTVocabulary.prepare(models: models, terms: terms, cachedCTCModels: nil)
+                    var timings: [String: [Double]] = [:]
+                    var reference: String?
+                    for iteration in 0..<iterations {
+                        for variant in iteration.isMultiple(of: 2) ? ["acoustic", "candidate_gated"] : ["candidate_gated", "acoustic"] {
+                            let before = try BenchmarkProcessResources.sample()
+                            let start = ContinuousClock.now
+                            let output = variant == "acoustic"
+                                ? try await prepared.rescoreWithoutCandidateDiscoveryForTesting(original, samples: audio)
+                                : try await prepared.rescore(original, samples: audio)
+                            let elapsed = BenchmarkStatistics.elapsedMilliseconds(from: start)
+                            let after = try BenchmarkProcessResources.sample()
+                            if let reference { XCTAssertEqual(output, reference, "Candidate discovery changed final text") }
+                            else { reference = output }
+                            timings[variant, default: []].append(elapsed)
+                            try emit(fixture: fixture, model: choice, list: list, terms: terms, variant: variant,
+                                iteration: iteration, elapsed: elapsed, cpu: after.cpuMilliseconds - before.cpuMilliseconds,
+                                peak: after.peakResidentBytes, original: original.text, output: output,
+                                error: fixture.errorRate(hypothesis: output))
+                        }
+                    }
+                    for variant in ["acoustic", "candidate_gated"] {
+                        BenchmarkStatistics(timings[variant] ?? []).report(component: "ctc_candidate_discovery",
+                            details: "model=\(choice.rawValue) fixture=\(id) list=\(list) variant=\(variant)")
+                    }
+                    ran += 1
+                }
+            }
+            await manager.cleanup()
+        }
+        try XCTSkipUnless(ran > 0, "Install selected TDT models and vocabulary assets")
+        #endif
+    }
+
     func testVocabularyPoliciesAndSharedHead() async throws {
         #if !PIPELINE_BENCHMARK
         throw XCTSkip("Use --only tdt-vocabulary for paired installed-model vocabulary checks")

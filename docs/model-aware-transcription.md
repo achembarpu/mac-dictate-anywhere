@@ -53,6 +53,10 @@ timings/audio. Vocabulary sessions use bounded batch previews, without starting
 an overlap decoder whose final output would be discarded. The preview session
 is cancelled before the whole-recording vocabulary pass.
 Native streaming finalization does not use this CTC vocabulary path.
+Prepared CTC sessions first use the SDK's exact candidate discovery. If no term
+can be rescored, the original transcript is returned without another acoustic
+pass. Eligible candidates keep the same CTC comparison and thresholds. Vocabulary
+assets are still prepared and warmed before use.
 
 Multilingual v3/Ultra recordings capture the selected script hint at start and
 use it for previews, final windows and vocabulary decoding. Recovery uses one
@@ -167,7 +171,10 @@ history.
 
 ## Development references
 
-FluidAudio is pinned to 0.17.5. The SDK logger emits warnings/errors without console
+FluidAudio is pinned to an exact commit of the
+[achembarpu fork](https://github.com/achembarpu/FluidAudio/tree/perf/vocabulary-candidate-discovery)
+for the candidate-discovery API and prepared normalization. The revision is
+recorded in `Package.resolved`; it requires no local vendor checkout. The SDK logger emits warnings/errors without console
 mirroring; `DICTATE_ANYWHERE_KEEP_FLUID_DEBUG_LOGS=1` enables speech debug logs in
 Debug builds only. See the [tracing map](performance-tracing.md) and
 [benchmark guide](performance-benchmarking.md) for diagnostics and reproducible

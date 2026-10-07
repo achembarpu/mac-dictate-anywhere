@@ -521,10 +521,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		E2FLUID0003 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
+			repositoryURL = "https://github.com/achembarpu/FluidAudio.git";
 			requirement = {
-				kind = exactVersion;
-				version = 0.17.5;
+				kind = revision;
+				revision = 3a53fb52be18c0e86c9ec44de7f0aa9cd59d9d89;
 			};
 		};
 		E2LLAMA0003 /* XCRemoteSwiftPackageReference "llama" */ = {
