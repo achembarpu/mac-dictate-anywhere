@@ -487,8 +487,13 @@ final class ParakeetEngine: TranscriptionEngine {
     private var totalSampleCount: Int = 0
     private var droppedPendingSamples: Int = 0
     private let sampleLock = NSLock()
+    private var activeAudioSessionID: UUID?
+    private var audioProcessingContinuation: AsyncStream<Void>.Continuation?
+    private var audioSignalThreshold = AudioProcessingSignalThreshold(
+        thresholdSamples: BatchTranscriptionPolicy.batchProcessingSignalSamples)
     private var transcriptionTask: Task<Void, Never>?
     private var lastBatchPreviewSampleCount = 0
+    private var recordingPreviewsEnabled = true
     private var recordingModelChoice: ParakeetModelChoice?
     private var recordingScriptLanguage: Language?
     private var recordingVocabularyTerms: [String] = []
@@ -1010,6 +1015,7 @@ final class ParakeetEngine: TranscriptionEngine {
         let recoveryCapture = self.recoveryCapture
         logger.info("startRecording: entry, thread=\(Thread.current.description, privacy: .public), deviceID=\(deviceID.map { String($0) } ?? "nil", privacy: .public)")
         let modelChoice = selectedModelChoice
+        let previewsEnabled = Settings.shared.showTextPreview
         let vocabularyTerms = activeVocabularyTerms
         let language = scriptLanguage(for: modelChoice)
         let nativeLanguageCode = Settings.shared.selectedLanguage.nemotronLanguageCode
@@ -1036,10 +1042,14 @@ final class ParakeetEngine: TranscriptionEngine {
             do { try await prepareVocabulary(terms: vocabularyTerms, model: modelChoice) }
             catch { logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)") }
         }
-        try await asrCoordinator.resetSession(for: modelChoice, language: language, requiresWholeRecordingFinal: !vocabularyTerms.isEmpty)
+        try await asrCoordinator.resetSession(for: modelChoice, language: language,
+                                              requiresWholeRecordingFinal: !vocabularyTerms.isEmpty,
+                                              previewsEnabled: previewsEnabled)
+        let signalThreshold = try await asrCoordinator.audioProcessingSignalThreshold(for: modelChoice)
         recordingModelChoice = modelChoice
         recordingScriptLanguage = language
         recordingVocabularyTerms = vocabularyTerms
+        recordingPreviewsEnabled = previewsEnabled
         lastBatchPreviewSampleCount = 0
 
         if modelChoice == .nemotronMultilingual {
@@ -1068,6 +1078,13 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         let usesExplicitMicrophoneSelection = Settings.shared.selectedMicrophoneUID != nil
+        let audioSessionID = UUID()
+        let (audioSignals, audioSignalContinuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        sampleLock.withLock {
+            activeAudioSessionID = audioSessionID
+            audioProcessingContinuation = audioSignalContinuation
+            audioSignalThreshold = signalThreshold
+        }
 
         // Start audio engine (async to avoid deadlock — the tap callback dispatches to main)
         logger.info("startRecording: dispatching to engineQueue for audio engine setup")
@@ -1083,7 +1100,7 @@ final class ParakeetEngine: TranscriptionEngine {
                 ) { [weak self] samples in
                     recoveryCapture?.append(samples)
                     guard let self else { return }
-                    self.appendCapturedSamples(samples, model: modelChoice)
+                    self.appendCapturedSamples(samples, model: modelChoice, sessionID: audioSessionID)
                 }
             }
         } catch {
@@ -1091,6 +1108,7 @@ final class ParakeetEngine: TranscriptionEngine {
             // stream alive. Identity keeps a stale attempt from cancelling a retry.
             if audioCaptureStartupCancellation === startupCancellation {
                 audioCaptureStartupCancellation = nil
+                invalidateAudioProcessingSignals(sessionID: audioSessionID)
                 recordingModelChoice = nil
                 recordingScriptLanguage = nil
                 recordingVocabularyTerms = []
@@ -1101,6 +1119,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
         guard audioCaptureStartupCancellation === startupCancellation else {
             captureController.stop()
+            invalidateAudioProcessingSignals(sessionID: audioSessionID)
             AudioCaptureRestartGate.shared.recordStop()
             throw CancellationError()
         }
@@ -1114,9 +1133,9 @@ final class ParakeetEngine: TranscriptionEngine {
         isTranscribing = true
         transcriptionTask = Task { [weak self] in
             if modelChoice.usesTrueStreaming {
-                await self?.streamingTranscriptionLoop()
+                await self?.streamingTranscriptionLoop(signals: audioSignals)
             } else {
-                await self?.transcriptionLoop()
+                await self?.transcriptionLoop(signals: audioSignals)
             }
         }
     }
@@ -1145,6 +1164,7 @@ final class ParakeetEngine: TranscriptionEngine {
         PerfTrace.event("audio.captureSummary", counts: audioCounts)
         // Stop transcription loop
         isTranscribing = false
+        invalidateCurrentAudioProcessingSignals()
         if let task = transcriptionTask {
             task.cancel()
             _ = await task.result
@@ -1162,8 +1182,11 @@ final class ParakeetEngine: TranscriptionEngine {
         audioCaptureStartupCancellation?.cancel()
         audioCaptureStartupCancellation = nil
         isTranscribing = false
-        transcriptionTask?.cancel()
         await teardownAudioEngineIfNeeded(outcome: "cancelled")
+        // stop() flushes the converter tail through the capture callback.
+        // Keep the session identity valid until that callback has returned.
+        invalidateCurrentAudioProcessingSignals()
+        transcriptionTask?.cancel()
         let task = transcriptionTask
         await task?.value
         transcriptionTask = nil
@@ -1249,9 +1272,8 @@ final class ParakeetEngine: TranscriptionEngine {
         PerfTrace.event("stt.firstPartial")
     }
 
-    private func transcriptionLoop() async {
-        while isTranscribing && !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(BatchTranscriptionPolicy.pollingMilliseconds))
+    private func transcriptionLoop(signals: AsyncStream<Void>) async {
+        for await _ in signals {
             guard isTranscribing, !Task.isCancelled else { break }
             do {
                 try await processBatchAudio()
@@ -1268,7 +1290,7 @@ final class ParakeetEngine: TranscriptionEngine {
             let pending = sampleBuffer
             sampleBuffer.removeAll(keepingCapacity: true)
             let total = totalSampleCount
-            let shouldPreview = BatchTranscriptionPolicy.shouldPreview(
+            let shouldPreview = BatchTranscriptionPolicy.shouldPreview(isEnabled: recordingPreviewsEnabled,
                 totalSamples: total, lastPreviewSamples: lastBatchPreviewSampleCount,
                 hasVisibleText: !currentTranscript.isEmpty,
                 model: recordingModelChoice ?? selectedModelChoice)
@@ -1310,16 +1332,15 @@ final class ParakeetEngine: TranscriptionEngine {
     }
     #endif
 
-    private func streamingTranscriptionLoop() async {
+    private func streamingTranscriptionLoop(signals: AsyncStream<Void>) async {
         logger.info("streamingTranscriptionLoop: entry")
         guard await asrCoordinator.isInitialized(for: recordingModelChoice ?? selectedModelChoice) else {
             logger.error("streamingTranscriptionLoop: coordinator not initialized, exiting")
             return
         }
 
-        while isTranscribing && !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(80))
-            guard isTranscribing else { break }
+        for await _ in signals {
+            guard isTranscribing, !Task.isCancelled else { break }
 
             let pendingSamples = sampleLock.withLock { () -> [Float] in
                 let samples = sampleBuffer
@@ -1462,8 +1483,9 @@ final class ParakeetEngine: TranscriptionEngine {
         model.tdtModelVersion == .v2 || (model.tdtModelVersion != nil && !vocabularyTerms.isEmpty)
     }
 
-    private func appendCapturedSamples(_ samples: [Float], model: ParakeetModelChoice) {
-        let droppedCount = sampleLock.withLock { () -> Int in
+    private func appendCapturedSamples(_ samples: [Float], model: ParakeetModelChoice, sessionID: UUID? = nil) {
+        let (droppedCount, continuationToSignal) = sampleLock.withLock { () -> (Int, AsyncStream<Void>.Continuation?) in
+            if let sessionID, activeAudioSessionID != sessionID { return (0, nil) }
             let dropped = max(0, sampleBuffer.count + samples.count - hardPendingSampleCap)
             droppedPendingSamples += dropped
             if dropped > 0 { sampleBuffer.removeFirst(min(dropped, sampleBuffer.count)) }
@@ -1474,11 +1496,29 @@ final class ParakeetEngine: TranscriptionEngine {
                 if retainsOriginalAudio { fullRecordingSamples.append(contentsOf: samples) }
             }
             totalSampleCount += samples.count
-            return dropped
+            let shouldSignal = audioSignalThreshold.shouldSignal(totalSamples: totalSampleCount)
+            return (dropped, shouldSignal ? audioProcessingContinuation : nil)
         }
+        continuationToSignal?.yield(())
         if droppedCount > 0 {
             logger.warning("Dropped \(droppedCount, privacy: .public) buffered samples to avoid memory pressure.")
         }
+    }
+
+    private func invalidateAudioProcessingSignals(sessionID: UUID) {
+        let continuation = sampleLock.withLock { () -> AsyncStream<Void>.Continuation? in
+            guard activeAudioSessionID == sessionID else { return nil }
+            activeAudioSessionID = nil
+            let continuation = audioProcessingContinuation
+            audioProcessingContinuation = nil
+            return continuation
+        }
+        continuation?.finish()
+    }
+
+    private func invalidateCurrentAudioProcessingSignals() {
+        let sessionID = sampleLock.withLock { activeAudioSessionID }
+        if let sessionID { invalidateAudioProcessingSignals(sessionID: sessionID) }
     }
 
     /// Concatenates disjoint SenseVoice speech segments. Repeated words are
@@ -1604,6 +1644,32 @@ private actor AsrManagerCoordinator {
                 return manager != nil && models?.version == modelVersion
             }
             return streamingManager != nil && streamingModelChoice == modelChoice
+        }
+    }
+
+    func audioProcessingSignalThreshold(for modelChoice: ParakeetModelChoice) async throws -> AudioProcessingSignalThreshold {
+        switch modelChoice {
+        case .parakeetEou320:
+            guard let manager = streamingManager as? StreamingEouAsrManager else {
+                throw TranscriptionError.engineNotReady
+            }
+            let chunkSize = await manager.chunkSize
+            return AudioProcessingSignalThreshold(
+                firstChunkSamples: chunkSize.chunkSamples,
+                subsequentChunkSamples: chunkSize.shiftSamples)
+        case .nemotron560, .nemotron1120, .nemotron2240:
+            guard let manager = streamingManager as? StreamingNemotronAsrManager else {
+                throw TranscriptionError.engineNotReady
+            }
+            let config = await manager.config
+            return AudioProcessingSignalThreshold(thresholdSamples: config.chunkSamples)
+        case .nemotronMultilingual:
+            guard let manager = multilingualManager else { throw TranscriptionError.engineNotReady }
+            let config = await manager.config
+            return AudioProcessingSignalThreshold(thresholdSamples: config.chunkSamples)
+        default:
+            guard !modelChoice.usesTrueStreaming else { throw TranscriptionError.engineNotReady }
+            return AudioProcessingSignalThreshold(thresholdSamples: BatchTranscriptionPolicy.batchProcessingSignalSamples)
         }
     }
 
@@ -1871,16 +1937,20 @@ private actor AsrManagerCoordinator {
         }
     }
 
-    func resetSession(for modelChoice: ParakeetModelChoice, language: Language?, requiresWholeRecordingFinal: Bool = false) async throws {
+    func resetSession(for modelChoice: ParakeetModelChoice, language: Language?, requiresWholeRecordingFinal: Bool = false,
+                      previewsEnabled: Bool = true) async throws {
         guard isInitialized(for: modelChoice) else { throw TranscriptionError.engineNotReady }
         if !modelChoice.usesTrueStreaming {
             await cancelBatch()
             if modelChoice == .senseVoice {
                 guard let senseVoiceManager, let batchVad else { throw TranscriptionError.engineNotReady }
-                batchSession = BatchTranscriptionSession.senseVoice(manager: senseVoiceManager, vad: batchVad)
+                batchSession = BatchTranscriptionSession.senseVoice(manager: senseVoiceManager, vad: batchVad,
+                                                                    previewsEnabled: previewsEnabled)
             } else {
                 guard let manager, let models, let batchVad else { throw TranscriptionError.engineNotReady }
-                batchSession = try await BatchTranscriptionSession.parakeet(models: models, previewManager: manager, vad: batchVad, language: language, requiresWholeRecordingFinal: requiresWholeRecordingFinal)
+                batchSession = try await BatchTranscriptionSession.parakeet(
+                    models: models, previewManager: manager, vad: batchVad, language: language,
+                    requiresWholeRecordingFinal: requiresWholeRecordingFinal, previewsEnabled: previewsEnabled)
             }
             return
         }

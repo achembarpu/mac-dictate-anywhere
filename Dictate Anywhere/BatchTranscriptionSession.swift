@@ -14,6 +14,7 @@ actor BatchTranscriptionSession {
     private let backend: Backend
     private let language: Language?
     private let vad: VadManager
+    private let previewsEnabled: Bool
     private var updateTask: Task<Void, Never>?
     private var samples = AudioSampleBuffer()
     private var startSample = 0
@@ -26,30 +27,33 @@ actor BatchTranscriptionSession {
     private var vadPending = AudioSampleBuffer()
     private var speechPresence = BatchSpeechPresence()
 
-    private init(backend: Backend, vad: VadManager, language: Language? = nil) {
+    private init(backend: Backend, vad: VadManager, language: Language? = nil, previewsEnabled: Bool) {
         self.backend = backend
         self.vad = vad
         self.language = language
+        self.previewsEnabled = previewsEnabled
     }
 
     static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager, language: Language?,
-                         requiresWholeRecordingFinal: Bool) async throws -> BatchTranscriptionSession {
+                         requiresWholeRecordingFinal: Bool, previewsEnabled: Bool) async throws -> BatchTranscriptionSession {
         if models.version == .v2 || requiresWholeRecordingFinal {
             // The SDK batch path preserves v2 mel context and repairs gaps.
             // Its live overlap path drops clear speech in shifted-seam goldens.
             // Vocabulary uses a whole-recording final too, so its previews do
             // not need a second overlap decoder whose result would be discarded.
-            return BatchTranscriptionSession(backend: .parakeetBatch(previewManager), vad: vad, language: language)
+            return BatchTranscriptionSession(backend: .parakeetBatch(previewManager), vad: vad, language: language,
+                                             previewsEnabled: previewsEnabled)
         }
         let overlapping = SlidingWindowAsrManager(config: .streaming.applying(language: language))
         try await overlapping.loadModels(models)
-        let session = BatchTranscriptionSession(backend: .parakeet(previewManager, overlapping), vad: vad, language: language)
+        let session = BatchTranscriptionSession(backend: .parakeet(previewManager, overlapping), vad: vad,
+                                                language: language, previewsEnabled: previewsEnabled)
         try await session.start()
         return session
     }
 
-    static func senseVoice(manager: SenseVoiceManager, vad: VadManager) -> BatchTranscriptionSession {
-        BatchTranscriptionSession(backend: .senseVoice(manager), vad: vad)
+    static func senseVoice(manager: SenseVoiceManager, vad: VadManager, previewsEnabled: Bool) -> BatchTranscriptionSession {
+        BatchTranscriptionSession(backend: .senseVoice(manager), vad: vad, previewsEnabled: previewsEnabled)
     }
 
     private func start() async throws {
@@ -123,6 +127,7 @@ actor BatchTranscriptionSession {
     }
 
     func preview() async throws -> String {
+        guard previewsEnabled else { return committedText }
         guard !samples.isEmpty else { return committedText }
         // A failed SenseVoice segment is retained for retry. Keep its provisional
         // decode bounded too; the authoritative finish still processes every sample.
@@ -199,6 +204,10 @@ actor BatchTranscriptionSession {
     func cancel() async {
         if case .parakeet(_, let overlapping) = backend {
             await overlapping.cancel()
+            // The pinned SDK's cancel() requests cancellation but does not
+            // await the recognizer task. finish() joins that task even when
+            // it reports the expected cancellation error.
+            _ = try? await overlapping.finish()
             await closeOverlap(overlapping)
         }
         samples.reset()

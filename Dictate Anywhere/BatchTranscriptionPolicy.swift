@@ -4,7 +4,7 @@ import FluidAudio
 /// Audio-time policies. Inference time never creates a queue of stale previews.
 nonisolated enum BatchTranscriptionPolicy {
     static let sampleRate = 16_000
-    static let pollingMilliseconds: UInt64 = 500
+    static let batchProcessingSignalSamples = sampleRate / 4
     static let firstPreviewSamples = sampleRate / 2
     static let previewDeltaSamples = sampleRate
     static let sustainedPreviewStartSamples = sampleRate * 8
@@ -33,8 +33,9 @@ nonisolated enum BatchTranscriptionPolicy {
 
     /// Growing-window TDT guesses repeatedly decode the same audio. Preserve
     /// early feedback, then reduce duplicate inference on sustained recordings.
-    static func shouldPreview(totalSamples: Int, lastPreviewSamples: Int,
+    static func shouldPreview(isEnabled: Bool = true, totalSamples: Int, lastPreviewSamples: Int,
                               hasVisibleText: Bool, model: ParakeetModelChoice) -> Bool {
+        guard isEnabled else { return false }
         let interval: Int
         if !hasVisibleText { interval = firstPreviewSamples }
         else if !model.usesTrueStreaming, model != .senseVoice, totalSamples >= sustainedPreviewStartSamples {
@@ -47,6 +48,36 @@ nonisolated enum BatchTranscriptionPolicy {
     static func finalTranscript(_ final: String, fallback: String) -> String {
         let text = final.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? fallback.trimmingCharacters(in: .whitespacesAndNewlines) : text
+    }
+}
+
+/// Coalesces capture callbacks into bounded audio-time work notifications.
+/// The consumer drains all queued samples after each signal, so a full signal
+/// buffer never drops audio or creates a backlog of stale decode requests.
+nonisolated struct AudioProcessingSignalThreshold: Sendable {
+    private let subsequentChunkSamples: Int
+    private var nextSignalSample: Int
+
+    init(thresholdSamples: Int) {
+        self.init(firstChunkSamples: thresholdSamples, subsequentChunkSamples: thresholdSamples)
+    }
+
+    init(firstChunkSamples: Int, subsequentChunkSamples: Int) {
+        precondition(firstChunkSamples > 0 && subsequentChunkSamples > 0)
+        self.subsequentChunkSamples = subsequentChunkSamples
+        self.nextSignalSample = firstChunkSamples
+    }
+
+    /// Signals only when the recording timeline crosses the next complete SDK
+    /// chunk boundary. A coalesced wake can cover several boundaries because
+    /// the consumer passes all accumulated samples to the SDK at once.
+    mutating func shouldSignal(totalSamples: Int) -> Bool {
+        guard totalSamples >= nextSignalSample else { return false }
+        nextSignalSample += subsequentChunkSamples
+        while nextSignalSample <= totalSamples {
+            nextSignalSample += subsequentChunkSamples
+        }
+        return true
     }
 }
 

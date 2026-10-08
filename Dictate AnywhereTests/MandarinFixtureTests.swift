@@ -115,7 +115,7 @@ final class MandarinFixtureTests: XCTestCase {
         let manager = try XCTUnwrap(Self.manager)
         let full = try await manager.transcribe(audio: all)
         let vad = try await VadManager()
-        let session = BatchTranscriptionSession.senseVoice(manager: manager, vad: vad)
+        let session = BatchTranscriptionSession.senseVoice(manager: manager, vad: vad, previewsEnabled: true)
         for offset in stride(from: 0, to: all.count, by: 8_000) {
             try await session.append(Array(all[offset..<min(offset + 8_000, all.count)]))
         }

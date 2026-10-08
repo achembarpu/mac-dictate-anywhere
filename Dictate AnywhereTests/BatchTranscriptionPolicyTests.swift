@@ -38,6 +38,27 @@ final class BatchTranscriptionPolicyTests: XCTestCase {
         XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(totalSamples: 24_000, lastPreviewSamples: 8_000, hasVisibleText: true, model: .multilingual))
     }
 
+    func testHiddenTextPreviewDisablesProvisionalDecodeScheduling() {
+        XCTAssertFalse(BatchTranscriptionPolicy.shouldPreview(
+            isEnabled: false, totalSamples: 8_000, lastPreviewSamples: 0,
+            hasVisibleText: false, model: .multilingual))
+        XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(
+            isEnabled: true, totalSamples: 8_000, lastPreviewSamples: 0,
+            hasVisibleText: false, model: .multilingual))
+    }
+
+    func testAudioSignalWaitsForCompleteChunkAndKeepsAbsoluteAlignmentAfterCoalescing() {
+        var threshold = AudioProcessingSignalThreshold(firstChunkSamples: 10, subsequentChunkSamples: 5)
+        XCTAssertFalse(threshold.shouldSignal(totalSamples: 0), "An empty buffer must not wake inference")
+        XCTAssertFalse(threshold.shouldSignal(totalSamples: 9), "Do not process an incomplete first chunk")
+        XCTAssertTrue(threshold.shouldSignal(totalSamples: 10))
+        XCTAssertFalse(threshold.shouldSignal(totalSamples: 14), "Do not process an incomplete next chunk")
+        XCTAssertTrue(threshold.shouldSignal(totalSamples: 30), "A coalesced wake covers all complete chunk boundaries")
+        XCTAssertFalse(threshold.shouldSignal(totalSamples: 30), "An already-consumed boundary must not wake again")
+        XCTAssertFalse(threshold.shouldSignal(totalSamples: 34), "A remaining partial tail waits for Stop")
+        XCTAssertTrue(threshold.shouldSignal(totalSamples: 35))
+    }
+
     func testSustainedTDTPreviewsReduceWorkWithoutDelayingFirstText() {
         for model in ParakeetModelChoice.allCases {
             XCTAssertTrue(BatchTranscriptionPolicy.shouldPreview(
