@@ -1693,11 +1693,15 @@ private actor AsrManagerCoordinator {
 
     func isInitialized() -> Bool {
         guard !lifecycleMutationInProgress else { return false }
-        manager != nil || streamingManager != nil || senseVoiceManager != nil || multilingualManager != nil
+        return manager != nil || streamingManager != nil || senseVoiceManager != nil || multilingualManager != nil
     }
 
     func isInitialized(for modelChoice: ParakeetModelChoice) -> Bool {
         guard !lifecycleMutationInProgress else { return false }
+        return isInitializedUnlocked(for: modelChoice)
+    }
+
+    private func isInitializedUnlocked(for modelChoice: ParakeetModelChoice) -> Bool {
         switch modelChoice {
         case .senseVoice:
             return senseVoiceManager != nil
@@ -1740,7 +1744,10 @@ private actor AsrManagerCoordinator {
     func initializeSenseVoice(download: Bool = false) async throws {
         let trace = PerfTrace.begin("stt.modelLoad")
         defer { trace.end() }
-        await cleanup()
+        await waitForLifecycleMutation()
+        lifecycleMutationInProgress = true
+        defer { finishLifecycleMutation() }
+        await cleanupUnlocked()
         // int8: ~225 MB, ANE-targeted, accuracy-neutral per FluidAudio docs.
         // Non-ANE Macs get the fp32 encoder instead — see senseVoiceEncoderPrecision.
         let precision = ParakeetEngine.senseVoiceEncoderPrecision
@@ -1770,7 +1777,10 @@ private actor AsrManagerCoordinator {
         let trace = PerfTrace.begin("stt.modelLoad")
         defer { trace.end() }
         logger.info("initialize: starting (existing manager=\(self.manager != nil, privacy: .public))")
-        await cleanup()
+        await waitForLifecycleMutation()
+        lifecycleMutationInProgress = true
+        defer { finishLifecycleMutation() }
+        await cleanupUnlocked()
         let m = AsrManager(config: config)
         try await m.loadModels(models)
         let vad = try await loadSpeechDetection(download: downloadSpeechDetection)
@@ -1791,12 +1801,15 @@ private actor AsrManagerCoordinator {
         // The picker already hides ANE-only models on Intel; this stops a stale
         // persisted selection from starting a download that can never load.
         guard modelChoice.isAvailableOnThisMac else { throw TranscriptionError.engineNotReady }
-        if isInitialized(for: modelChoice) {
-            try await resetSession(for: modelChoice, language: nil)
+        await waitForLifecycleMutation()
+        lifecycleMutationInProgress = true
+        defer { finishLifecycleMutation() }
+        if isInitializedUnlocked(for: modelChoice) {
+            try await resetSessionUnlocked(for: modelChoice, language: nil)
             return
         }
 
-        await cleanup()
+        await cleanupUnlocked()
         pendingEndOfUtterance = false
 
         switch modelChoice {
@@ -2030,7 +2043,23 @@ private actor AsrManagerCoordinator {
 
     func resetSession(for modelChoice: ParakeetModelChoice, language: Language?, requiresWholeRecordingFinal: Bool = false,
                       previewsEnabled: Bool = true) async throws {
-        guard isInitialized(for: modelChoice) else { throw TranscriptionError.engineNotReady }
+        await waitForLifecycleMutation()
+        lifecycleMutationInProgress = true
+        defer { finishLifecycleMutation() }
+        try await resetSessionUnlocked(
+            for: modelChoice, language: language,
+            requiresWholeRecordingFinal: requiresWholeRecordingFinal,
+            previewsEnabled: previewsEnabled
+        )
+    }
+
+    private func resetSessionUnlocked(
+        for modelChoice: ParakeetModelChoice,
+        language: Language?,
+        requiresWholeRecordingFinal: Bool = false,
+        previewsEnabled: Bool = true
+    ) async throws {
+        guard isInitializedUnlocked(for: modelChoice) else { throw TranscriptionError.engineNotReady }
         if !modelChoice.usesTrueStreaming {
             await cancelBatch()
             if modelChoice == .senseVoice {
@@ -2191,6 +2220,12 @@ private actor AsrManagerCoordinator {
         await waitForLifecycleMutation()
         lifecycleMutationInProgress = true
         defer { finishLifecycleMutation() }
+        await cleanupUnlocked()
+    }
+
+    private func cleanupUnlocked() async {
+        let hadInitializedManager = manager != nil || streamingManager != nil
+            || senseVoiceManager != nil || multilingualManager != nil
         modelGeneration = UUID()
         let tdtTask = vocabularyPreparation?.task
         vocabularyPreparation = nil
@@ -2206,7 +2241,7 @@ private actor AsrManagerCoordinator {
         preparedStreamingTerms = []
         multilingualModelDirectory = nil
         await cancelBatch()
-        logger.info("cleanup: releasing manager (was initialized=\(self.isInitialized(), privacy: .public))")
+        logger.info("cleanup: releasing manager (was initialized=\(hadInitializedManager, privacy: .public))")
         if let manager {
             await manager.cleanup()
         }
