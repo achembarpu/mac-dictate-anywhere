@@ -2000,6 +2000,10 @@ private actor AsrManagerCoordinator {
     }
 
     func downloadSpeechDetection() async throws {
+        await waitForLifecycleMutation()
+        try Task.checkCancellation()
+        lifecycleMutationInProgress = true
+        defer { finishLifecycleMutation() }
         let vad = try await loadSpeechDetection(download: true)
         try Task.checkCancellation()
         batchVad = vad
