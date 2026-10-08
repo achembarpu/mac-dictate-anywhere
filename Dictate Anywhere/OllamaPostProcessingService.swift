@@ -113,12 +113,12 @@ enum OllamaPostProcessingService {
         let instructions = remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
         let key = try detailsKey(baseURL: baseURL, model: trimmedModel)
         let support = schemaSupport ?? (session === URLSession.shared ? self.schemaSupport : CleanupSchemaSupport())
-        var structuredOutput = await support.usesStructuredOutput(for: key)
-        var adaptedSchema = false
         return try await RemoteCleanupProcessing.process(
             text: text, instructions: instructions, vocabulary: vocabulary, context: context,
             contextLength: contextLength
         ) { chunk in
+            var structuredOutput = await support.usesStructuredOutput(for: key)
+            var adaptedSchema = false
             for attempt in 0..<2 {
                 var request = URLRequest(url: try endpointURL(baseURL: baseURL, endpoint: .generate))
                 request.httpMethod = "POST"

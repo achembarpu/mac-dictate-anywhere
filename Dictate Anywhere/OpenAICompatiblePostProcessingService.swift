@@ -87,11 +87,11 @@ enum OpenAICompatiblePostProcessingService {
         let key = SchemaKey(endpoint: DiscoveryKey(endpoint: try endpointURL(baseURL: baseURL, path: "chat/completions"),
             credentialID: credentialIdentity(apiKey: trimmedAPIKey)), model: trimmedModel)
         let support = schemaSupport ?? (session === URLSession.shared ? self.schemaSupport : CleanupSchemaSupport())
-        var options = CleanupChatOptions(structuredOutput: await support.usesStructuredOutput(for: key))
-        var adaptedSchema = false
         return try await RemoteCleanupProcessing.process(
             text: text, instructions: instructions, vocabulary: vocabulary, context: context
         ) { chunk in
+            var options = CleanupChatOptions(structuredOutput: await support.usesStructuredOutput(for: key))
+            var adaptedSchema = false
             for attempt in 0..<2 {
                 do {
                     let output = try await performChatCompletionRequest(baseURL: baseURL, model: trimmedModel,

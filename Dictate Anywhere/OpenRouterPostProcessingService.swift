@@ -188,11 +188,16 @@ enum OpenRouterPostProcessingService {
         if let capabilities {
             options.structuredOutput = capabilities.supportedParameters == nil || capabilities.supportsStructuredOutputs
         }
+        let initialOptions = options
         return try await RemoteCleanupProcessing.process(
             text: text, instructions: instructions, vocabulary: vocabulary, context: context,
             contextLength: capabilities?.contextLength ?? 8_192,
-            maximumCompletionTokens: capabilities?.maximumCompletionTokens
+            maximumCompletionTokens: capabilities?.maximumCompletionTokens,
+            maximumConcurrentRequests: 2
         ) { chunk in
+            // Each concurrent request owns its adaptation. One rejection must
+            // never mutate another request's provider-routing requirements.
+            var options = initialOptions
             // At most one retry for an explicitly unsupported schema.
             for attempt in 0..<2 {
                 do {

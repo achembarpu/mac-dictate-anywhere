@@ -142,7 +142,8 @@ enum RemoteCleanupProcessing {
     static func process(
         text: String, instructions: String, vocabulary: [String], context: DictationPostProcessingContext?,
         contextLength: Int = 8_192, maximumCompletionTokens: Int? = nil,
-        generate: (String) async throws -> String
+        maximumConcurrentRequests: Int = 1,
+        generate: @escaping @Sendable (String) async throws -> String
     ) async throws -> String {
         let fixedTokens = TranscriptCleanupPlan.estimatedTokens(instructions) + 512
         let chunks = try await TranscriptCleanupPlan.chunks(text) { candidate in
@@ -151,13 +152,48 @@ enum RemoteCleanupProcessing {
             return fixedTokens + TranscriptCleanupPlan.estimatedTokens(request) + output <= contextLength
                 && (maximumCompletionTokens.map { output <= $0 } ?? true)
         }
-        var outputs: [String] = []
-        for chunk in chunks {
-            try Task.checkCancellation()
-            guard !chunk.text.isEmpty else { outputs.append(chunk.original); continue }
-            let raw = try await generate(chunk.text)
-            outputs.append(chunk.replacingText(with: cleanedRemotePostProcessingResponse(from: raw, originalText: chunk.text)))
+        // Local model servers keep serial generation. Independent cloud
+        // passages can overlap without changing partitions or their order.
+        let limit = min(2, max(1, maximumConcurrentRequests))
+        if limit == 1 || chunks.count <= 1 {
+            var outputs: [String] = []
+            for chunk in chunks {
+                outputs.append(try await processChunk(chunk, generate: generate))
+            }
+            return outputs.joined()
         }
-        return outputs.joined()
+        return try await withThrowingTaskGroup(of: (Int, String).self) { group in
+            var nextIndex = 0
+            var outputs = Array(repeating: "", count: chunks.count)
+            func enqueueNext() {
+                let index = nextIndex
+                let chunk = chunks[index]
+                nextIndex += 1
+                group.addTask {
+                    (index, try await processChunk(chunk, generate: generate))
+                }
+            }
+            for _ in 0..<min(limit, chunks.count) { enqueueNext() }
+            do {
+                while let (index, output) = try await group.next() {
+                    try Task.checkCancellation()
+                    outputs[index] = output
+                    if nextIndex < chunks.count { enqueueNext() }
+                }
+            } catch {
+                group.cancelAll()
+                throw error // No partial or reordered cleanup can escape.
+            }
+            return outputs.joined()
+        }
+    }
+
+    private static func processChunk(_ chunk: TranscriptCleanupChunk,
+                                     generate: @Sendable (String) async throws -> String) async throws -> String {
+        try Task.checkCancellation()
+        guard !chunk.text.isEmpty else { return chunk.original }
+        let raw = try await generate(chunk.text)
+        try Task.checkCancellation()
+        return chunk.replacingText(with: cleanedRemotePostProcessingResponse(from: raw, originalText: chunk.text))
     }
 }
