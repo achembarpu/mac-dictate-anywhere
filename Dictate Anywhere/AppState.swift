@@ -167,6 +167,8 @@ final class AppState {
     /// Model preparation outlives a settings view; shutdown must join blocking
     /// inference before releasing the engine underneath it.
     private var cleanupPreparation: CleanupPreparation?
+    private var cleanupRuntimeReleaseInProgress = false
+    private var cleanupRuntimeReleaseWaiters: [CheckedContinuation<Void, Never>] = []
     private var preparedCleanupKey: CleanupPreparationKey?
     var isPreparingCleanupEngine = false
     private var cleanupPreparationFailure: (key: CleanupPreparationKey, message: String)?
@@ -714,6 +716,7 @@ final class AppState {
     }
 
     private func prepareCleanupEngineIfNeeded(force: Bool, allowRecording: Bool) async {
+        await waitForCleanupRuntimeRelease()
         guard !AppDelegate.isRunningTests || cleanupModelPreparation != nil else { return }
         guard !Task.isCancelled, !isShuttingDown, !isCancelling else { return }
         let previouslyPreparedKey = preparedCleanupKey ?? cleanupPreparation?.key
@@ -823,7 +826,10 @@ final class AppState {
     /// Join an obsolete preparation before freeing its runtime. Re-read the
     /// selected settings after the join so a rapid switch back keeps the model.
     private func releaseDeselectedCleanupRuntime(previouslyPreparedKey: CleanupPreparationKey?) async {
+        await waitForCleanupRuntimeRelease()
         guard !isShuttingDown, status == .idle else { return }
+        cleanupRuntimeReleaseInProgress = true
+        defer { finishCleanupRuntimeRelease() }
         if let inFlight = cleanupPreparation,
            !cleanupConfigurationMatches(inFlight.key, cleanupPreparationKey) {
             inFlight.task.cancel()
@@ -865,6 +871,22 @@ final class AppState {
         if (key.mode != .appleIntelligence || key.engine == .assemblyAI), #available(macOS 26, *) {
             await AIPostProcessingService.discardPreparedSession()
         }
+    }
+
+    /// Preparation and release share process-wide model services. Keep a
+    /// newer selection from warming a runtime while an older selection is
+    /// still unloading it across an actor suspension.
+    private func waitForCleanupRuntimeRelease() async {
+        while cleanupRuntimeReleaseInProgress {
+            await withCheckedContinuation { cleanupRuntimeReleaseWaiters.append($0) }
+        }
+    }
+
+    private func finishCleanupRuntimeRelease() {
+        cleanupRuntimeReleaseInProgress = false
+        let waiters = cleanupRuntimeReleaseWaiters
+        cleanupRuntimeReleaseWaiters.removeAll(keepingCapacity: true)
+        waiters.forEach { $0.resume() }
     }
 
     private func handleAccessibilityPermissionChanged(_ granted: Bool) {
