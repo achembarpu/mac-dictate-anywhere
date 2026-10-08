@@ -99,6 +99,9 @@ final class AssemblyAIEngine: TranscriptionEngine {
     /// `stateLock` because live preview callbacks arrive off the main actor.
     private var firstPartialEmitted = false
     private var fullRecordingSamples: [Float] = []
+    /// Identifies the capture that owns `fullRecordingSamples`. Guarded by
+    /// `stateLock` because capture callbacks run off the main actor.
+    private var recordingSessionID: UUID?
     private var levelSampleBuffer = AudioLevelSampleBuffer()
     private var recordingExceededLimit = false
     private var audioCaptureController: AudioCaptureController?
@@ -149,8 +152,17 @@ final class AssemblyAIEngine: TranscriptionEngine {
         let trace = PerfTrace.begin("audio.startup")
         defer { trace.end() }
         guard isReady else { throw AssemblyAIEngineError.missingAPIKey }
+        let recordingSessionID = UUID()
+        let needsLivePreview = Settings.shared.showTextPreview
         audioCaptureStartupCancellation?.cancel()
-        await stopLivePreview()
+        stateLock.withLock {
+            self.recordingSessionID = recordingSessionID
+            livePreviewSessionID = nil
+        }
+        await stopLivePreview(for: recordingSessionID)
+        guard stateLock.withLock({ self.recordingSessionID == recordingSessionID }) else {
+            throw CancellationError()
+        }
         lastTranscriptionError = nil
         lastRawTranscript = nil
         lastInsertionPlan = nil
@@ -167,17 +179,20 @@ final class AssemblyAIEngine: TranscriptionEngine {
         audioCaptureStartupCancellation = startupCancellation
         let recoveryCapture = self.recoveryCapture
         let usesExplicitMicrophoneSelection = Settings.shared.selectedMicrophoneUID != nil
-        let livePreviewID = UUID()
+        let livePreviewID = needsLivePreview ? recordingSessionID : nil
         stateLock.withLock { livePreviewSessionID = livePreviewID }
         let initialContextualVocabulary = sessionContextualVocabulary
-        let previewSession = try await PerfTrace.measure("stt.livePreviewStart") {
+        let previewSession: (any AppleSpeechSessionProtocol)? = try await PerfTrace.measure(
+            "stt.livePreviewStart"
+        ) {
+            guard let livePreviewID else { return nil }
             var previewSession = await makeLivePreviewSession(id: livePreviewID)
+            guard audioCaptureStartupCancellation === startupCancellation,
+                  stateLock.withLock({ self.recordingSessionID == recordingSessionID }) else {
+                await previewSession?.cancel()
+                throw CancellationError()
+            }
             if let session = previewSession {
-                guard audioCaptureStartupCancellation === startupCancellation else {
-                    stateLock.withLock { livePreviewSessionID = nil }
-                    await session.cancel()
-                    throw CancellationError()
-                }
                 do {
                     try await session.start()
                 } catch {
@@ -193,9 +208,18 @@ final class AssemblyAIEngine: TranscriptionEngine {
             }
             return previewSession
         }
+        guard audioCaptureStartupCancellation === startupCancellation,
+              stateLock.withLock({ self.recordingSessionID == recordingSessionID }) else {
+            await previewSession?.cancel()
+            throw CancellationError()
+        }
         livePreviewSession = previewSession
         if sessionContextualVocabulary != initialContextualVocabulary {
             await updateSessionContextualVocabulary(sessionContextualVocabulary)
+        }
+        guard stateLock.withLock({ self.recordingSessionID == recordingSessionID }) else {
+            await stopLivePreview(for: recordingSessionID)
+            throw CancellationError()
         }
 
         do {
@@ -203,15 +227,20 @@ final class AssemblyAIEngine: TranscriptionEngine {
                 timeout: 5,
                 queue: audioCaptureSetupQueue,
                 cancellation: startupCancellation
-            ) { [self, previewSession] in
+            ) { [self, previewSession, recordingSessionID] in
                 try makeAudioCaptureController(
                     deviceID: deviceID,
                     usesExplicitMicrophoneSelection: usesExplicitMicrophoneSelection
-                ) { [weak self, previewSession] samples in
+                ) { [weak self, previewSession, recordingSessionID] samples in
                     guard let self else { return }
                     recoveryCapture?.append(samples)
+                    let isCurrentSession = self.stateLock.withLock {
+                        self.recordingSessionID == recordingSessionID
+                    }
+                    guard isCurrentSession else { return }
                     previewSession?.append(samples: samples)
                     self.stateLock.withLock {
+                        guard self.recordingSessionID == recordingSessionID else { return }
                         self.levelSampleBuffer.append(samples)
                         let remaining = Self.maximumSamples - self.fullRecordingSamples.count
                         if remaining > 0 {
@@ -223,7 +252,8 @@ final class AssemblyAIEngine: TranscriptionEngine {
                     }
                 }
             }
-            guard audioCaptureStartupCancellation === startupCancellation else {
+            guard audioCaptureStartupCancellation === startupCancellation,
+                  stateLock.withLock({ self.recordingSessionID == recordingSessionID }) else {
                 controller.stop()
                 throw CancellationError()
             }
@@ -236,7 +266,7 @@ final class AssemblyAIEngine: TranscriptionEngine {
             if audioCaptureStartupCancellation === startupCancellation {
                 audioCaptureStartupCancellation = nil
             }
-            await stopLivePreview()
+            await stopLivePreview(for: recordingSessionID)
             throw error
         }
     }
@@ -266,8 +296,17 @@ final class AssemblyAIEngine: TranscriptionEngine {
     func stopRecording() async -> String {
         let trace = PerfTrace.begin("stt.stopToFinal")
         defer { trace.end() }
+        guard let requestSessionID = stateLock.withLock({ recordingSessionID }) else {
+            // Stop can be called after a capture was cancelled or failed to
+            // start. Warm-up is speculative and must still be cancelled here.
+            let connectionPreparation = warmUpTask
+            warmUpTask = nil
+            connectionPreparation?.cancel()
+            return ""
+        }
         stopAudioCapture()
-        await stopLivePreview()
+        await stopLivePreview(for: requestSessionID)
+        guard stateLock.withLock({ recordingSessionID == requestSessionID }) else { return "" }
         // Connection preparation is speculative, not a dependency of the
         // transcription request. A slow /warm must not delay Stop by its
         // ten-second timeout. Keep it owned until this request completes.
@@ -280,36 +319,56 @@ final class AssemblyAIEngine: TranscriptionEngine {
         }
         do {
             guard !snapshot.exceededLimit else { throw AssemblyAIEngineError.recordingTooLong }
-            let result = try await transcribe(samples: snapshot.samples)
-            stateLock.withLock { transcript = result }
+            let result = try await transcribe(
+                samples: snapshot.samples,
+                recordingSessionID: requestSessionID
+            )
+            let completedCurrentSession = stateLock.withLock { () -> Bool in
+                guard recordingSessionID == requestSessionID else { return false }
+                transcript = result
+                fullRecordingSamples.removeAll(keepingCapacity: false)
+                recordingSessionID = nil
+                return true
+            }
+            guard completedCurrentSession else { return "" }
             lastTranscriptionError = nil
             return result
         } catch is CancellationError {
-            lastTranscriptionError = nil
+            if stateLock.withLock({ recordingSessionID == requestSessionID }) {
+                lastTranscriptionError = nil
+            }
             return ""
         } catch {
             if Task.isCancelled || (error as? URLError)?.code == .cancelled {
-                lastTranscriptionError = nil
+                if stateLock.withLock({ recordingSessionID == requestSessionID }) {
+                    lastTranscriptionError = nil
+                }
                 return ""
             }
             logger.error("Dictation request failed: \(error.localizedDescription, privacy: .public)")
-            lastTranscriptionError = error.localizedDescription
+            if stateLock.withLock({ recordingSessionID == requestSessionID }) {
+                lastTranscriptionError = error.localizedDescription
+            }
             return ""
         }
     }
 
     func cancel() async {
+        let cancelledSessionID = stateLock.withLock { recordingSessionID }
         audioCaptureStartupCancellation?.cancel()
         audioCaptureStartupCancellation = nil
         stopAudioCapture(outcome: "cancelled")
-        await stopLivePreview(outcome: "cancelled")
-        warmUpTask?.cancel()
+        let connectionPreparation = warmUpTask
         warmUpTask = nil
+        connectionPreparation?.cancel()
+        await stopLivePreview(for: cancelledSessionID, outcome: "cancelled")
+        guard stateLock.withLock({ recordingSessionID == cancelledSessionID }) else { return }
         lastTranscriptionError = nil
         sessionContextualVocabulary = []
         sessionDictationContext = nil
         stateLock.withLock {
             transcript = ""
+            recordingSessionID = nil
             fullRecordingSamples.removeAll(keepingCapacity: false)
             levelSampleBuffer.reset(keepingCapacity: false)
             recordingExceededLimit = false
@@ -331,12 +390,20 @@ final class AssemblyAIEngine: TranscriptionEngine {
         return try await transcribe(samples: samples)
     }
 
-    private func transcribe(samples: [Float]) async throws -> String {
+    private func transcribe(
+        samples: [Float],
+        recordingSessionID: UUID? = nil
+    ) async throws -> String {
         let trace = PerfTrace.begin("stt.assemblyAIFinal", counts: ["input_samples": samples.count])
         defer { trace.end() }
-        lastInsertionPlan = nil
-        lastResultWasPolished = false
-        lastRawTranscript = nil
+        let ownsResultState = recordingSessionID.map { id in
+            stateLock.withLock { self.recordingSessionID == id }
+        } ?? true
+        if ownsResultState {
+            lastInsertionPlan = nil
+            lastResultWasPolished = false
+            lastRawTranscript = nil
+        }
         try Task.checkCancellation()
         guard !samples.isEmpty else { throw AssemblyAIEngineError.noAudio }
         let settings = Settings.shared
@@ -413,11 +480,16 @@ final class AssemblyAIEngine: TranscriptionEngine {
         let expectsInsertionPlan = outputMode == .polished && Self.canRequestInsertionPlan(
             context: context, shareSurroundingText: shareSurroundingText
         )
-        lastRawTranscript = decoded.text
+        let mayPublishResult = recordingSessionID.map { id in
+            stateLock.withLock { self.recordingSessionID == id }
+        } ?? true
+        if mayPublishResult {
+            lastRawTranscript = decoded.text
+        }
         let allowsItems = Self.allowsEnumeratedItems(context: context)
         let result = Self.finalText(from: decoded, outputMode: outputMode,
                                    requiresInsertionPlan: expectsInsertionPlan, allowsEnumeratedItems: allowsItems)
-        if outputMode == .polished,
+        if mayPublishResult, outputMode == .polished,
            let polished = decoded.llmResponse, !polished.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             lastInsertionPlan = expectsInsertionPlan
                 ? ModelInsertionPlan.decode(polished, allowsEnumeratedItems: allowsItems) : nil
@@ -705,10 +777,18 @@ final class AssemblyAIEngine: TranscriptionEngine {
         }
     }
 
-    private func stopLivePreview(outcome: StaticString = "completed") async {
+    private func stopLivePreview(
+        for recordingSessionID: UUID?,
+        outcome: StaticString = "completed"
+    ) async {
+        let canStop = stateLock.withLock { () -> Bool in
+            guard self.recordingSessionID == recordingSessionID else { return false }
+            livePreviewSessionID = nil
+            return true
+        }
+        guard canStop else { return }
         let session = livePreviewSession
         livePreviewSession = nil
-        stateLock.withLock { livePreviewSessionID = nil }
         guard let session else { return }
         let trace = PerfTrace.begin("stt.livePreviewStop")
         await session.cancel()
