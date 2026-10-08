@@ -252,6 +252,67 @@ final class CleanupProviderContractTests: XCTestCase {
         XCTAssertTrue(payloads.allSatisfy { $0["temperature"] == nil }, "Unknown model sampling belongs to its server")
     }
 
+    func testPortableRemembersConfirmedSchemaRejectionAndScopesItToEndpointModelAndCredential() async throws {
+        let requests = OSAllocatedUnfairLock(initialState: [Bool]())
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            let schema = try Self.payload(request)["response_format"] != nil
+            requests.withLock { $0.append(schema) }
+            return schema ? (400, Data(#"{"error":{"message":"response_format json_schema is not supported"}}"#.utf8))
+                : (200, Data(#"{"choices":[{"finish_reason":"stop","message":{"content":"{\"action\":\"pasteCleanedText\",\"text\":\"Hello.\"}"}}]}"#.utf8))
+        } }
+        let clock = OSAllocatedUnfairLock(initialState: ContinuousClock.now)
+        let support = CleanupSchemaSupport<OpenAICompatiblePostProcessingService.SchemaKey>(
+            lifetime: .seconds(60), now: { clock.withLock { $0 } })
+        for (base, model, key) in [("http://cleanup.test", "model", "first"), ("http://cleanup.test/v1/", "model", " first "),
+                                   ("http://other.test", "model", "first"), ("http://cleanup.test", "other", "first"),
+                                   ("http://cleanup.test", "model", "second")] {
+            let output = try await OpenAICompatiblePostProcessingService.process(text: "hello", baseURL: base,
+                model: model, apiKey: key, prompt: "Correct punctuation.", session: session, schemaSupport: support)
+            XCTAssertEqual(output, "Hello.")
+        }
+        XCTAssertEqual(requests.withLock { $0 }, [true, false, false, true, false, true, false, true, false])
+        clock.withLock { $0 = $0.advanced(by: .seconds(61)) }
+        _ = try await OpenAICompatiblePostProcessingService.process(text: "hello", baseURL: "http://cleanup.test", model: "model",
+            apiKey: "first", prompt: "Correct punctuation.", session: session, schemaSupport: support)
+        XCTAssertEqual(requests.withLock { Array($0.suffix(2)) }, [true, false], "Expiry probes support again")
+    }
+
+    func testFailedUnstructuredRetryDoesNotTeachSchemaSupport() async throws {
+        let schemas = OSAllocatedUnfairLock(initialState: [Bool]())
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            let schema = try Self.payload(request)["response_format"] != nil
+            schemas.withLock { $0.append(schema) }
+            return schema ? (400, Data(#"{"error":{"message":"response_format is not supported"}}"#.utf8)) : (503, Data())
+        } }
+        let support = CleanupSchemaSupport<OpenAICompatiblePostProcessingService.SchemaKey>()
+        for _ in 0..<2 {
+            do {
+                _ = try await OpenAICompatiblePostProcessingService.process(text: "hello", baseURL: "http://cleanup.test", model: "model",
+                    apiKey: "", prompt: "Correct punctuation.", session: session, schemaSupport: support)
+                XCTFail("Unavailable cleanup must fail")
+            } catch { XCTAssertTrue(error is OpenAICompatiblePostProcessingService.ServiceError) }
+        }
+        XCTAssertEqual(schemas.withLock { $0 }, [true, false, true, false])
+    }
+
+    func testOllamaRemembersConfirmedFormatRejectionAcrossLatestAlias() async throws {
+        let schemas = OSAllocatedUnfairLock(initialState: [Bool]())
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            if request.url?.path.hasSuffix("show") == true { return (200, Data(#"{}"#.utf8)) }
+            let schema = try Self.payload(request)["format"] != nil
+            schemas.withLock { $0.append(schema) }
+            return schema ? (400, Data(#"{"error":"format is not supported for cloud models"}"#.utf8))
+                : (200, Data(#"{"done":true,"done_reason":"stop","response":"{\"action\":\"pasteCleanedText\",\"text\":\"Hello.\"}"}"#.utf8))
+        } }
+        let support = CleanupSchemaSupport<OllamaPostProcessingService.DetailsKey>()
+        for model in ["model", "model:latest", "other"] {
+            let output = try await OllamaPostProcessingService.process(text: "hello", baseURL: "http://cleanup.test", model: model,
+                prompt: "Correct punctuation.", session: session, schemaSupport: support)
+            XCTAssertEqual(output, "Hello.")
+        }
+        XCTAssertEqual(schemas.withLock { $0 }, [true, false, false, true, false])
+    }
+
     func testOllamaNonThinkingBudgetAndTransportMetadataAreIsolated() async throws {
         let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
         let discoveries = OSAllocatedUnfairLock(initialState: 0)

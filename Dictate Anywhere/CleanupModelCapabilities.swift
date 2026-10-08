@@ -106,6 +106,38 @@ nonisolated struct CleanupChatOptions: Sendable {
     }
 }
 
+/// Remember explicit protocol rejections, never transcript text or credentials.
+/// A short lifetime lets a server upgrade regain structured output automatically.
+actor CleanupSchemaSupport<Key: Hashable & Sendable> {
+    private let lifetime: Duration
+    private let capacity: Int
+    private let now: @Sendable () -> ContinuousClock.Instant
+    private var rejected: [Key: ContinuousClock.Instant] = [:]
+
+    init(lifetime: Duration = .seconds(300), capacity: Int = 8,
+         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }) {
+        self.lifetime = lifetime
+        self.capacity = max(1, capacity)
+        self.now = now
+    }
+
+    func usesStructuredOutput(for key: Key) -> Bool {
+        guard let time = rejected[key] else { return true }
+        if time.duration(to: now()) < lifetime { return false }
+        rejected[key] = nil
+        return true
+    }
+
+    func recordUnsupportedSchema(for key: Key) {
+        rejected[key] = now()
+        if rejected.count > capacity, let oldest = rejected.min(by: { $0.value < $1.value })?.key {
+            rejected[oldest] = nil
+        }
+    }
+
+    func invalidate(_ key: Key) { rejected[key] = nil }
+}
+
 enum RemoteCleanupProcessing {
     static func process(
         text: String, instructions: String, vocabulary: [String], context: DictationPostProcessingContext?,

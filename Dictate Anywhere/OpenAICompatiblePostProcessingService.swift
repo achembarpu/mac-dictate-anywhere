@@ -14,6 +14,11 @@ enum OpenAICompatiblePostProcessingService {
         let credentialID: Data
     }
     private static let discovery = TimedRequestCache<DiscoveryKey, [String]>()
+    nonisolated struct SchemaKey: Hashable, Sendable {
+        let endpoint: DiscoveryKey
+        let model: String
+    }
+    private static let schemaSupport = CleanupSchemaSupport<SchemaKey>()
 
     struct Availability: Sendable {
         let models: [String]
@@ -67,7 +72,8 @@ enum OpenAICompatiblePostProcessingService {
         prompt: String,
         vocabulary: [String] = [],
         context: DictationPostProcessingContext? = nil,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        schemaSupport: CleanupSchemaSupport<SchemaKey>? = nil
     ) async throws -> String {
         let trace = PerfTrace.begin("cleanup.request")
         defer { trace.end() }
@@ -78,18 +84,26 @@ enum OpenAICompatiblePostProcessingService {
 
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let instructions = remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
-        var options = CleanupChatOptions()
+        let key = SchemaKey(endpoint: DiscoveryKey(endpoint: try endpointURL(baseURL: baseURL, path: "chat/completions"),
+            credentialID: credentialIdentity(apiKey: trimmedAPIKey)), model: trimmedModel)
+        let support = schemaSupport ?? (session === URLSession.shared ? self.schemaSupport : CleanupSchemaSupport())
+        var options = CleanupChatOptions(structuredOutput: await support.usesStructuredOutput(for: key))
+        var adaptedSchema = false
         return try await RemoteCleanupProcessing.process(
             text: text, instructions: instructions, vocabulary: vocabulary, context: context
         ) { chunk in
             for attempt in 0..<2 {
                 do {
-                    return try await performChatCompletionRequest(baseURL: baseURL, model: trimmedModel,
+                    let output = try await performChatCompletionRequest(baseURL: baseURL, model: trimmedModel,
                         apiKey: trimmedAPIKey, instructions: instructions,
                         prompt: remotePostProcessingRequestPrompt(text: chunk, vocabulary: vocabulary, context: context),
                         options: options, session: session)
+                    try Task.checkCancellation()
+                    if adaptedSchema { await support.recordUnsupportedSchema(for: key) }
+                    return output
                 } catch let error as ServiceError {
                     guard case .serverMessage(let message) = error, attempt == 0, options.adapt(to: message) else { throw error }
+                    adaptedSchema = true
                 }
             }
             throw CleanupResponseError.incompleteResponse

@@ -20,6 +20,7 @@ enum OllamaPostProcessingService {
     }
 
     private static let detailsCache = TimedRequestCache<DetailsKey, OllamaModelDetails>()
+    private static let schemaSupport = CleanupSchemaSupport<DetailsKey>()
     // A short interval avoids redundant empty generation while still checking
     // residency well before the server's ten-minute keep_alive expires.
     private static let preloadCache = TimedRequestCache<PreloadKey, Bool>(lifetime: .seconds(60))
@@ -97,7 +98,8 @@ enum OllamaPostProcessingService {
         prompt: String,
         vocabulary: [String] = [],
         context: DictationPostProcessingContext? = nil,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        schemaSupport: CleanupSchemaSupport<DetailsKey>? = nil
     ) async throws -> String {
         let trace = PerfTrace.begin("cleanup.request")
         defer { trace.end() }
@@ -109,7 +111,10 @@ enum OllamaPostProcessingService {
         let details = try? await modelDetails(baseURL: baseURL, model: trimmedModel, session: session)
         let contextLength = details?.cleanupContextLength ?? 8_192
         let instructions = remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
-        var structuredOutput = true
+        let key = try detailsKey(baseURL: baseURL, model: trimmedModel)
+        let support = schemaSupport ?? (session === URLSession.shared ? self.schemaSupport : CleanupSchemaSupport())
+        var structuredOutput = await support.usesStructuredOutput(for: key)
+        var adaptedSchema = false
         return try await RemoteCleanupProcessing.process(
             text: text, instructions: instructions, vocabulary: vocabulary, context: context,
             contextLength: contextLength
@@ -134,7 +139,12 @@ enum OllamaPostProcessingService {
                 if structuredOutput { payload["format"] = remotePostProcessingOutputSchema }
                 if let think = details?.thinkValue(for: reasoning) { payload["think"] = think.jsonValue }
                 request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-                do { return try await performGenerateRequest(request, session: session) }
+                do {
+                    let output = try await performGenerateRequest(request, session: session)
+                    try Task.checkCancellation()
+                    if adaptedSchema { await support.recordUnsupportedSchema(for: key) }
+                    return output
+                }
                 catch let error as ServiceError {
                     // Ollama Cloud does not currently support schema output.
                     // Adapt only an explicit format rejection; keep the JSON
@@ -142,6 +152,7 @@ enum OllamaPostProcessingService {
                     guard case .serverMessage(let message) = error, attempt == 0, structuredOutput,
                           CleanupRequestAdaptation.unsupportedParameter(in: message) == .structuredOutput else { throw error }
                     structuredOutput = false
+                    adaptedSchema = true
                 }
             }
             throw CleanupResponseError.incompleteResponse
@@ -268,6 +279,7 @@ enum OllamaPostProcessingService {
         }.value
         let key = try detailsKey(baseURL: baseURL, model: trimmedModel)
         await detailsCache.invalidate(key)
+        await schemaSupport.invalidate(key)
         await preloadCache.invalidate { $0.details == key }
     }
 
