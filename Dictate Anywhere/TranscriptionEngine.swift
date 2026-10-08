@@ -644,12 +644,12 @@ final class ParakeetEngine: TranscriptionEngine {
         let selectedModel = selectedModelChoice
         let isSelectedModelLoaded = await asrCoordinator.isInitialized(for: selectedModel)
         if !isSelectedModelLoaded {
+            await asrCoordinator.cleanup()
+            loadedModels = nil
+            invalidateVocabularyReadiness()
             await MainActor.run {
                 self.isReady = false
             }
-            invalidateVocabularyReadiness()
-            await asrCoordinator.cleanup()
-            loadedModels = nil
         }
 
         await recheckModelOnDisk(for: selectedModel)
@@ -1238,6 +1238,23 @@ final class ParakeetEngine: TranscriptionEngine {
             self.currentTranscript = ""
             self.audioSamples = []
         }
+    }
+
+    /// Releases speech weights only after capture and inference owners have
+    /// unwound. AppState calls this when the user selects another provider.
+    func unloadDeselectedModel() async {
+        await cancel()
+        await asrCoordinator.cleanup()
+        loadedModels = nil
+        invalidateVocabularyReadiness()
+        await MainActor.run { self.isReady = false }
+    }
+
+    /// Keep the selected speech model warm while dropping vocabulary-only
+    /// heads and cached graphs after FluidAudio vocabulary cleanup is deselected.
+    func releaseVocabularyModels() async {
+        await asrCoordinator.releaseVocabularyModels()
+        invalidateVocabularyReadiness()
     }
 
     func transcribeRecording(at url: URL) async throws -> String {
@@ -2186,5 +2203,25 @@ private actor AsrManagerCoordinator {
         multilingualManager = nil
         pendingEndOfUtterance = false
         ctcModels = nil
+    }
+
+    func releaseVocabularyModels() async {
+        modelGeneration = UUID()
+        let tdtTask = vocabularyPreparation?.task
+        vocabularyPreparation = nil
+        tdtTask?.cancel()
+        _ = try? await tdtTask?.value
+        let streamingTask = streamingVocabularyPreparation?.task
+        streamingVocabularyPreparation = nil
+        streamingTask?.cancel()
+        _ = try? await streamingTask?.value
+        preparedVocabulary = nil
+        preparedVocabularyTerms = []
+        preparedStreamingTerms = []
+        cachedVocabularyHead = nil
+        ctcModels = nil
+        if let multilingualManager {
+            await multilingualManager.setCustomVocabulary([])
+        }
     }
 }

@@ -137,6 +137,8 @@ final class AppState {
     }
 
     private var enginePreparation: EnginePreparation?
+    private var appleSpeechIdlePreparation: Task<Void, Never>?
+    private var appleSpeechIdlePreparationID: UUID?
     private var recordingCleanupPreparation: Task<Void, Never>?
     struct CleanupPreparationKey: Equatable {
         let engine: TranscriptionEngineChoice
@@ -447,6 +449,10 @@ final class AppState {
         invalidateContextCapture()
         startupTask?.cancel()
         startupTask = nil
+        appleSpeechIdlePreparation?.cancel()
+        await appleSpeechIdlePreparation?.value
+        appleSpeechIdlePreparation = nil
+        appleSpeechIdlePreparationID = nil
         inputSourceApplyTask?.cancel()
         inputSourceApplyTask = nil
         activeRecordingStartupID = nil
@@ -710,6 +716,23 @@ final class AppState {
     private func prepareCleanupEngineIfNeeded(force: Bool, allowRecording: Bool) async {
         guard !AppDelegate.isRunningTests || cleanupModelPreparation != nil else { return }
         guard !Task.isCancelled, !isShuttingDown, !isCancelling else { return }
+        let previouslyPreparedKey = preparedCleanupKey ?? cleanupPreparation?.key
+        let requestedMode = cleanupPreparationKey.mode
+        while let inFlight = cleanupPreparation {
+            if inFlight.key.mode != requestedMode { inFlight.task.cancel() }
+            let ready = await inFlight.task.value
+            if cleanupPreparation?.id == inFlight.id {
+                cleanupPreparation = nil
+                isPreparingCleanupEngine = false
+                if !inFlight.task.isCancelled { recordCleanupPreparation(ready, key: inFlight.key) }
+            }
+            guard !Task.isCancelled, !isShuttingDown, !isCancelling else { return }
+            if cleanupConfigurationMatches(inFlight.key, cleanupPreparationKey) || isCleanupEnginePrepared { return }
+        }
+        await releaseDeselectedCleanupRuntime(previouslyPreparedKey: previouslyPreparedKey)
+        // Releasing a runtime suspends. A second settings callback may have
+        // started the newly selected preparation while this caller waited.
+        // Join that owner before reserving another backend load.
         while let inFlight = cleanupPreparation {
             let ready = await inFlight.task.value
             if cleanupPreparation?.id == inFlight.id {
@@ -720,6 +743,7 @@ final class AppState {
             guard !Task.isCancelled, !isShuttingDown, !isCancelling else { return }
             if cleanupConfigurationMatches(inFlight.key, cleanupPreparationKey) || isCleanupEnginePrepared { return }
         }
+        let key = cleanupPreparationKey
         if force, settings.transcriptPostProcessingMode == .fluidAudioVocabulary,
            settings.engineChoice == .parakeet, !parakeetEngine.isReady {
             await prepareActiveEngine()
@@ -728,7 +752,6 @@ final class AppState {
                 return
             }
         }
-        let key = cleanupPreparationKey
         if key.mode == .s1Mini, isCleanupEnginePrepared { return }
         let canPrepareWhileRecording = allowRecording && status == .recording
             && [.appleIntelligence, .ollama, .openRouter, .openAICompatible].contains(key.mode)
@@ -797,6 +820,53 @@ final class AppState {
         }
     }
 
+    /// Join an obsolete preparation before freeing its runtime. Re-read the
+    /// selected settings after the join so a rapid switch back keeps the model.
+    private func releaseDeselectedCleanupRuntime(previouslyPreparedKey: CleanupPreparationKey?) async {
+        guard !isShuttingDown, status == .idle else { return }
+        if let inFlight = cleanupPreparation,
+           !cleanupConfigurationMatches(inFlight.key, cleanupPreparationKey) {
+            inFlight.task.cancel()
+            _ = await inFlight.task.value
+            if cleanupPreparation?.id == inFlight.id {
+                cleanupPreparation = nil
+                isPreparingCleanupEngine = false
+            }
+        }
+
+        let key = cleanupPreparationKey
+        guard key.idle else { return }
+        let s1IsInactive = key.mode != .s1Mini || key.engine == .assemblyAI
+        if s1IsInactive {
+            await S1MiniPostProcessingService.unload()
+            if preparedCleanupKey?.mode == .s1Mini { preparedCleanupKey = nil }
+        }
+        let previous = previouslyPreparedKey ?? preparedCleanupKey
+        guard let previous else {
+            if (key.mode != .appleIntelligence || key.engine == .assemblyAI), #available(macOS 26, *) {
+                await AIPostProcessingService.discardPreparedSession()
+            }
+            return
+        }
+
+        let previousUsedVocabulary = previous.mode == .fluidAudioVocabulary
+            && !previous.vocabulary.isEmpty
+        let vocabularyIsNoLongerNeeded = key.mode != .fluidAudioVocabulary
+            || key.engine != .parakeet || !key.model.supportsFluidAudioVocabulary
+            || key.vocabulary.isEmpty
+        if previousUsedVocabulary && vocabularyIsNoLongerNeeded {
+            await parakeetEngine.releaseVocabularyModels()
+        }
+        if (previous.mode == .s1Mini && s1IsInactive)
+            || (previousUsedVocabulary && vocabularyIsNoLongerNeeded)
+            || key.engine == .assemblyAI || previous.mode != key.mode {
+            preparedCleanupKey = nil
+        }
+        if (key.mode != .appleIntelligence || key.engine == .assemblyAI), #available(macOS 26, *) {
+            await AIPostProcessingService.discardPreparedSession()
+        }
+    }
+
     private func handleAccessibilityPermissionChanged(_ granted: Bool) {
         rearmResolvedBlockingAttentionIssues()
         updateAccessibilityIntegration(granted: granted, promptIfNeeded: false)
@@ -837,6 +907,28 @@ final class AppState {
         async let speech: Void = prepareActiveEngine(prewarmModel: true, resolvedConfiguration: resolvedConfiguration)
         async let cleanup: Void = prepareCleanupEngineIfNeeded()
         _ = await (speech, cleanup)
+    }
+
+    /// Warm the next one-shot analyzer after this dictation completes. The
+    /// engine coalesces this with a racing recording startup and uses its own
+    /// generation guard so selection changes cannot install a stale session.
+    private func prepareAppleSpeechForNextDictation() {
+        guard !isShuttingDown, status == .idle, settings.engineChoice == .appleSpeech,
+              AppleSpeechEngine.isSupported else { return }
+        appleSpeechIdlePreparation?.cancel()
+        let id = UUID()
+        appleSpeechIdlePreparationID = id
+        appleSpeechIdlePreparation = Task { [weak self] in
+            guard let self, !Task.isCancelled, self.appleSpeechIdlePreparationID == id,
+                  !self.isShuttingDown, self.status == .idle,
+                  self.settings.engineChoice == .appleSpeech else { return }
+            do { try await self.appleSpeechEngine.prepare() }
+            catch { }
+            if self.appleSpeechIdlePreparationID == id {
+                self.appleSpeechIdlePreparationID = nil
+                self.appleSpeechIdlePreparation = nil
+            }
+        }
     }
 
     func prepareActiveEngine(prewarmModel: Bool = true) async {
@@ -984,7 +1076,12 @@ final class AppState {
 
         appleSpeechUnsupportedSelection = false
 
+        let previousChoice = settings.engineChoice
+        let previousCleanupKey = preparedCleanupKey ?? cleanupPreparation?.key
         if choice != .appleSpeech {
+            appleSpeechIdlePreparation?.cancel()
+            appleSpeechIdlePreparation = nil
+            appleSpeechIdlePreparationID = nil
             await appleSpeechEngine.invalidatePreparedSession()
         }
         enginePreparationError = nil
@@ -993,6 +1090,10 @@ final class AppState {
         if !selectedPage.isVisible(for: choice) {
             selectedPage = .models
         }
+        if previousChoice == .parakeet, choice != .parakeet {
+            await parakeetEngine.unloadDeselectedModel()
+        }
+        await releaseDeselectedCleanupRuntime(previouslyPreparedKey: previousCleanupKey)
         await prepareSelectedEngines(prewarmModel: prewarmModel)
     }
 
@@ -1002,6 +1103,9 @@ final class AppState {
         guard status == .idle, settings.engineChoice == .appleSpeech else { return }
         guard appleSpeechSupportedLanguages.contains(language) else { return }
         settings.appleSpeechLanguage = language
+        appleSpeechIdlePreparation?.cancel()
+        appleSpeechIdlePreparation = nil
+        appleSpeechIdlePreparationID = nil
         await appleSpeechEngine.invalidatePreparedSession()
         await prepareSelectedEngines(prewarmModel: prewarmModel)
     }
@@ -1653,6 +1757,7 @@ final class AppState {
             status = .idle
             insertionTargetApp = nil
             sessionDictationContext = nil
+            prepareAppleSpeechForNextDictation()
             return
         }
 
@@ -1861,6 +1966,7 @@ final class AppState {
         await discardSessionRecovery(completed: true)
         sessionEngine = nil
         status = .idle
+        prepareAppleSpeechForNextDictation()
         teardownTrace.end()
     }
 
@@ -1903,6 +2009,7 @@ final class AppState {
         overlay.hide(afterDelay: 0)
         recoveryStore.errorMessage = recoveryStore.errorMessage ?? presentedMessage
         status = .idle
+        prepareAppleSpeechForNextDictation()
     }
 
     func cancelDictation() async {
