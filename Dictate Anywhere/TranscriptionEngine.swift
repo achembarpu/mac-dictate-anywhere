@@ -1829,6 +1829,7 @@ private actor AsrManagerCoordinator {
         let trace = PerfTrace.begin("stt.modelLoad")
         defer { trace.end() }
         await waitForLifecycleMutation()
+        try Task.checkCancellation()
         lifecycleMutationInProgress = true
         defer { finishLifecycleMutation() }
         await cleanupUnlocked()
@@ -1862,6 +1863,7 @@ private actor AsrManagerCoordinator {
         defer { trace.end() }
         logger.info("initialize: starting (existing manager=\(self.manager != nil, privacy: .public))")
         await waitForLifecycleMutation()
+        try Task.checkCancellation()
         lifecycleMutationInProgress = true
         defer { finishLifecycleMutation() }
         await cleanupUnlocked()
@@ -1886,6 +1888,7 @@ private actor AsrManagerCoordinator {
         // persisted selection from starting a download that can never load.
         guard modelChoice.isAvailableOnThisMac else { throw TranscriptionError.engineNotReady }
         await waitForLifecycleMutation()
+        try Task.checkCancellation()
         lifecycleMutationInProgress = true
         defer { finishLifecycleMutation() }
         if isInitializedUnlocked(for: modelChoice) {
@@ -2128,6 +2131,7 @@ private actor AsrManagerCoordinator {
     func resetSession(for modelChoice: ParakeetModelChoice, language: Language?, requiresWholeRecordingFinal: Bool = false,
                       previewsEnabled: Bool = true) async throws {
         await waitForLifecycleMutation()
+        try Task.checkCancellation()
         lifecycleMutationInProgress = true
         defer { finishLifecycleMutation() }
         try await resetSessionUnlocked(
