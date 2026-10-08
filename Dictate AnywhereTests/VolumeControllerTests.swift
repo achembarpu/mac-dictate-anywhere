@@ -1,6 +1,7 @@
 import XCTest
 @testable import Dictate_Anywhere
 
+#if DEBUG
 @MainActor
 final class VolumeControllerTests: XCTestCase {
     func testFinalizationConsumesSettleIntervalWithoutEarlyRestoration() async {
@@ -82,3 +83,4 @@ final class VolumeControllerTests: XCTestCase {
         XCTAssertFalse(volume.hasOutputStateToRestore)
     }
 }
+#endif
