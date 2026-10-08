@@ -17,7 +17,7 @@ actor BatchTranscriptionSession {
 
     private let backend: Backend
     private let language: Language?
-    private let vad: VadManager
+    private let vad: VadManager?
     private let previewsEnabled: Bool
     private var updateTask: Task<Void, Never>?
     private var samples = AudioSampleBuffer()
@@ -31,7 +31,7 @@ actor BatchTranscriptionSession {
     private var vadPending = AudioSampleBuffer()
     private var speechPresence = BatchSpeechPresence()
 
-    private init(backend: Backend, vad: VadManager, language: Language? = nil,
+    private init(backend: Backend, vad: VadManager?, language: Language? = nil,
                  previewsEnabled: Bool, provisionalTDTWindowSamples: Int? = nil) {
         self.backend = backend
         self.vad = vad
@@ -40,7 +40,7 @@ actor BatchTranscriptionSession {
         self.provisionalTDTWindowSamples = provisionalTDTWindowSamples
     }
 
-    static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager, language: Language?,
+    static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager?, language: Language?,
                          requiresWholeRecordingFinal: Bool, previewsEnabled: Bool) async throws -> BatchTranscriptionSession {
         if models.version == .v2 || requiresWholeRecordingFinal {
             // The SDK batch path preserves v2 mel context and repairs gaps.
@@ -65,7 +65,7 @@ actor BatchTranscriptionSession {
         return session
     }
 
-    static func senseVoice(manager: SenseVoiceManager, vad: VadManager, previewsEnabled: Bool) -> BatchTranscriptionSession {
+    static func senseVoice(manager: SenseVoiceManager, vad: VadManager?, previewsEnabled: Bool) -> BatchTranscriptionSession {
         BatchTranscriptionSession(backend: .senseVoice(manager), vad: vad, previewsEnabled: previewsEnabled)
     }
 
@@ -98,8 +98,10 @@ actor BatchTranscriptionSession {
             retainPreviewWindow()
         case .senseVoice: break
         }
-        vadPending.append(newSamples)
-        try await processVad()
+        if vad != nil {
+            vadPending.append(newSamples)
+            try await processVad()
+        }
         try await commitSenseVoiceSegments()
     }
 
@@ -112,6 +114,10 @@ actor BatchTranscriptionSession {
     }
 
     private func processVad(flushTail: Bool = false) async throws {
+        // Cached speech models remain usable without the optional VAD asset.
+        // The engine's volume gate still qualifies audio, and SenseVoice's
+        // maximum segment length still bounds retained audio without pauses.
+        guard let vad else { return }
         let trace = PerfTrace.begin("stt.batchVAD", counts: ["input_samples": vadPending.count])
         do {
             while vadPending.count >= VadManager.chunkSize || (flushTail && !vadPending.isEmpty) {

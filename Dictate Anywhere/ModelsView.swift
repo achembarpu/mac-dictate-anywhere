@@ -95,6 +95,10 @@ struct ModelsView: View {
                     DSDivider()
                     statusRow
                     if appState.parakeetEngine.isModelDownloaded {
+                        if !selectedModel.usesTrueStreaming {
+                            DSDivider()
+                            speechDetectionRow
+                        }
                         DSDivider()
                         DSInfoRow(
                             label: "Remove the downloaded model files from this Mac.",
@@ -105,7 +109,8 @@ struct ModelsView: View {
                                 modelPendingDeletion = selectedModel
                             }
                             .buttonStyle(.dsDestructive)
-                            .disabled(appState.status != .idle || appState.isPreparingEngine || isDeletingModel)
+                            .disabled(appState.status != .idle || appState.isPreparingEngine || isDeletingModel
+                                || appState.parakeetEngine.isDownloading)
                         }
                     }
                     if let error = modelActionError ?? appState.enginePreparationError {
@@ -427,6 +432,29 @@ struct ModelsView: View {
             }
         })
         .disabled(appState.status != .idle || isDeletingModel)
+    }
+
+    private var speechDetectionRow: some View {
+        let installed = appState.parakeetEngine.isSpeechDetectionDownloaded
+        return DSDetailRow(label: "Speech detection", caption: installed
+            ? "Helps recognize quiet speech and split recordings at pauses."
+            : "Optional download for quiet speech and pause detection. Dictation works without it.") {
+            if installed {
+                Text("Installed")
+                    .foregroundStyle(DS.Colors.textSecondary)
+            } else {
+                Button("Download Speech Detection") {
+                    modelActionError = nil
+                    Task {
+                        do { try await appState.parakeetEngine.downloadSpeechDetection() }
+                        catch { modelActionError = error.localizedDescription }
+                    }
+                }
+                .buttonStyle(.dsSecondary)
+                .disabled(appState.status != .idle || appState.isPreparingEngine || isDeletingModel
+                    || appState.parakeetEngine.isDownloading)
+            }
+        }
     }
 
     private func applyParakeetSelection(userInitiated: Bool) {

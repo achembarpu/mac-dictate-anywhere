@@ -301,6 +301,12 @@ When your local signing setup is ready, package the release with:
 
 The app uses FluidAudio speech models that run entirely on your Mac. Parakeet TDT remains the default path, and optional Parakeet EOU or Nemotron streaming models can be downloaded for lower-latency live previews.
 
+Batch models also use an optional speech-detection model for quiet speech and
+pause segmentation. Explicit model setup installs it; existing installations can
+use **Download Speech Detection** in Speech Model settings. Cached speech models
+still prepare offline without it, using volume detection and bounded segments.
+Preparation does not download or repair the speech-detection cache.
+
 ## Privacy
 
 - **Temporary Recovery Audio** - When Preserve cancelled sessions is enabled, audio is written locally while recording. Completed sessions delete this temporary copy; cancelled sessions expire after 24 hours (or on the next launch if the app is closed). Recovery files are excluded from backups. Continue retains the original until the combined dictation is completed or safely saved, and preserves all restored words if cancelled again. Turning preservation off applies to new dictations; continuing an existing saved session still protects it. Existing copies can be deleted from History.

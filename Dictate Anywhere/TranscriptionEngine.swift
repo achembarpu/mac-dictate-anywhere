@@ -471,11 +471,13 @@ final class ParakeetEngine: TranscriptionEngine {
     var isModelDownloaded: Bool = false
     var isDownloading: Bool = false
     var downloadProgress: Double = 0.0
+    private(set) var isSpeechDetectionDownloaded: Bool = false
 
     // MARK: - Private
 
     private var loadedModels: AsrModels?
-    private let asrCoordinator = AsrManagerCoordinator()
+    private let asrCoordinator: AsrManagerCoordinator
+    private let vadModelURL: URL
     private var audioCaptureController: AudioCaptureController?
     var recoveryCapture: RecoveryAudioCapture?
     private var audioCaptureStartupCancellation: AudioCaptureStartupCancellation?
@@ -559,7 +561,10 @@ final class ParakeetEngine: TranscriptionEngine {
 
     // MARK: - Init
 
-    init() {
+    init(vadModelURL: URL = BatchSpeechDetection.modelURL) {
+        self.vadModelURL = vadModelURL
+        self.asrCoordinator = AsrManagerCoordinator(vadModelURL: vadModelURL)
+        isSpeechDetectionDownloaded = BatchSpeechDetection.isDownloaded(at: vadModelURL)
         isModelDownloaded = checkModelOnDisk()
     }
 
@@ -596,6 +601,7 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func recheckModelOnDisk(for modelChoice: ParakeetModelChoice) async {
+        isSpeechDetectionDownloaded = BatchSpeechDetection.isDownloaded(at: vadModelURL)
         let result = await Task.detached(priority: .utility) {
             Self.checkModelOnDiskSync(for: modelChoice)
         }.value
@@ -608,6 +614,7 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func recheckAllModelsOnDisk() async {
+        isSpeechDetectionDownloaded = BatchSpeechDetection.isDownloaded(at: vadModelURL)
         let results = await Task.detached(priority: .utility) {
             Dictionary(
                 uniqueKeysWithValues: ParakeetModelChoice.allCases.map {
@@ -746,6 +753,7 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         let modelsExist = checkModelOnDisk(for: modelChoice)
+            && (modelChoice.usesTrueStreaming || isSpeechDetectionDownloaded)
 
         // Simulate progress for fresh downloads
         let progressTask = Task { @MainActor in
@@ -759,7 +767,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
         do {
             if modelChoice == .senseVoice {
-                try await asrCoordinator.initializeSenseVoice()
+                try await asrCoordinator.initializeSenseVoice(download: true)
                 loadedModels = nil
             } else if modelChoice.usesTrueStreaming {
                 try await asrCoordinator.initializeStreaming(modelChoice: modelChoice)
@@ -769,7 +777,7 @@ final class ParakeetEngine: TranscriptionEngine {
                     ? try await CompactSpeechModelLoader.load(download: true)
                     : try await AsrModels.downloadAndLoad(version: modelVersion)
                 let config = BatchTranscriptionPolicy.asrConfig
-                try await asrCoordinator.initialize(models: models, config: config)
+                try await asrCoordinator.initialize(models: models, config: config, downloadSpeechDetection: true)
                 self.loadedModels = models
             } else {
                 throw TranscriptionError.engineNotReady
@@ -779,6 +787,7 @@ final class ParakeetEngine: TranscriptionEngine {
             await prepareVocabularyIfNeeded()
 
             self.modelOnDiskCached[modelChoice] = true
+            isSpeechDetectionDownloaded = BatchSpeechDetection.isDownloaded(at: vadModelURL)
             await MainActor.run {
                 self.isModelDownloaded = true
                 self.isDownloading = false
@@ -787,6 +796,9 @@ final class ParakeetEngine: TranscriptionEngine {
             }
         } catch {
             progressTask.cancel()
+            // ASR may have completed before an optional asset failed. Keep its
+            // installation visible so cache-only preparation remains available.
+            await recheckModelOnDisk(for: modelChoice)
             invalidateVocabularyReadiness()
             await asrCoordinator.cleanup()
             self.loadedModels = nil
@@ -797,6 +809,20 @@ final class ParakeetEngine: TranscriptionEngine {
             }
             throw error
         }
+    }
+
+    /// Existing installations can opt into pause/quiet-speech detection without
+    /// redownloading ASR or losing readiness if the optional download fails.
+    func downloadSpeechDetection() async throws {
+        guard !isDownloading else { return }
+        isDownloading = true
+        downloadProgress = 0
+        defer {
+            isDownloading = false
+            isSpeechDetectionDownloaded = BatchSpeechDetection.isDownloaded(at: vadModelURL)
+        }
+        try await asrCoordinator.downloadSpeechDetection()
+        downloadProgress = 1
     }
 
     func deleteModel() async throws {
@@ -837,6 +863,7 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func prepare() async throws {
+        isSpeechDetectionDownloaded = BatchSpeechDetection.isDownloaded(at: vadModelURL)
         let trace = PerfTrace.begin("stt.enginePrepare")
         defer { trace.end() }
         let modelChoice = selectedModelChoice
@@ -1606,6 +1633,7 @@ final class ParakeetEngine: TranscriptionEngine {
 // MARK: - AsrManagerCoordinator
 
 private actor AsrManagerCoordinator {
+    private let vadModelURL: URL
     private var manager: AsrManager?
     private var models: AsrModels?
     private var streamingManager: (any StreamingAsrManager)?
@@ -1628,6 +1656,10 @@ private actor AsrManagerCoordinator {
         subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
         category: "AsrCoordinator"
     )
+
+    init(vadModelURL: URL) {
+        self.vadModelURL = vadModelURL
+    }
 
     func isInitialized() -> Bool {
         manager != nil || streamingManager != nil || senseVoiceManager != nil || multilingualManager != nil
@@ -1673,19 +1705,23 @@ private actor AsrManagerCoordinator {
         }
     }
 
-    func initializeSenseVoice() async throws {
+    func initializeSenseVoice(download: Bool = false) async throws {
         let trace = PerfTrace.begin("stt.modelLoad")
         defer { trace.end() }
         await cleanup()
         // int8: ~225 MB, ANE-targeted, accuracy-neutral per FluidAudio docs.
         // Non-ANE Macs get the fp32 encoder instead — see senseVoiceEncoderPrecision.
         let precision = ParakeetEngine.senseVoiceEncoderPrecision
-        let svModels = try await SenseVoiceModels.downloadAndLoad(precision: precision)
+        let svModels: SenseVoiceModels
+        if download {
+            svModels = try await SenseVoiceModels.downloadAndLoad(precision: precision)
+        } else {
+            let directory = fluidAudioModelCacheRoot().appendingPathComponent(Repo.senseVoiceSmall.folderName)
+            svModels = try SenseVoiceModels.load(from: directory, precision: precision)
+        }
         // textNorm 14 = withitn: punctuated, inverse-text-normalized output.
         // The library default (15) strips punctuation — unusable for dictation.
-        let vad = try await VadManager(config: VadConfig(
-            computeUnits: Hardware.canUseAppleNeuralEngine ? .cpuAndNeuralEngine : .cpuOnly
-        ))
+        let vad = try await loadSpeechDetection(download: download)
         senseVoiceManager = SenseVoiceManager(
             models: svModels,
             language: SenseVoiceConfig.defaultLanguage,
@@ -1694,28 +1730,24 @@ private actor AsrManagerCoordinator {
         batchVad = vad
         try await PerfTrace.measure("stt.modelWarmup") {
             _ = try await senseVoiceManager?.transcribe(audio: Self.warmupAudio)
-            try await warmVad(vad)
         }
         logger.info("initializeSenseVoice: completed")
     }
 
-    func initialize(models: AsrModels, config: ASRConfig) async throws {
+    func initialize(models: AsrModels, config: ASRConfig, downloadSpeechDetection: Bool = false) async throws {
         let trace = PerfTrace.begin("stt.modelLoad")
         defer { trace.end() }
         logger.info("initialize: starting (existing manager=\(self.manager != nil, privacy: .public))")
         await cleanup()
         let m = AsrManager(config: config)
         try await m.loadModels(models)
-        let vad = try await VadManager(config: VadConfig(
-            computeUnits: Hardware.canUseAppleNeuralEngine ? .cpuAndNeuralEngine : .cpuOnly
-        ))
+        let vad = try await loadSpeechDetection(download: downloadSpeechDetection)
         manager = m
         self.models = models
         batchVad = vad
         try await PerfTrace.measure("stt.modelWarmup") {
             var state = TdtDecoderState.make(decoderLayers: await m.decoderLayerCount)
             _ = try await m.transcribe(Self.warmupAudio, decoderState: &state)
-            try await warmVad(vad)
         }
         logger.info("initialize: completed successfully")
     }
@@ -1806,6 +1838,29 @@ private actor AsrManagerCoordinator {
         _ = try await vad.processStreamingChunk(
             [Float](repeating: 0, count: VadManager.chunkSize), state: .initial()
         )
+    }
+
+    private func loadSpeechDetection(download: Bool) async throws -> VadManager? {
+        do {
+            let vad = download
+                ? try await BatchSpeechDetection.download(modelsDirectory: vadModelURL.deletingLastPathComponent().deletingLastPathComponent())
+                : try await BatchSpeechDetection.loadCached(at: vadModelURL)
+            if let vad { try await warmVad(vad) }
+            return vad
+        } catch {
+            try Task.checkCancellation()
+            if download || error is CancellationError { throw error }
+            // A damaged optional cache must not block an otherwise usable ASR
+            // model, and cache-only loading must not attempt network recovery.
+            logger.warning("Cached speech detection unavailable: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    func downloadSpeechDetection() async throws {
+        let vad = try await loadSpeechDetection(download: true)
+        try Task.checkCancellation()
+        batchVad = vad
     }
 
     /// Serialize preparation against capture and other preparation requests.
@@ -1943,11 +1998,11 @@ private actor AsrManagerCoordinator {
         if !modelChoice.usesTrueStreaming {
             await cancelBatch()
             if modelChoice == .senseVoice {
-                guard let senseVoiceManager, let batchVad else { throw TranscriptionError.engineNotReady }
+                guard let senseVoiceManager else { throw TranscriptionError.engineNotReady }
                 batchSession = BatchTranscriptionSession.senseVoice(manager: senseVoiceManager, vad: batchVad,
                                                                     previewsEnabled: previewsEnabled)
             } else {
-                guard let manager, let models, let batchVad else { throw TranscriptionError.engineNotReady }
+                guard let manager, let models else { throw TranscriptionError.engineNotReady }
                 batchSession = try await BatchTranscriptionSession.parakeet(
                     models: models, previewManager: manager, vad: batchVad, language: language,
                     requiresWholeRecordingFinal: requiresWholeRecordingFinal, previewsEnabled: previewsEnabled)
