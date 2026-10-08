@@ -45,26 +45,20 @@ nonisolated struct OllamaModelDetails: Decodable, Sendable {
 
     var reasoningCapability: OllamaReasoningCapability {
         guard let values = thinking?.values else { return .unsupported }
-        if values.contains(.toggle(true)) {
-            return values.contains(.toggle(false)) ? .toggle : .required
+        let hasReasoning = values.contains(.toggle(true)) || values.contains {
+            if case .level = $0 { return true }
+            return false
         }
+        if hasReasoning && values.contains(.toggle(false)) { return .toggle }
+        if values.contains(.toggle(true)) { return .required }
         if ["low", "medium", "high"].contains(where: { values.contains(.level($0)) }) { return .level }
         if values.contains(where: { if case .level = $0 { return true }; return false }) { return .required }
         return .unsupported
     }
 
-    func thinkValue(for setting: OllamaReasoningSetting) -> ThinkingValue? {
-        guard let values = thinking?.values else { return nil }
-        let requested: ThinkingValue?
-        switch setting {
-        case .automatic: requested = nil
-        case .disabled: requested = values.contains(.toggle(false)) ? .toggle(false) : nil
-        case .enabled: requested = values.contains(.toggle(true)) ? .toggle(true) : nil
-        case .low: requested = .level("low")
-        case .medium: requested = .level("medium")
-        case .high: requested = .level("high")
-        }
-        return requested.flatMap { values.contains($0) ? $0 : nil }
+    func reasoningOffOverride(enabled: Bool) -> ThinkingValue? {
+        guard !enabled, let values = thinking?.values, values.contains(.toggle(false)) else { return nil }
+        return .toggle(false)
     }
 }
 

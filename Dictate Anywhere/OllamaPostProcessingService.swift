@@ -94,7 +94,7 @@ enum OllamaPostProcessingService {
         text: String,
         baseURL: String,
         model: String,
-        reasoning: OllamaReasoningSetting = .disabled,
+        reasoningEnabled: Bool = true,
         prompt: String,
         vocabulary: [String] = [],
         context: DictationPostProcessingContext? = nil,
@@ -137,7 +137,9 @@ enum OllamaPostProcessingService {
                     "stream": false, "keep_alive": "10m", "options": options
                 ]
                 if structuredOutput { payload["format"] = remotePostProcessingOutputSchema }
-                if let think = details?.thinkValue(for: reasoning) { payload["think"] = think.jsonValue }
+                if let think = details?.reasoningOffOverride(enabled: reasoningEnabled) {
+                    payload["think"] = think.jsonValue
+                }
                 request.httpBody = try JSONSerialization.data(withJSONObject: payload)
                 do {
                     let output = try await performGenerateRequest(request, session: session)

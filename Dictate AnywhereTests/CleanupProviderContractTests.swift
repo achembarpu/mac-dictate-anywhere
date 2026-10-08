@@ -339,8 +339,7 @@ final class CleanupProviderContractTests: XCTestCase {
             XCTAssertEqual(options["num_ctx"] as? Int, index == 0 ? 4_096 : 8_192)
             XCTAssertEqual(options["num_predict"] as? Int, TranscriptCleanupPlan.outputReserve(inputTokens: 5))
             XCTAssertNil(options["temperature"], "Preserve server defaults even without an author preset")
-            if index == 0 { XCTAssertEqual(payload["think"] as? Bool, false) }
-            else { XCTAssertNil(payload["think"], "A completion-only model needs no fabricated thinking flag") }
+            XCTAssertNil(payload["think"], "Default On preserves the provider recommendation, including non-thinking models")
         }
     }
 
@@ -564,16 +563,46 @@ final class CleanupProviderContractTests: XCTestCase {
         }
     }
 
-    func testThinkingAndUnsupportedOptionPoliciesUseReportedCapabilities() throws {
-        for (values, expected) in [("[false,true]", OllamaReasoningCapability.toggle), ("[true]", .required),
-                                   ("[false]", .unsupported), ("[\"low\",\"medium\",\"high\"]", .level)] {
-            let json = "{\"thinking\":{\"values\":\(values)}}"
-            let details = try JSONDecoder().decode(OllamaModelDetails.self, from: Data(json.utf8))
-            XCTAssertEqual(details.reasoningCapability, expected)
-            if expected == .required || expected == .level { XCTAssertNil(details.thinkValue(for: .disabled)) }
+    func testOllamaReasoningTogglePreservesProviderDefaultAndDisablesOnlyAdvertisedOff() async throws {
+        let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            if request.url?.path.hasSuffix("show") == true {
+                let model = try Self.payload(request)["model"] as? String
+                let details: String
+                switch model {
+                case "test/toggle": details = #"{"thinking":{"values":[false,true]}}"#
+                case "test/levels": details = #"{"thinking":{"values":["low","medium","high"]}}"#
+                case "test/required": details = #"{"thinking":{"values":[true]}}"#
+                default: details = #"{}"#
+                }
+                return (200, Data(details.utf8))
+            }
+            try requests.withLock { $0.append(try Self.payload(request)) }
+            return (200, Data(#"{"done":true,"done_reason":"stop","response":"{\"action\":\"pasteCleanedText\",\"text\":\"Hello.\"}"}"#.utf8))
+        } }
+
+        for (model, enabled) in [
+            ("test/toggle", true),
+            ("test/toggle", false),
+            ("test/levels", false),
+            ("test/required", false),
+            ("test/unknown", false),
+        ] {
+            _ = try await OllamaPostProcessingService.process(
+                text: "hello", baseURL: "http://cleanup.test", model: model,
+                reasoningEnabled: enabled, prompt: "Correct punctuation.", session: session
+            )
         }
+
+        let payloads = requests.withLock { $0 }
+        XCTAssertEqual(payloads.count, 5)
+        XCTAssertNil(payloads[0]["think"], "On leaves the model/server reasoning recommendation unchanged")
+        XCTAssertEqual(payloads[1]["think"] as? Bool, false, "Off sends the override only when false is advertised")
+        XCTAssertNil(payloads[2]["think"], "Effort-only models keep their provider effort; low is not substituted for Off")
+        XCTAssertNil(payloads[3]["think"], "Mandatory reasoning cannot be overridden off")
+        XCTAssertNil(payloads[4]["think"], "Unknown capabilities must not receive a guessed override")
+
         var options = CleanupChatOptions()
-        // Sampling is never sent, so a temperature error is not retryable.
         XCTAssertFalse(options.adapt(to: "Unsupported value: temperature only supports the default"))
         XCTAssertFalse(options.adapt(to: "Input exceeds the maximum context length"))
         XCTAssertTrue(options.adapt(to: "json_schema is not supported"))

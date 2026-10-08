@@ -692,62 +692,6 @@ enum OllamaReasoningCapability: String, Sendable {
     }
 }
 
-enum OllamaReasoningSetting: String, CaseIterable, Sendable {
-    case automatic = "automatic"
-    case disabled = "disabled"
-    case enabled = "enabled"
-    case low = "low"
-    case medium = "medium"
-    case high = "high"
-
-    var displayName: String {
-        switch self {
-        case .automatic: return "Automatic"
-        case .disabled: return "Off"
-        case .enabled: return "On"
-        case .low: return "Low"
-        case .medium: return "Medium"
-        case .high: return "High"
-        }
-    }
-
-    static func options(for capability: OllamaReasoningCapability) -> [Self] {
-        switch capability {
-        case .unsupported:
-            return []
-        case .required:
-            return [.automatic]
-        case .toggle:
-            return [.automatic, .disabled, .enabled]
-        case .level:
-            return [.automatic, .low, .medium, .high]
-        }
-    }
-
-    func sanitized(for capability: OllamaReasoningCapability) -> Self {
-        switch capability {
-        case .unsupported:
-            return self
-        case .required:
-            return .automatic
-        case .toggle:
-            switch self {
-            case .automatic, .disabled, .enabled:
-                return self
-            case .low, .medium, .high:
-                return .enabled
-            }
-        case .level:
-            switch self {
-            case .automatic, .low, .medium, .high:
-                return self
-            case .disabled, .enabled:
-                return .automatic
-            }
-        }
-    }
-}
-
 // MARK: - Hotkey Mode
 
 enum HotkeyMode: String, CaseIterable, Codable {
@@ -1004,7 +948,8 @@ final class Settings {
         static let s1MiniContextSetting = "s1MiniContextSetting"
         static let ollamaBaseURL = "ollamaBaseURL"
         static let ollamaModel = "ollamaModel"
-        static let ollamaReasoningSetting = "ollamaReasoningSetting"
+        static let ollamaReasoningEnabled = "ollamaReasoningEnabled"
+        static let legacyOllamaReasoningSetting = "ollamaReasoningSetting"
         static let ollamaPostProcessingPrompt = "ollamaPostProcessingPrompt"
         static let openRouterModel = "openRouterModel"
         static let openRouterReasoningEnabled = "openRouterReasoningEnabled"
@@ -1416,9 +1361,9 @@ final class Settings {
         }
     }
 
-    var ollamaReasoningSetting: OllamaReasoningSetting {
+    var ollamaReasoningEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(ollamaReasoningSetting.rawValue, forKey: Keys.ollamaReasoningSetting)
+            UserDefaults.standard.set(ollamaReasoningEnabled, forKey: Keys.ollamaReasoningEnabled)
         }
     }
 
@@ -1631,6 +1576,18 @@ final class Settings {
         return defaultPrompt
     }
 
+    static func loadOllamaReasoningEnabled(from defaults: UserDefaults) -> Bool {
+        if let enabled = defaults.object(forKey: Keys.ollamaReasoningEnabled) as? Bool {
+            defaults.removeObject(forKey: Keys.legacyOllamaReasoningSetting)
+            return enabled
+        }
+        guard defaults.object(forKey: Keys.legacyOllamaReasoningSetting) != nil else { return true }
+        let enabled = defaults.string(forKey: Keys.legacyOllamaReasoningSetting) != "disabled"
+        defaults.set(enabled, forKey: Keys.ollamaReasoningEnabled)
+        defaults.removeObject(forKey: Keys.legacyOllamaReasoningSetting)
+        return enabled
+    }
+
     private init() {
         let defaults = UserDefaults.standard
 
@@ -1822,9 +1779,7 @@ final class Settings {
         ) ?? .automatic
         ollamaBaseURL = defaults.string(forKey: Keys.ollamaBaseURL) ?? OllamaPostProcessingService.defaultBaseURL
         ollamaModel = defaults.string(forKey: Keys.ollamaModel) ?? ""
-        ollamaReasoningSetting = OllamaReasoningSetting(
-            rawValue: defaults.string(forKey: Keys.ollamaReasoningSetting) ?? ""
-        ) ?? .disabled
+        ollamaReasoningEnabled = Self.loadOllamaReasoningEnabled(from: defaults)
         ollamaPostProcessingPrompt = Self.loadCleanupPrompt(
             from: defaults, forKey: Keys.ollamaPostProcessingPrompt,
             defaultPrompt: Self.recommendedTranscriptCleanupPrompt

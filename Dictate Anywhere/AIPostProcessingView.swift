@@ -976,27 +976,23 @@ struct AIPostProcessingView: View {
         }
 
         if let capability = ollamaAvailability?.selectedModelReasoningCapability,
-           capability.supportsReasoning, capability != .required {
-            DSSection(overline: "Reasoning") {
-                DSDetailRow(
-                    label: "Reasoning",
-                    caption: ollamaReasoningFooter(for: capability)
-                ) {
-                    DSDropdown(
-                        selection: Binding(
-                            get: { settings.ollamaReasoningSetting.sanitized(for: capability) },
-                            set: { settings.ollamaReasoningSetting = $0.sanitized(for: capability) }
-                        ),
-                        options: OllamaReasoningSetting.options(for: capability),
-                        title: \.displayName,
-                        accessibilityName: "Ollama reasoning"
+           capability.supportsReasoning {
+            let canTurnOff = capability == .toggle
+            let caption = canTurnOff
+                ? "On preserves the model/server recommendation. Off can reduce wait time, but may affect corrections."
+                : "This model cannot turn reasoning off. Its model/server recommendation is preserved."
+            DSSection(overline: "Cleanup Reasoning") {
+                DSDetailRow(label: "Allow reasoning", caption: caption) {
+                    DSSwitch(
+                        accessibilityName: "Allow Ollama cleanup reasoning",
+                        isOn: Binding(
+                            get: { !canTurnOff || settings.ollamaReasoningEnabled },
+                            set: { settings.ollamaReasoningEnabled = $0 }
+                        )
                     )
+                    .disabled(!canTurnOff)
                 }
             }
-        }
-
-        if ollamaAvailability?.selectedModelReasoningCapability == .required {
-            DSHint(text: "This model always uses reasoning. An Instruct model usually cleans short dictation faster.")
         }
 
         let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
@@ -1625,13 +1621,6 @@ struct AIPostProcessingView: View {
             guard !Task.isCancelled, ollamaCheckID == checkID else { return }
             ollamaAvailability = availability
             ollamaStatusMessage = nil
-            if availability.selectedModelReasoningCapability.supportsReasoning {
-                let sanitizedReasoning = settings.ollamaReasoningSetting
-                    .sanitized(for: availability.selectedModelReasoningCapability)
-                if sanitizedReasoning != settings.ollamaReasoningSetting {
-                    settings.ollamaReasoningSetting = sanitizedReasoning
-                }
-            }
         } catch {
             guard !Task.isCancelled, ollamaCheckID == checkID else { return }
             ollamaAvailability = nil
@@ -1740,18 +1729,6 @@ struct AIPostProcessingView: View {
         openAICompatibleStatusMessage = nil
     }
 
-    private func ollamaReasoningFooter(for capability: OllamaReasoningCapability) -> String {
-        switch capability {
-        case .unsupported:
-            return ""
-        case .required:
-            return "This model always uses reasoning."
-        case .toggle:
-            return "Shown only when the selected model reports Ollama thinking support. Automatic keeps the model default; Off disables reasoning to reduce latency."
-        case .level:
-            return "Shown only when the selected model supports configurable reasoning levels. Automatic keeps the model default; low, medium, and high trade speed for more reasoning."
-        }
-    }
 }
 
 private struct OpenRouterModelMatch: Identifiable, Hashable {

@@ -1431,7 +1431,7 @@ final class AppState {
                     text: finalText,
                     baseURL: settings.ollamaBaseURL,
                     model: settings.ollamaModel,
-                    reasoning: settings.ollamaReasoningSetting,
+                    reasoningEnabled: settings.ollamaReasoningEnabled,
                     prompt: settings.ollamaPostProcessingPrompt,
                     vocabulary: settings.customVocabulary,
                     context: postProcessingContext(
