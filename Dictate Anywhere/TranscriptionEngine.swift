@@ -1133,11 +1133,14 @@ final class ParakeetEngine: TranscriptionEngine {
         let recoveryCapture = self.recoveryCapture
         logger.info("startRecording: entry, thread=\(Thread.current.description, privacy: .public), deviceID=\(deviceID.map { String($0) } ?? "nil", privacy: .public)")
         let modelChoice = selectedModelChoice
+        let generation = modelSelectionGeneration
         let previewsEnabled = Settings.shared.showTextPreview
         let vocabularyTerms = activeVocabularyTerms
         let language = scriptLanguage(for: modelChoice)
         let nativeLanguageCode = Settings.shared.selectedLanguage.nemotronLanguageCode
-        if !(await asrCoordinator.isInitialized(for: modelChoice)) {
+        let modelIsInitialized = await asrCoordinator.isInitialized(for: modelChoice)
+        guard ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
+        if !modelIsInitialized {
             guard !isDownloading else {
                 logger.error("startRecording: selected model is still downloading")
                 throw TranscriptionError.engineNotReady
@@ -1146,24 +1149,28 @@ final class ParakeetEngine: TranscriptionEngine {
             try await prepare()
         }
 
-        guard await asrCoordinator.isInitialized(for: modelChoice) else {
+        let preparedModelIsInitialized = await asrCoordinator.isInitialized(for: modelChoice)
+        guard ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
+        guard preparedModelIsInitialized else {
             logger.error("startRecording: coordinator not initialized")
-            await MainActor.run {
-                self.isReady = false
-            }
+            isReady = false
             throw TranscriptionError.engineNotReady
         }
-        guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
+        guard audioCaptureStartupCancellation === startupCancellation,
+              ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
         if modelChoice == .nemotronMultilingual {
-            try await prepareVocabulary(terms: vocabularyTerms, model: modelChoice)
+            try await prepareVocabulary(terms: vocabularyTerms, model: modelChoice, generation: generation)
         } else if modelChoice.supportsFluidAudioVocabulary {
-            do { try await prepareVocabulary(terms: vocabularyTerms, model: modelChoice) }
+            do { try await prepareVocabulary(terms: vocabularyTerms, model: modelChoice, generation: generation) }
+            catch is CancellationError { throw CancellationError() }
             catch { logger.error("Vocabulary preparation failed: \(error.localizedDescription, privacy: .private)") }
         }
+        guard ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
         try await asrCoordinator.resetSession(for: modelChoice, language: language,
                                               requiresWholeRecordingFinal: !vocabularyTerms.isEmpty,
                                               previewsEnabled: previewsEnabled)
         let signalThreshold = try await asrCoordinator.audioProcessingSignalThreshold(for: modelChoice)
+        guard ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
         recordingModelChoice = modelChoice
         recordingScriptLanguage = language
         recordingVocabularyTerms = vocabularyTerms
@@ -1175,11 +1182,13 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         // Ensure a previous engine is fully torn down before starting a new one.
-        guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
+        guard audioCaptureStartupCancellation === startupCancellation,
+              ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
         await teardownAudioEngineIfNeeded()
 
         // Clear state
-        guard audioCaptureStartupCancellation === startupCancellation else { throw CancellationError() }
+        guard audioCaptureStartupCancellation === startupCancellation,
+              ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
         sampleLock.withLock {
             sampleBuffer.removeAll(keepingCapacity: true)
             levelSampleBuffer.reset(keepingCapacity: true)
@@ -1235,7 +1244,8 @@ final class ParakeetEngine: TranscriptionEngine {
             throw error
         }
 
-        guard audioCaptureStartupCancellation === startupCancellation else {
+        guard audioCaptureStartupCancellation === startupCancellation,
+              ownsSelection(modelChoice, generation: generation) else {
             captureController.stop()
             invalidateAudioProcessingSignals(sessionID: audioSessionID)
             AudioCaptureRestartGate.shared.recordStop()
