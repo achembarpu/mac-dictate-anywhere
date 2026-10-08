@@ -66,7 +66,6 @@ require_command() {
 benchmark_catalog() {
   cat <<'EOF'
 asr|Installed-model speech accuracy and latency|RecoveryASRSmokeTests/testRepeatableOfflineASRBenchmark RecoveryASRSmokeTests/testInstalledMandarinASRBenchmark RecoveryASRSmokeTests/testUserSuppliedSpeechFixtureBenchmark
-preview|Non-streaming pending-audio work|RecoveryASRSmokeTests/testNonStreamingPendingAudioWorkBenchmark
 audio|Meter polling and PCM buffer construction|PipelinePerformanceBenchmarkTests/testAudioPollingBenchmark PipelineWorkloadBenchmarkTests/testPCMBufferConstruction
 overlay|Preview observation and suffix cost|OverlayContentTests OverlayPerformanceBenchmarkTests
 transcript|Long transcript assembly and normalization|PipelineWorkloadBenchmarkTests/testLongTranscriptAssemblyAndNormalization

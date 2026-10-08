@@ -7,6 +7,7 @@
 
 import AppKit
 import SwiftUI
+import FluidAudio
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -42,12 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        configureFluidAudioLogging()
         guard !Self.isRunningTests else { return }
         guard enforceSingleInstance() else { return }
         let trace = PerfTrace.begin("app.launch")
         defer { trace.end() }
         NSApp.disableRelaunchOnLogin()
-        FluidAudioDebugLogFilter.installIfNeeded()
         setupMenuBar()
         configureMainWindow()
         setupNotificationObservers()
@@ -347,95 +348,16 @@ extension Notification.Name {
     static let requestShowMainWindow = Notification.Name("requestShowMainWindow")
 }
 
-// MARK: - FluidAudio Debug Log Filter
-
-private enum FluidAudioDebugLogFilter {
-    static func installIfNeeded() {
-        #if DEBUG
-        Shared.instance.installIfNeeded()
-        #endif
-    }
-
+/// Use the SDK's supported routing rather than intercepting process stderr.
+/// Speech debug output is opt-in and retained only in local Debug builds.
+@MainActor
+private func configureFluidAudioLogging() {
     #if DEBUG
-    private final class Shared {
-        static let instance = Shared()
-        private let queue = DispatchQueue(label: "com.dictate-anywhere.stderr-filter", qos: .utility)
-        private let lock = NSLock()
-        private var isInstalled = false
-        private var source: DispatchSourceRead?
-        private var readFD: Int32 = -1
-        private var originalStderrFD: Int32 = -1
-        private var pendingData = Data()
-
-        deinit {
-            source?.cancel()
-        }
-
-        func installIfNeeded() {
-            lock.lock()
-            defer { lock.unlock() }
-            guard !isInstalled else { return }
-            guard ProcessInfo.processInfo.environment["DICTATE_ANYWHERE_KEEP_FLUID_DEBUG_LOGS"] != "1" else { return }
-
-            let savedStderr = dup(STDERR_FILENO)
-            guard savedStderr >= 0 else { return }
-
-            var pipeFDs: [Int32] = [0, 0]
-            guard pipe(&pipeFDs) == 0 else { close(savedStderr); return }
-            guard dup2(pipeFDs[1], STDERR_FILENO) >= 0 else {
-                close(pipeFDs[0]); close(pipeFDs[1]); close(savedStderr); return
-            }
-            close(pipeFDs[1])
-
-            originalStderrFD = savedStderr
-            readFD = pipeFDs[0]
-            isInstalled = true
-
-            let readSource = DispatchSource.makeReadSource(fileDescriptor: readFD, queue: queue)
-            readSource.setEventHandler { [weak self] in self?.readAvailableData() }
-            readSource.setCancelHandler { [weak self] in
-                guard let self else { return }
-                if self.readFD >= 0 { close(self.readFD); self.readFD = -1 }
-                if self.originalStderrFD >= 0 { close(self.originalStderrFD); self.originalStderrFD = -1 }
-            }
-            source = readSource
-            readSource.resume()
-        }
-
-        private func readAvailableData() {
-            var buffer = [UInt8](repeating: 0, count: 4096)
-            let bytesRead = read(readFD, &buffer, buffer.count)
-            guard bytesRead > 0 else { source?.cancel(); source = nil; return }
-            pendingData.append(contentsOf: buffer.prefix(Int(bytesRead)))
-            flushCompleteLines()
-        }
-
-        private func flushCompleteLines() {
-            while let range = pendingData.firstRange(of: Data([0x0A])) {
-                let lineData = pendingData.subdata(in: pendingData.startIndex..<range.lowerBound)
-                pendingData.removeSubrange(pendingData.startIndex...range.lowerBound)
-                if let text = String(data: lineData, encoding: .utf8), text.contains("[DEBUG] [FluidAudio.") {
-                    continue
-                }
-                var output = lineData
-                output.append(0x0A)
-                writeAll(output)
-            }
-        }
-
-        private func writeAll(_ data: Data) {
-            guard originalStderrFD >= 0 else { return }
-            data.withUnsafeBytes { raw in
-                guard var base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
-                var remaining = raw.count
-                while remaining > 0 {
-                    let written = write(originalStderrFD, base, remaining)
-                    if written <= 0 { break }
-                    base = base.advanced(by: written)
-                    remaining -= written
-                }
-            }
-        }
-    }
+    let keepDebugLogs = ProcessInfo.processInfo.environment["DICTATE_ANYWHERE_KEEP_FLUID_DEBUG_LOGS"] == "1"
+    AppLogger.minimumLevel = keepDebugLogs ? .debug : .warning
+    AppLogger.mirrorsToConsole = keepDebugLogs
+    #else
+    AppLogger.minimumLevel = .warning
+    AppLogger.mirrorsToConsole = false
     #endif
 }

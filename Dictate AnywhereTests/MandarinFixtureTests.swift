@@ -106,44 +106,25 @@ final class MandarinFixtureTests: XCTestCase {
         print("code-switch transcript: \(text)")
     }
 
-    /// Reproduces the shipping chunker rather than an idealized one.
-    ///
-    /// `ParakeetEngine.commitBufferedChunksIfNeeded` commits fixed-size chunks
-    /// and then drops exactly that many samples, retaining **no** overlap, and
-    /// the finalize path transcribes whatever tail is left over. Consecutive
-    /// chunk transcripts therefore meet at a hard seam with no repeated audio —
-    /// which is why `joinChunkTranscripts` concatenates rather than
-    /// deduplicating. This splits the fixture on the same boundary, using the
-    /// production constant so the two cannot drift.
+    /// Exercises the production VAD/pause segmentation, including its final
+    /// tail, rather than independently splitting on an arbitrary clock seam.
     func testLongAudioSplitMergeMatchesFullTranscription() async throws {
         let all = try samples(for: "zh-long")
-        let chunk = ParakeetEngine.chunkTranscriptionSampleCount
-        let minimumTailSamples = 8_000  // finalize skips a shorter tail
-        try XCTSkipUnless(
-            all.count > chunk + minimumTailSamples,
-            "zh-long fixture must exceed one \(ParakeetEngine.chunkTranscriptionSeconds) s chunk plus a tail — regenerate")
+        try XCTSkipUnless(all.count > BatchTranscriptionPolicy.senseVoiceTargetSamples,
+                          "Fixture must exercise segmentation")
         let manager = try XCTUnwrap(Self.manager)
         let full = try await manager.transcribe(audio: all)
-
-        var merged = ""
-        var seamOffsets: [Int] = []
-        for start in stride(from: 0, to: all.count, by: chunk) {
-            let slice = Array(all[start..<min(start + chunk, all.count)])
-            // Production drops a sub-8000-sample tail instead of transcribing it.
-            if slice.count <= minimumTailSamples { break }
-            let text = try await manager.transcribe(audio: slice)
-            if !merged.isEmpty { seamOffsets.append(merged.count) }
-            merged = ParakeetEngine.joinChunkTranscripts(base: merged, addition: text)
+        let vad = try await VadManager()
+        let session = BatchTranscriptionSession.senseVoice(manager: manager, vad: vad, previewsEnabled: true)
+        for offset in stride(from: 0, to: all.count, by: 8_000) {
+            try await session.append(Array(all[offset..<min(offset + 8_000, all.count)]))
         }
-
-        XCTAssertFalse(seamOffsets.isEmpty, "fixture produced no chunk seam to exercise")
+        let merged = try await session.finish()
         XCTAssertLessThanOrEqual(characterErrorRate(reference: full, hypothesis: merged), 0.15,
-            "merged: \(merged)\nfull: \(full)")
-        // CER strips whitespace, so check space injection separately: pure-zh
-        // audio must not gain spaces between Han characters at the merge seam.
+                                "merged: \(merged)\nfull: \(full)")
         XCTAssertNil(merged.range(of: #"\p{Han}\s+\p{Han}"#, options: .regularExpression),
-            "space injected between Han characters: \(merged)")
-        print("chunked transcript (seams at \(seamOffsets)): \(merged)")
+                     "space injected between Han characters: \(merged)")
+        print("pause-segmented transcript: \(merged)")
         print("full transcript: \(full)")
     }
 

@@ -31,14 +31,6 @@ dependencies are Release-optimized; benchmark runs also compile the XCTest
 harness with `-O`. Synthetic test-loop timings still exclude full app rendering
 and are not production absolute timings.
 
-The command runs the following deterministic or opt-in scenarios:
-
-The pending-audio workload shares the production preview interval, delta
-predicate, commit threshold, and chunk size. Its 60-second continuous-speech
-fixture requests 120 previews and processes 31,840,000 pending samples for
-960,000 captured samples (33.17x). These counts describe the current policy's
-repeated buffer work; they do not measure inference time or transcript quality.
-
 Use registered groups to run focused benchmarks:
 
 ```sh
@@ -60,7 +52,6 @@ compile both app and tests with `-O` for consistent helper comparisons.
 | Offline ASR | Replays the bundled speech fixture through installed Parakeet and available Apple Speech engines. Reports latency, duration, median real-time factor, and beginning/end recognition sentinels. |
 | Mandarin ASR quality | Replays the four bundled, referenced Mandarin fixtures through installed SenseVoice. Reports CER and per-fixture p50/p95; skips if the model is not installed. |
 | User audio quality | If both `PIPELINE_BENCHMARK_AUDIO_PATH` and `PIPELINE_BENCHMARK_REFERENCE_PATH` are provided, replays a local 16 kHz mono fixture and reports WER. No audio or reference content is uploaded or logged by the harness. |
-| Pending audio workload | Models the non-streaming preview's repeated sample processing; no model inference or audio quality is measured. |
 | Audio polling | Processes fixed sample windows and measures RMS/smoothing plus meaningful-display-change decisions. |
 | PCM buffer creation | Repeatedly calls the app's 4096-frame 16 kHz buffer builder. XCTest records clock, CPU, and memory metrics. |
 | Cloud request encoding | Converts 60 s of synthetic samples to PCM16 and builds AssemblyAI's multipart body, without network access. XCTest records clock, CPU, and memory. |

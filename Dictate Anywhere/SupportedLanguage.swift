@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// Languages supported by FluidAudio's multilingual Parakeet TDT model for transcription.
+/// App language preferences. Each speech model declares its own supported subset.
 enum SupportedLanguage: String, CaseIterable, Identifiable, Codable {
     // Germanic languages
     case english = "en"
@@ -43,6 +43,7 @@ enum SupportedLanguage: String, CaseIterable, Identifiable, Codable {
     case hungarian = "hu"
     case finnish = "fi"
     case greek = "el"
+    case maltese = "mt"
 
     // East Asian languages
     case chinese = "zh"
@@ -50,7 +51,7 @@ enum SupportedLanguage: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
 
     /// The English display name for this language.
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .english: return "English"
         case .german: return "German"
@@ -77,6 +78,7 @@ enum SupportedLanguage: String, CaseIterable, Identifiable, Codable {
         case .hungarian: return "Hungarian"
         case .finnish: return "Finnish"
         case .greek: return "Greek"
+        case .maltese: return "Maltese"
         case .chinese: return "Chinese (Simplified)"
         }
     }
@@ -109,6 +111,7 @@ enum SupportedLanguage: String, CaseIterable, Identifiable, Codable {
         case .hungarian: return "Magyar"
         case .finnish: return "Suomi"
         case .greek: return "\u{0395}\u{03BB}\u{03BB}\u{03B7}\u{03BD}\u{03B9}\u{03BA}\u{03AC}"
+        case .maltese: return "Malti"
         case .chinese: return "简体中文"
         }
     }
@@ -141,6 +144,7 @@ enum SupportedLanguage: String, CaseIterable, Identifiable, Codable {
         case .hungarian: return "\u{1F1ED}\u{1F1FA}"
         case .finnish: return "\u{1F1EB}\u{1F1EE}"
         case .greek: return "\u{1F1EC}\u{1F1F7}"
+        case .maltese: return "🇲🇹"
         case .chinese: return "\u{1F1E8}\u{1F1F3}"
         }
     }
