@@ -925,29 +925,29 @@ final class AppState {
 
     /// Resolve configuration first, then overlap independent speech and cleanup
     /// loads. Vocabulary preparation needs the selected speech weights resident.
-    func prepareSelectedEngines(prewarmModel: Bool = true, selectionOperationID: UUID? = nil) async {
-        guard !isShuttingDown, !Task.isCancelled,
-              selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+    func prepareSelectedEngines(prewarmModel: Bool = true, selectionOperationID requestedOperationID: UUID? = nil) async {
+        let operationID = requestedOperationID ?? selectionOperationID
+        guard !isShuttingDown, !Task.isCancelled, ownsSelectionOperation(operationID) else { return }
         // Configuration may select an available Apple Speech language. Resolve
         // that fallback before cleanup evaluates its language/model eligibility.
-        await prepareActiveEngine(prewarmModel: false, selectionOperationID: selectionOperationID)
+        await prepareActiveEngine(prewarmModel: false, resolvedConfiguration: nil, selectionOperationID: operationID)
         guard prewarmModel, !isShuttingDown, !Task.isCancelled,
-              selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+              ownsSelectionOperation(operationID) else { return }
         let resolvedConfiguration = enginePreparationKey(prewarmModel: true)
         if settings.transcriptPostProcessingMode == .fluidAudioVocabulary {
             await prepareActiveEngine(
                 prewarmModel: true,
                 resolvedConfiguration: resolvedConfiguration,
-                selectionOperationID: selectionOperationID
+                selectionOperationID: operationID
             )
-            guard selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+            guard ownsSelectionOperation(operationID) else { return }
             if !Task.isCancelled { await prepareCleanupEngineIfNeeded() }
             return
         }
         async let speech: Void = prepareActiveEngine(
             prewarmModel: true,
             resolvedConfiguration: resolvedConfiguration,
-            selectionOperationID: selectionOperationID
+            selectionOperationID: operationID
         )
         async let cleanup: Void = prepareCleanupEngineIfNeeded()
         _ = await (speech, cleanup)
@@ -976,19 +976,20 @@ final class AppState {
     }
 
     func prepareActiveEngine(prewarmModel: Bool = true) async {
-        await prepareActiveEngine(prewarmModel: prewarmModel, resolvedConfiguration: nil, selectionOperationID: nil)
+        let operationID = selectionOperationID
+        await prepareActiveEngine(prewarmModel: prewarmModel, resolvedConfiguration: nil, selectionOperationID: operationID)
     }
 
     private func prepareActiveEngine(
         prewarmModel: Bool,
         resolvedConfiguration: EnginePreparationKey?,
-        selectionOperationID: UUID?
+        selectionOperationID: UUID
     ) async {
         defer { rearmResolvedBlockingAttentionIssues() }
-        guard selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+        guard ownsSelectionOperation(selectionOperationID) else { return }
         while let inFlight = enginePreparation {
             await inFlight.task.value
-            guard selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+            guard ownsSelectionOperation(selectionOperationID) else { return }
             if enginePreparation?.id == inFlight.id {
                 enginePreparation = nil
             }
@@ -996,7 +997,7 @@ final class AppState {
                 return
             }
         }
-        guard !isShuttingDown, selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+        guard !isShuttingDown, ownsSelectionOperation(selectionOperationID) else { return }
         let id = UUID()
         let task = Task { [weak self] in
             guard let self else { return }
@@ -1029,7 +1030,7 @@ final class AppState {
     private func performPrepareActiveEngine(
         prewarmModel: Bool,
         resolvedConfiguration: EnginePreparationKey?,
-        selectionOperationID: UUID?,
+        selectionOperationID: UUID,
         preparationID: UUID
     ) async {
         let trace = PerfTrace.begin("stt.prepare")
@@ -1037,7 +1038,7 @@ final class AppState {
         defer {
             if enginePreparation?.id == preparationID { isPreparingEngine = false }
         }
-        guard !isShuttingDown, selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+        guard !isShuttingDown, ownsSelectionOperation(selectionOperationID) else { return }
         logger.info("prepareActiveEngine: called, engineChoice=\(String(describing: self.settings.engineChoice), privacy: .public), status=\(String(describing: self.status), privacy: .public)")
         if case .recording = status { return }
         if case .processing = status { return }
@@ -1046,7 +1047,7 @@ final class AppState {
         if resolvedConfiguration != enginePreparationKey(prewarmModel: prewarmModel) {
             await resolveActiveEngineConfiguration()
         }
-        guard !isShuttingDown, selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+        guard !isShuttingDown, ownsSelectionOperation(selectionOperationID) else { return }
 
         let targetEngine = activeEngine
         let ready = targetEngine.isReady
@@ -1057,25 +1058,25 @@ final class AppState {
             enginePreparationError = nil
             do {
                 try await targetEngine.prepare()
-                guard selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+                guard ownsSelectionOperation(selectionOperationID) else { return }
                 guard !isShuttingDown else {
                     await targetEngine.cancel()
                     return
                 }
             } catch {
-                guard selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+                guard ownsSelectionOperation(selectionOperationID) else { return }
                 logger.error("prepareActiveEngine: prepare() failed on first attempt: \(error.localizedDescription, privacy: .public)")
                 try? await Task.sleep(for: .seconds(1))
-                guard !isShuttingDown, selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+                guard !isShuttingDown, ownsSelectionOperation(selectionOperationID) else { return }
                 do {
                     try await targetEngine.prepare()
-                    guard selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+                    guard ownsSelectionOperation(selectionOperationID) else { return }
                     guard !isShuttingDown else {
                         await targetEngine.cancel()
                         return
                     }
                 } catch {
-                    guard selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+                    guard ownsSelectionOperation(selectionOperationID) else { return }
                     logger.error("prepareActiveEngine: prepare() failed on retry: \(error.localizedDescription, privacy: .public)")
                     enginePreparationError = error.localizedDescription
                 }
@@ -1086,9 +1087,9 @@ final class AppState {
         // the input-source mapping hint is watching; refresh so the hint
         // clears without waiting for settings to reopen.
         if settings.engineChoice == .appleSpeech, !ready, prewarmModel,
-           selectionOperationID.map(ownsSelectionOperation) ?? true {
+           ownsSelectionOperation(selectionOperationID) {
             appleSpeechInstalledLanguages = await AppleSpeechEngine.installedLanguages()
-            guard !isShuttingDown, selectionOperationID.map(ownsSelectionOperation) ?? true else { return }
+            guard !isShuttingDown, ownsSelectionOperation(selectionOperationID) else { return }
         }
     }
 
