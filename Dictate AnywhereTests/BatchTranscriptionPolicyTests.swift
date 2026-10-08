@@ -124,22 +124,36 @@ final class BatchTranscriptionPolicyTests: XCTestCase {
 
     func testPreviewUsesAudioTimesAndPreservesRepeatedWords() {
         var timeline = BatchPreviewTimeline()
-        timeline.update([token(" go", at: 1), token(" go", at: 2), token(" yester", at: 3)])
+        timeline.recordAuthoritativeUpdate([token(" go", at: 1), token(" go", at: 2), token(" yester", at: 3)])
         let result = ASRResult(text: "go tomorrow", confidence: 1, duration: 4, processingTime: 0,
-                               tokenTimings: [token(" go", at: 0), token(" tomorrow", at: 1)])
-        XCTAssertEqual(timeline.preview(result, startingAt: 2 * 16_000), "go go tomorrow")
-        timeline.update([token(" yesterday", at: 3), token(" today", at: 4)])
-        XCTAssertEqual(timeline.words.map(\.word), ["go", "go", "yesterday", "today"])
+                               tokenTimings: [token(" go", at: 0), token(" today", at: 1.5)])
+        XCTAssertEqual(timeline.recordProvisionalPreview(result, startingAt: 2 * 16_000), "go go yester today")
+        timeline.recordAuthoritativeUpdate([token(" yesterday", at: 3), token(" today", at: 4)])
+        XCTAssertEqual(timeline.authoritativeWords.map(\.word), ["go", "go", "yesterday", "today"])
+    }
+
+    func testAuthoritativeUpdateReplacesStaleGuessAndKeepsManualBridge() {
+        var timeline = BatchPreviewTimeline()
+        let guessed = ASRResult(text: "wrong", confidence: 1, duration: 1, processingTime: 0,
+                                tokenTimings: [token(" wrong", at: 0)])
+        XCTAssertEqual(timeline.recordProvisionalPreview(guessed, startingAt: 2 * 16_000), "wrong")
+        timeline.recordAuthoritativeUpdate([token(" right", at: 2)])
+        XCTAssertEqual(timeline.previewText, "right")
+        XCTAssertTrue(timeline.provisionalWords.isEmpty, "Confirmed audio must be released from provisional storage")
+
+        let bridge = ASRResult(text: "later", confidence: 1, duration: 1, processingTime: 0,
+                               tokenTimings: [token(" later", at: 0)])
+        XCTAssertEqual(timeline.recordProvisionalPreview(bridge, startingAt: 4 * 16_000), "right later")
     }
 
     func testBatchOnlyPreviewKeepsPrefixWhenAudioWindowMoves() {
         var timeline = BatchPreviewTimeline()
         let first = ASRResult(text: "go go yesterday", confidence: 1, duration: 4, processingTime: 0,
                               tokenTimings: [token(" go", at: 1), token(" go", at: 2), token(" yesterday", at: 3)])
-        XCTAssertEqual(timeline.recordPreview(first, startingAt: 0), "go go yesterday")
+        XCTAssertEqual(timeline.recordProvisionalPreview(first, startingAt: 0), "go go yesterday")
         let next = ASRResult(text: "go tomorrow", confidence: 1, duration: 3, processingTime: 0,
                              tokenTimings: [token(" go", at: 0), token(" tomorrow", at: 1)])
-        XCTAssertEqual(timeline.recordPreview(next, startingAt: 2 * 16_000), "go go tomorrow")
+        XCTAssertEqual(timeline.recordProvisionalPreview(next, startingAt: 2 * 16_000), "go go tomorrow")
     }
 
     private func token(_ text: String, at time: Double) -> TokenTiming {

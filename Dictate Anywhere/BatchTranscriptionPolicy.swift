@@ -123,40 +123,62 @@ nonisolated struct SenseVoicePauseBoundaries {
     }
 }
 
-/// Only the provisional UI uses this timeline. Final text comes from the SDK's
-/// token-aware overlap merger, never from string suffix/prefix deduplication.
+/// Keeps authoritative streaming tokens separate from manual provisional tokens.
+/// Final text comes from the SDK's token-aware overlap merger, never this timeline.
 nonisolated struct BatchPreviewTimeline {
-    private(set) var words: [WordTiming] = []
+    private(set) var authoritativeWords: [WordTiming] = []
+    private(set) var provisionalWords: [WordTiming] = []
+    private var provisionalFallbackText = ""
 
-    mutating func update(_ timings: [TokenTiming]) {
+    mutating func recordAuthoritativeUpdate(_ timings: [TokenTiming]) {
         let incoming = buildWordTimings(from: timings)
         guard let first = incoming.first else { return }
-        // A new SDK window can replace its predecessor's trailing word.
-        words.removeAll { $0.endTime > first.startTime }
-        words.append(contentsOf: incoming)
+        // SDK updates contain only the current chunk. A new chunk may revise
+        // its predecessor's trailing word, matching the legacy stream timeline.
+        authoritativeWords.removeAll { $0.endTime > first.startTime }
+        authoritativeWords.append(contentsOf: incoming)
+        discardAuthoritativeProvisionalPrefix()
     }
 
-    /// A batch-only backend has no SDK live updates. Keep the prior prefix and
-    /// replace the covered provisional tail using original audio positions.
-    mutating func recordPreview(_ result: ASRResult, startingAt sample: Int) -> String {
+    /// Retain an overlapping bridge between SDK progress and the rolling manual
+    /// suffix. A newly arrived SDK chunk always owns its timeline; the manual
+    /// guess cannot replace that authoritative prefix.
+    mutating func recordProvisionalPreview(_ result: ASRResult, startingAt sample: Int) -> String {
         let offset = Double(sample) / Double(BatchTranscriptionPolicy.sampleRate)
-        let timings = (result.tokenTimings ?? []).map {
+        provisionalFallbackText = result.text
+        let incoming = (result.tokenTimings ?? []).map {
             TokenTiming(token: $0.token, tokenId: $0.tokenId, startTime: $0.startTime + offset,
                         endTime: $0.endTime + offset, confidence: $0.confidence)
         }
-        update(timings)
-        return words.isEmpty ? result.text : words.map(\.word).joined(separator: " ")
+        let words = buildWordTimings(from: incoming)
+        if let first = words.first {
+            provisionalWords.removeAll { $0.endTime > first.startTime }
+            provisionalWords.append(contentsOf: words)
+            discardAuthoritativeProvisionalPrefix()
+        }
+        return previewText
     }
 
-    func preview(_ result: ASRResult, startingAt sample: Int) -> String {
-        guard let last = words.last else { return result.text }
-        let offset = Double(sample) / Double(BatchTranscriptionPolicy.sampleRate)
-        // If recognition falls behind, keep the covered prefix visible until
-        // the SDK catches up instead of displaying a gap in the recording.
-        guard offset <= last.startTime else { return words.map(\.word).joined(separator: " ") }
-        let tail = buildWordTimings(from: result.tokenTimings ?? [])
-            .filter { $0.endTime + offset > last.startTime }
-        guard !tail.isEmpty else { return words.map(\.word).joined(separator: " ") }
-        return (words.dropLast().map(\.word) + tail.map(\.word)).joined(separator: " ")
+    var previewText: String {
+        guard let authoritativeLast = authoritativeWords.last else {
+            return provisionalWords.isEmpty
+                ? provisionalFallbackText
+                : provisionalWords.map(\.word).joined(separator: " ")
+        }
+        // SDK chunks are authoritative, including their trailing word. The
+        // rolling manual timeline fills only the uncovered bridge and suffix.
+        var bridge = provisionalWords.filter { $0.endTime > authoritativeLast.endTime }
+        // A word crossing the frontier may be the same boundary token the SDK
+        // just confirmed. Keep one copy while retaining any earlier bridge.
+        if let first = bridge.first, first.startTime < authoritativeLast.endTime,
+           first.word == authoritativeLast.word {
+            bridge.removeFirst()
+        }
+        return (authoritativeWords.map(\.word) + bridge.map(\.word)).joined(separator: " ")
+    }
+
+    private mutating func discardAuthoritativeProvisionalPrefix() {
+        guard let frontier = authoritativeWords.last?.endTime else { return }
+        provisionalWords.removeAll { $0.endTime <= frontier }
     }
 }

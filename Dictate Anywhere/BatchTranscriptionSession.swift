@@ -5,6 +5,10 @@ import FluidAudio
 /// A recording-scoped decoder. The SDK input stream is single-use, so each
 /// recording gets a new session while the already-loaded models are reused.
 actor BatchTranscriptionSession {
+    /// Keep the rolling TDT preview's most recent audio small enough to bound
+    /// joint-decoder work. The authoritative final still consumes every sample.
+    private let provisionalTDTWindowSamples: Int?
+
     private enum Backend {
         case parakeet(AsrManager, SlidingWindowAsrManager)
         case parakeetBatch(AsrManager)
@@ -27,11 +31,13 @@ actor BatchTranscriptionSession {
     private var vadPending = AudioSampleBuffer()
     private var speechPresence = BatchSpeechPresence()
 
-    private init(backend: Backend, vad: VadManager, language: Language? = nil, previewsEnabled: Bool) {
+    private init(backend: Backend, vad: VadManager, language: Language? = nil,
+                 previewsEnabled: Bool, provisionalTDTWindowSamples: Int? = nil) {
         self.backend = backend
         self.vad = vad
         self.language = language
         self.previewsEnabled = previewsEnabled
+        self.provisionalTDTWindowSamples = provisionalTDTWindowSamples
     }
 
     static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager, language: Language?,
@@ -44,10 +50,17 @@ actor BatchTranscriptionSession {
             return BatchTranscriptionSession(backend: .parakeetBatch(previewManager), vad: vad, language: language,
                                              previewsEnabled: previewsEnabled)
         }
+        // The short provisional window is evaluated only for the v3 and 110M
+        // streaming paths. V2, Ultra, and whole-recording vocabulary previews
+        // retain their existing context until they pass their own quality gate.
+        let provisionalWindow = models.version == .v3 || models.version == .tdtCtc110m
+            ? 12 * BatchTranscriptionPolicy.sampleRate
+            : nil
         let overlapping = SlidingWindowAsrManager(config: .streaming.applying(language: language))
         try await overlapping.loadModels(models)
         let session = BatchTranscriptionSession(backend: .parakeet(previewManager, overlapping), vad: vad,
-                                                language: language, previewsEnabled: previewsEnabled)
+                                                language: language, previewsEnabled: previewsEnabled,
+                                                provisionalTDTWindowSamples: provisionalWindow)
         try await session.start()
         return session
     }
@@ -70,7 +83,7 @@ actor BatchTranscriptionSession {
 
     private func accept(_ update: SlidingWindowTranscriptionUpdate) {
         guard previewsEnabled else { return }
-        previewTimeline.update(update.tokenTimings)
+        previewTimeline.recordAuthoritativeUpdate(update.tokenTimings)
     }
 
     func append(_ newSamples: [Float]) async throws {
@@ -129,13 +142,21 @@ actor BatchTranscriptionSession {
 
     func preview() async throws -> String {
         guard previewsEnabled else { return committedText }
+        let maximumTDTWindowSamples = provisionalTDTWindowSamples ?? .max
         guard !samples.isEmpty else { return committedText }
         // A failed SenseVoice segment is retained for retry. Keep its provisional
         // decode bounded too; the authoritative finish still processes every sample.
         let input: [Float]
+        let inputStartSample: Int
         switch backend {
-        case .parakeet, .parakeetBatch: input = Array(samples.samples)
-        case .senseVoice: input = Array(samples.samples.prefix(BatchTranscriptionPolicy.senseVoiceMaximumSamples))
+        case .parakeet, .parakeetBatch:
+            let windowCount = min(samples.count, max(1, maximumTDTWindowSamples))
+            let skipped = samples.count - windowCount
+            input = Array(samples.samples.suffix(windowCount))
+            inputStartSample = startSample + skipped
+        case .senseVoice:
+            input = Array(samples.samples.prefix(BatchTranscriptionPolicy.senseVoiceMaximumSamples))
+            inputStartSample = startSample
         }
         let newCount = min(input.count, totalSamples - lastPreviewTotalSamples)
         let trace = PerfTrace.begin("stt.batchPreview", counts: [
@@ -148,11 +169,11 @@ actor BatchTranscriptionSession {
         case .parakeet(let manager, _):
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
             let result = try await manager.transcribe(input, decoderState: &state, language: language)
-            return previewTimeline.preview(result, startingAt: startSample)
+            return previewTimeline.recordProvisionalPreview(result, startingAt: inputStartSample)
         case .parakeetBatch(let manager):
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
             let result = try await manager.transcribe(input, decoderState: &state, language: language)
-            return previewTimeline.recordPreview(result, startingAt: startSample)
+            return previewTimeline.recordProvisionalPreview(result, startingAt: inputStartSample)
         case .senseVoice(let manager):
             let result = try await manager.transcribe(audio: input)
             return ParakeetEngine.joinChunkTranscripts(base: committedText, addition: result)
