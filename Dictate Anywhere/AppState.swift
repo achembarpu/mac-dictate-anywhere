@@ -149,6 +149,7 @@ final class AppState {
     private struct EnginePreparation {
         let id: UUID
         let key: EnginePreparationKey
+        let selectionOperationID: UUID
         let task: Task<Void, Never>
     }
 
@@ -1009,7 +1010,8 @@ final class AppState {
             if enginePreparation?.id == inFlight.id {
                 enginePreparation = nil
             }
-            if inFlight.key == enginePreparationKey(prewarmModel: prewarmModel) {
+            if inFlight.key == enginePreparationKey(prewarmModel: prewarmModel),
+               inFlight.selectionOperationID == selectionOperationID {
                 return
             }
         }
@@ -1025,7 +1027,8 @@ final class AppState {
             )
         }
         enginePreparation = EnginePreparation(
-            id: id, key: enginePreparationKey(prewarmModel: prewarmModel), task: task
+            id: id, key: enginePreparationKey(prewarmModel: prewarmModel),
+            selectionOperationID: selectionOperationID, task: task
         )
         await task.value
         if enginePreparation?.id == id {
