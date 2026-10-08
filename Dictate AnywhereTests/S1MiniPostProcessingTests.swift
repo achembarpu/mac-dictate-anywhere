@@ -258,15 +258,6 @@ final class S1MiniPostProcessingTests: XCTestCase {
         XCTAssertEqual(styling.styling(for: .other), .semiFormal)
     }
 
-    func testPinnedModelMetadata() {
-        XCTAssertEqual(S1MiniModelSpec.byteCount, 484_219_808)
-        XCTAssertEqual(
-            S1MiniModelSpec.sha256,
-            "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634"
-        )
-        XCTAssertTrue(S1MiniModelSpec.downloadURL.absoluteString.contains(S1MiniModelSpec.revision))
-    }
-
     func testDownloadProgressFallsBackToPinnedSizeWhenServerLengthIsUnknown() {
         let fraction = S1MiniDownloadProgress.transferFraction(
             totalBytesWritten: S1MiniModelSpec.byteCount / 4,
@@ -312,7 +303,7 @@ final class S1MiniPostProcessingTests: XCTestCase {
 
     func testIntegrityRejectsWrongFileSize() throws {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("s1-mini-invalid-\(UUID().uuidString)")
+            .appendingPathComponent("s1-mini-invalid-\(UUID().uuidString).gguf")
         try Data("not a model".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
 

@@ -244,7 +244,7 @@ run_tests() {
   set +e
   env TEST_RUNNER_RUN_AUDIO_CAPTURE_SMOKE="${RUN_AUDIO_CAPTURE_SMOKE:-0}" \
     xcodebuild "${xcodebuild_args[@]}" \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG PIPELINE_BENCHMARK_OPTIMIZED" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) DEBUG PIPELINE_BENCHMARK_OPTIMIZED' \
     -resultBundlePath "$RESULT_BUNDLE_PATH" test
   local test_status=$?
   set -e
@@ -302,7 +302,7 @@ run_benchmark() {
   rm -rf "$benchmark_result_bundle_path"
   env "${benchmark_test_environment[@]}" xcodebuild "${benchmark_xcodebuild_args[@]}" \
     SWIFT_OPTIMIZATION_LEVEL=-O \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="$benchmark_conditions" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) $benchmark_conditions" \
     -enableCodeCoverage NO \
     -resultBundlePath "$benchmark_result_bundle_path" test
 }

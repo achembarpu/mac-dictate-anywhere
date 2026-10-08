@@ -113,6 +113,11 @@ for scenario in native-arm64 native-intel rosetta; do
       printf 'FAIL: %s did not select a native macOS destination for %s\n' "$command" "$scenario" >&2
       exit 1
     fi
+    if [[ "$command" == test || "$command" == benchmark ]] && \
+       ! /usr/bin/grep -Fq 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) ' "$XCODEBUILD_ARGS_LOG"; then
+      printf 'FAIL: %s replaced package compilation conditions\n' "$command" >&2
+      exit 1
+    fi
   done
 done
 
