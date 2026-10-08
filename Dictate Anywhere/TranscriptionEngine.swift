@@ -550,6 +550,7 @@ final class ParakeetEngine: TranscriptionEngine {
     private var vocabularyPreparationIdentity: (model: ParakeetModelChoice, terms: [String])?
     private var vocabularyPreparationTaskID: UUID?
     private var vocabularyPreparationStatus: ModelReadiness = .available
+    private var modelSelectionGeneration = UUID()
 
     var vocabularyReadiness: ModelReadiness {
         guard selectedModelChoice.supportsFluidAudioVocabulary else {
@@ -689,10 +690,14 @@ final class ParakeetEngine: TranscriptionEngine {
     }
 
     func handleSelectedModelChange() async {
+        modelSelectionGeneration = UUID()
+        let generation = modelSelectionGeneration
         let selectedModel = selectedModelChoice
         let isSelectedModelLoaded = await asrCoordinator.isInitialized(for: selectedModel)
+        guard generation == modelSelectionGeneration else { return }
         if !isSelectedModelLoaded {
             await asrCoordinator.cleanup()
+            guard generation == modelSelectionGeneration else { return }
             loadedModels = nil
             invalidateVocabularyReadiness()
             await MainActor.run {
@@ -701,8 +706,10 @@ final class ParakeetEngine: TranscriptionEngine {
         }
 
         await recheckModelOnDisk(for: selectedModel)
+        guard generation == modelSelectionGeneration else { return }
 
         let coordinatorReady = await asrCoordinator.isInitialized(for: selectedModel)
+        guard generation == modelSelectionGeneration else { return }
         await MainActor.run {
             self.isReady = coordinatorReady
         }
@@ -1291,8 +1298,12 @@ final class ParakeetEngine: TranscriptionEngine {
     /// Releases speech weights only after capture and inference owners have
     /// unwound. AppState calls this when the user selects another provider.
     func unloadDeselectedModel() async {
+        modelSelectionGeneration = UUID()
+        let generation = modelSelectionGeneration
         await cancel()
+        guard generation == modelSelectionGeneration, Settings.shared.engineChoice != .parakeet else { return }
         await asrCoordinator.cleanup()
+        guard generation == modelSelectionGeneration, Settings.shared.engineChoice != .parakeet else { return }
         loadedModels = nil
         invalidateVocabularyReadiness()
         await MainActor.run { self.isReady = false }
@@ -1714,6 +1725,8 @@ private actor AsrManagerCoordinator {
     private var preparedVocabularyTerms: [String] = []
     private var vocabularyPreparation: (id: UUID, terms: [String], task: Task<PreparedTDTVocabulary, Error>)?
     private var modelGeneration = UUID()
+    private var lifecycleMutationInProgress = false
+    private var lifecycleMutationWaiters: [CheckedContinuation<Void, Never>] = []
     private var multilingualModelDirectory: URL?
     private var preparedStreamingTerms: [String] = []
     private var streamingVocabularyPreparation: (id: UUID, terms: [String], task: Task<Void, Error>)?
@@ -1727,10 +1740,12 @@ private actor AsrManagerCoordinator {
     }
 
     func isInitialized() -> Bool {
+        guard !lifecycleMutationInProgress else { return false }
         manager != nil || streamingManager != nil || senseVoiceManager != nil || multilingualManager != nil
     }
 
     func isInitialized(for modelChoice: ParakeetModelChoice) -> Bool {
+        guard !lifecycleMutationInProgress else { return false }
         switch modelChoice {
         case .senseVoice:
             return senseVoiceManager != nil
@@ -1931,6 +1946,8 @@ private actor AsrManagerCoordinator {
     /// Serialize preparation against capture and other preparation requests.
     /// Reset clears the match tail, while the unchanged term index stays resident.
     func prepareStreamingVocabulary(terms: [String]) async throws {
+        await waitForLifecycleMutation()
+        try Task.checkCancellation()
         let terms = Array(Set(terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty })).sorted()
         let generation = modelGeneration
@@ -1996,6 +2013,8 @@ private actor AsrManagerCoordinator {
     }
 
     func prepareVocabulary(terms: [String], progressHandler: ProgressHandler? = nil) async throws {
+        await waitForLifecycleMutation()
+        try Task.checkCancellation()
         let terms = Array(Set(terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty })).sorted()
         let generation = modelGeneration
@@ -2217,6 +2236,9 @@ private actor AsrManagerCoordinator {
     }
 
     func cleanup() async {
+        await waitForLifecycleMutation()
+        lifecycleMutationInProgress = true
+        defer { finishLifecycleMutation() }
         modelGeneration = UUID()
         let tdtTask = vocabularyPreparation?.task
         vocabularyPreparation = nil
@@ -2254,6 +2276,9 @@ private actor AsrManagerCoordinator {
     }
 
     func releaseVocabularyModels() async {
+        await waitForLifecycleMutation()
+        lifecycleMutationInProgress = true
+        defer { finishLifecycleMutation() }
         modelGeneration = UUID()
         let tdtTask = vocabularyPreparation?.task
         vocabularyPreparation = nil
@@ -2271,5 +2296,21 @@ private actor AsrManagerCoordinator {
         if let multilingualManager {
             await multilingualManager.setCustomVocabulary([])
         }
+    }
+
+    /// Actor methods can re-enter at `await`. Keep vocabulary preparation,
+    /// vocabulary release, and full cleanup from mutating shared graph state
+    /// across one another's suspension points.
+    private func waitForLifecycleMutation() async {
+        while lifecycleMutationInProgress {
+            await withCheckedContinuation { lifecycleMutationWaiters.append($0) }
+        }
+    }
+
+    private func finishLifecycleMutation() {
+        lifecycleMutationInProgress = false
+        let waiters = lifecycleMutationWaiters
+        lifecycleMutationWaiters.removeAll(keepingCapacity: true)
+        waiters.forEach { $0.resume() }
     }
 }
