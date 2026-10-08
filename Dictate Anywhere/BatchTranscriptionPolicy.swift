@@ -167,13 +167,7 @@ nonisolated struct BatchPreviewTimeline {
         }
         // SDK chunks are authoritative, including their trailing word. The
         // rolling manual timeline fills only the uncovered bridge and suffix.
-        var bridge = provisionalWords.filter { $0.endTime > authoritativeLast.endTime }
-        // A word crossing the frontier may be the same boundary token the SDK
-        // just confirmed. Keep one copy while retaining any earlier bridge.
-        if let first = bridge.first, first.startTime < authoritativeLast.endTime,
-           first.word == authoritativeLast.word {
-            bridge.removeFirst()
-        }
+        let bridge = provisionalWords.filter { $0.startTime >= authoritativeLast.endTime }
         return (authoritativeWords.map(\.word) + bridge.map(\.word)).joined(separator: " ")
     }
 
