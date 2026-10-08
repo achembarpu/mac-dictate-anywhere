@@ -160,6 +160,59 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testLocalFinalizationOverlapsContextButDeliveryWaitsForContext() async {
+        let captured = expectation(description: "context capture began")
+        let gate = StartupContextGate(started: captured)
+        let engine = StartupContextEngine()
+        engine.requiresContextBeforeFinalization = false
+        let finalized = expectation(description: "local decoding completed before context")
+        engine.onFinalized = { finalized.fulfill() }
+        var delivered: [String] = []
+        let app = app(engine: engine, capture: { _ in await gate.capture() }, delivery: {
+            delivered.append($0)
+            return .copiedOnly
+        })
+        await app.startDictation()
+        await fulfillment(of: [captured], timeout: 2)
+        let stopping = Task { await app.stopDictation() }
+        await fulfillment(of: [finalized], timeout: 2)
+        XCTAssertFalse(engine.capturing)
+        XCTAssertNil(engine.contextAtFinalization)
+        XCTAssertTrue(delivered.isEmpty)
+        let context = Self.context(pid: 123, word: "Zephyr")
+        await gate.resolve(context)
+        await stopping.value
+        XCTAssertTrue(engine.appliedContexts.contains(context))
+        XCTAssertEqual(delivered, ["Recorded words."])
+        await app.shutdown()
+    }
+
+    func testCancellingLocalFinalizationDropsLateContextAndDelivery() async {
+        let captured = expectation(description: "context capture began")
+        let gate = StartupContextGate(started: captured)
+        let engine = StartupContextEngine()
+        engine.requiresContextBeforeFinalization = false
+        let finalized = expectation(description: "local decoding completed")
+        engine.onFinalized = { finalized.fulfill() }
+        var delivered: [String] = []
+        let app = app(engine: engine, capture: { _ in await gate.capture() }, delivery: {
+            delivered.append($0)
+            return .copiedOnly
+        })
+        await app.startDictation()
+        await fulfillment(of: [captured], timeout: 2)
+        let stopping = Task { await app.stopDictation() }
+        await fulfillment(of: [finalized], timeout: 2)
+        await app.cancelDictation()
+        await gate.resolve(Self.context(pid: 123, word: "Stale"))
+        await stopping.value
+        XCTAssertTrue(delivered.isEmpty)
+        XCTAssertTrue(Settings.shared.transcriptHistory.isEmpty)
+        XCTAssertNil(engine.context)
+        XCTAssertEqual(app.status, .idle)
+        await app.shutdown()
+    }
+
     func testSlowContextDoesNotDelayListeningAndStopClosesMicrophoneBeforeWaiting() async {
         let captured = expectation(description: "context capture began")
         let gate = StartupContextGate(started: captured)
@@ -494,6 +547,7 @@ private actor StartupModelPreparationGate {
 private final class StartupContextEngine: TranscriptionEngine {
     var recoveryCapture: RecoveryAudioCapture?
     var isReady = true
+    var requiresContextBeforeFinalization = true
     var currentTranscript = ""
     var audioSamples: [Float] = []
     var capturing = false
@@ -510,6 +564,7 @@ private final class StartupContextEngine: TranscriptionEngine {
     var finalTranscript = "Recorded words."
     var lastTranscriptionError: String?
     var onCaptureStopped: (() -> Void)?
+    var onFinalized: (() -> Void)?
 
     func levelSamples(count: Int) -> [Float] { [] }
     func prepare() async throws {
@@ -520,11 +575,16 @@ private final class StartupContextEngine: TranscriptionEngine {
         onPrepare?()
     }
     func startRecording(deviceID: AudioDeviceID?) async throws { capturing = true }
-    func stopAudioCapture() async { capturing = false; onCaptureStopped?() }
+    func stopAudioCapture() async {
+        guard capturing else { return }
+        capturing = false
+        onCaptureStopped?()
+    }
     func stopRecording() async -> String {
         finalizationCount += 1
         contextAtFinalization = context
         vocabularyAtFinalization = vocabulary
+        onFinalized?()
         return finalTranscript
     }
     func cancel() async { capturing = false }

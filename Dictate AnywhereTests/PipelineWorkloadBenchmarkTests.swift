@@ -52,9 +52,8 @@ final class PipelineWorkloadBenchmarkTests: XCTestCase {
         )
         var lastBody = Data()
         measure(metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()], options: measureOptions) {
-            let audio = AssemblyAIEngine.pcm16Data(from: samples)
             lastBody = (try? AssemblyAIEngine.multipartBody(
-                config: config, pcmAudio: audio, boundary: "benchmark-boundary"
+                config: config, samples: samples, boundary: "benchmark-boundary"
             )) ?? Data()
         }
         XCTAssertGreaterThan(lastBody.count, samples.count * MemoryLayout<Int16>.size)

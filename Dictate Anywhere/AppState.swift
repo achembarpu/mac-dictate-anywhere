@@ -1349,16 +1349,19 @@ final class AppState {
 
         let engine = sessionEngine ?? activeEngine
 
-        // A short utterance can finish before a cold editor exposes its text.
-        // Stop the microphone now, then await context before the cloud request
-        // or local cleanup/insertion consumes it.
+        // Local final decoding can overlap a cold editor's context capture.
+        // Context-dependent engines retain their context-before-decode order.
         await engine.stopAudioCapture()
-        await contextApplicationTask?.value
-        guard !Task.isCancelled else { return }
+        volumeController.recordCaptureStopped()
+        let contextTask = contextApplicationTask
+        async let recognition = finalizeRecording(
+            engine: engine,
+            contextTask: engine.requiresContextBeforeFinalization ? contextTask : nil
+        )
+        await contextTask?.value
+        let newTranscript = await recognition
         invalidateContextCapture()
 
-        // Get final transcript
-        let newTranscript = await engine.stopRecording()
         let usesAssemblyAI = engine === assemblyAIEngine
         let modelInsertionPlan = usesAssemblyAI && transcriptPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? assemblyAIEngine.lastInsertionPlan : nil
@@ -1686,6 +1689,8 @@ final class AppState {
         let engine = sessionEngine ?? activeEngine
         // Let a cancelled finish/cleanup unwind before reusing the same engine.
         // The task checks cancellation before saving or delivering its result.
+        await engine.stopAudioCapture()
+        volumeController.recordCaptureStopped()
         await processingTask?.value
         processingOperationID = nil
         processingTask = nil
@@ -1889,6 +1894,12 @@ final class AppState {
     }
 
     // MARK: - Audio Level Polling
+
+    private func finalizeRecording(engine: TranscriptionEngine, contextTask: Task<Void, Never>?) async -> String {
+        await contextTask?.value
+        guard !Task.isCancelled else { return "" }
+        return await engine.stopRecording()
+    }
 
     private func invalidateContextCapture() {
         contextCaptureID = nil

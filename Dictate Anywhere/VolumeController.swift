@@ -13,24 +13,53 @@ final class VolumeController {
 
     private var savedOutputMuteState: OutputMuteState?
     private var savedInputVolume: InputVolumeState?
+    private var captureStoppedAt: ContinuousClock.Instant?
+    private var audioStateID = UUID()
+    private let now: () -> ContinuousClock.Instant
+    private let waitForRouteSettle: (Duration) async throws -> Void
+
+    init(now: @escaping () -> ContinuousClock.Instant = { .now },
+         waitForRouteSettle: @escaping (Duration) async throws -> Void = {
+             try await Task.sleep(for: $0)
+         }) {
+        self.now = now
+        self.waitForRouteSettle = waitForRouteSettle
+    }
+
+    /// Start the route-settle interval only after the engine confirms capture
+    /// has stopped. Repeated teardown must not restart the same interval.
+    func recordCaptureStopped() {
+        guard savedOutputMuteState != nil, captureStoppedAt == nil else { return }
+        captureStoppedAt = now()
+    }
 
     var hasOutputStateToRestore: Bool {
         savedOutputMuteState != nil
     }
 
-    /// Wait only when recording actually changed output mute state. A route
-    /// that was bypassed or already muted needs no playback settle delay.
+    /// Finalization can consume the route-settle interval. Keep restoration at
+    /// the existing teardown point, waiting only for any remaining interval.
     func restoreAfterRecordingWithSettle() async {
+        let stateID = audioStateID
         if savedOutputMuteState?.didMuteForRecording == true {
+            let deadline = (captureStoppedAt ?? now()).advanced(by: .milliseconds(200))
+            let remaining = now().duration(to: deadline)
             let trace = PerfTrace.begin("audio.restoreSettle")
-            try? await Task.sleep(for: .milliseconds(200))
-            trace.end(outcome: Task.isCancelled ? "cancelled" : "completed")
+            if remaining > .zero {
+                try? await waitForRouteSettle(remaining)
+            }
+            trace.end(outcome: Task.isCancelled ? "cancelled"
+                : (remaining > .zero ? "completed" : "alreadySettled"))
         }
+        // A suspended restore must never unmute a newer recording's state.
+        guard audioStateID == stateID else { return }
         restoreAfterRecording()
     }
 
     #if DEBUG
     func installOutputMuteStateForTesting(didMuteForRecording: Bool) {
+        captureStoppedAt = nil
+        audioStateID = UUID()
         // Device 0 is invalid, so restoration tests never alter host audio.
         savedOutputMuteState = OutputMuteState(
             deviceID: 0, deviceUID: nil, element: kAudioObjectPropertyElementMain,
@@ -51,6 +80,9 @@ final class VolumeController {
         let trace = PerfTrace.begin("audio.systemMute")
         defer { trace.end() }
         guard savedOutputMuteState == nil else { return }
+
+        captureStoppedAt = nil
+        audioStateID = UUID()
 
         guard let outputID = getDefaultOutputDeviceID() else { return }
         guard !shouldBypassMuteForCurrentRoute(outputDeviceID: outputID) else { return }
@@ -94,6 +126,8 @@ final class VolumeController {
         }
 
         savedOutputMuteState = nil
+        captureStoppedAt = nil
+        audioStateID = UUID()
     }
 
     // MARK: - Output Adjustments

@@ -23,17 +23,58 @@ nonisolated protocol AudioCaptureController: AnyObject, Sendable {
 
 nonisolated private final class AVAudioEngineCaptureController: @unchecked Sendable, AudioCaptureController {
     let engine: AVAudioEngine
+    private let samples: CapturePCMStream
+    private let stopLock = NSLock()
+    private var stopped = false
 
-    init(engine: AVAudioEngine) {
+    init(engine: AVAudioEngine, samples: CapturePCMStream) {
         self.engine = engine
+        self.samples = samples
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        if engine.isRunning {
-            engine.stop()
+        stopLock.withLock {
+            guard !stopped else { return }
+            stopped = true
+            engine.inputNode.removeTap(onBus: 0)
+            if engine.isRunning { engine.stop() }
+            samples.finish()
+            engine.reset()
         }
-        engine.reset()
+    }
+}
+
+/// The lock orders callback delivery and the final converter tail. A Stop
+/// cannot deliver tail samples before an in-flight tap has delivered its block.
+nonisolated private final class CapturePCMStream: @unchecked Sendable {
+    private let lock = NSLock()
+    private let converter: PCMStreamConverter
+    private let onSamples: ([Float]) -> Void
+
+    init(from input: AVAudioFormat, to output: AVAudioFormat, onSamples: @escaping ([Float]) -> Void) throws {
+        converter = try PCMStreamConverter(from: input, to: output)
+        self.onSamples = onSamples
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.withLock {
+            do { deliver(try converter.convert(buffer)) }
+            catch { audioLogger.error("Microphone conversion failed: \(error.localizedDescription, privacy: .public)") }
+        }
+    }
+
+    func finish() {
+        lock.withLock {
+            do { deliver(try converter.finish()) }
+            catch { audioLogger.error("Microphone conversion finish failed: \(error.localizedDescription, privacy: .public)") }
+        }
+    }
+
+    private func deliver(_ buffers: [AVAudioPCMBuffer]) {
+        for buffer in buffers {
+            guard let data = buffer.floatChannelData?[0], buffer.frameLength > 0 else { continue }
+            onSamples(Array(UnsafeBufferPointer(start: data, count: Int(buffer.frameLength))))
+        }
     }
 }
 
@@ -211,6 +252,8 @@ protocol TranscriptionEngine: AnyObject {
     var isReady: Bool { get }
     var currentTranscript: String { get }
     var audioSamples: [Float] { get }
+    /// Whether late destination context must be applied before final decoding.
+    var requiresContextBeforeFinalization: Bool { get }
     /// Thread-safe snapshot of recent audio samples for level visualization.
     func levelSamples(count: Int) -> [Float]
     func prepare() async throws
@@ -233,6 +276,7 @@ protocol TranscriptionEngine: AnyObject {
 }
 
 extension TranscriptionEngine {
+    var requiresContextBeforeFinalization: Bool { false }
     func setSessionContextualVocabulary(_ terms: [String]) {}
     func updateSessionContextualVocabulary(_ terms: [String]) async {
         setSessionContextualVocabulary(terms)
@@ -247,7 +291,7 @@ extension TranscriptionEngine {
 private func makeRecordingEngine(
     deviceID: AudioDeviceID?,
     onSamples: @escaping ([Float]) -> Void
-) throws -> AVAudioEngine {
+) throws -> AVAudioEngineCaptureController {
     audioLogger.info("makeRecordingEngine: entry, thread=\(Thread.current.description, privacy: .public), deviceID=\(deviceID.map { String($0) } ?? "nil", privacy: .public)")
     let engine = AVAudioEngine()
     let inputNode = engine.inputNode
@@ -288,9 +332,7 @@ private func makeRecordingEngine(
     guard let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false) else {
         throw TranscriptionError.audioFormatError
     }
-    guard let converter = AVAudioConverter(from: recFormat, to: targetFormat) else {
-        throw TranscriptionError.audioFormatError
-    }
+    let samples = try CapturePCMStream(from: recFormat, to: targetFormat, onSamples: onSamples)
 
     var tapCallbackCount = 0
     let tapStartTime = CFAbsoluteTimeGetCurrent()
@@ -301,27 +343,7 @@ private func makeRecordingEngine(
             let elapsed = CFAbsoluteTimeGetCurrent() - tapStartTime
             audioLogger.info("makeRecordingEngine: first tap callback after \(String(format: "%.3f", elapsed), privacy: .public)s, frameLength=\(buffer.frameLength, privacy: .public)")
         }
-        let frameCapacity = AVAudioFrameCount(
-            Double(buffer.frameLength) * targetFormat.sampleRate / buffer.format.sampleRate
-        )
-        guard frameCapacity > 0,
-              let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCapacity) else { return }
-
-        converter.reset()
-        var consumed = false
-        var error: NSError?
-        let status = converter.convert(to: converted, error: &error) { _, outStatus in
-            if consumed { outStatus.pointee = .noDataNow; return nil }
-            consumed = true
-            outStatus.pointee = .haveData
-            return buffer
-        }
-        guard status != .error, error == nil,
-              let data = converted.floatChannelData?[0],
-              converted.frameLength > 0 else { return }
-
-        let samples = Array(UnsafeBufferPointer(start: data, count: Int(converted.frameLength)))
-        onSamples(samples)
+        samples.append(buffer)
     }
 
     engine.prepare()
@@ -338,7 +360,7 @@ private func makeRecordingEngine(
         throw TranscriptionError.audioEngineSetupFailed
     }
 
-    return engine
+    return AVAudioEngineCaptureController(engine: engine, samples: samples)
 }
 
 nonisolated func makePCMBuffer(from samples: [Float], sampleRate: Double = 16_000) throws -> AVAudioPCMBuffer {
@@ -407,7 +429,7 @@ func makeAudioCaptureController(
         return controller
     }
 
-    return AVAudioEngineCaptureController(engine: try makeRecordingEngine(deviceID: deviceID, onSamples: onSamples))
+    return try makeRecordingEngine(deviceID: deviceID, onSamples: onSamples)
 }
 
 // MARK: - Errors

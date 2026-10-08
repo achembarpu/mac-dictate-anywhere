@@ -3,6 +3,23 @@ import XCTest
 @testable import Dictate_Anywhere
 
 final class AssemblyAIEngineTests: XCTestCase {
+    #if DEBUG
+    func testStopDoesNotWaitForSpeculativeConnectionPreparation() async {
+        let engine = AssemblyAIEngine()
+        let warmUp = Task { _ = try? await Task.sleep(for: .seconds(30)) }
+        engine.installConnectionWarmUpForTesting(warmUp)
+        let stopped = expectation(description: "Stop completes before connection preparation")
+        let stop = Task {
+            _ = await engine.stopRecording() // Empty audio: no remote request.
+            stopped.fulfill()
+        }
+        await fulfillment(of: [stopped], timeout: 1)
+        XCTAssertTrue(warmUp.isCancelled, "Stop must retain ownership and cancel speculative work")
+        warmUp.cancel()
+        await stop.value
+        await warmUp.value
+    }
+    #endif
     func testRegionsUseDocumentedHosts() {
         XCTAssertEqual(AssemblyAIRegion.global.baseURL.host, "dictation.assemblyai.com")
         XCTAssertEqual(AssemblyAIRegion.unitedStates.baseURL.host, "dictation.us.assemblyai.com")
@@ -342,7 +359,7 @@ final class AssemblyAIEngineTests: XCTestCase {
         )
         let body = try AssemblyAIEngine.multipartBody(
             config: config,
-            pcmAudio: Data([0x01, 0x02]),
+            samples: [0.125],
             boundary: "boundary"
         )
         let rendered = String(decoding: body, as: UTF8.self)
@@ -353,12 +370,29 @@ final class AssemblyAIEngineTests: XCTestCase {
         XCTAssertTrue(rendered.hasSuffix("\r\n--boundary--\r\n"))
     }
 
-    func testPCMConversionClampsAndUsesSigned16BitSamples() {
-        let data = AssemblyAIEngine.pcm16Data(from: [-2, -1, 0, 1, 2])
-        let values = data.withUnsafeBytes { rawBuffer in
-            Array(rawBuffer.bindMemory(to: Int16.self)).map { Int16(littleEndian: $0) }
-        }
-        XCTAssertEqual(values, [Int16.min + 1, Int16.min + 1, 0, Int16.max, Int16.max])
+    func testPCMConversionClampsAndUsesSignedLittleEndianSamples() throws {
+        let values = try audioBytes(from: [-2, -1, 0, 1, 2, .nan, .infinity, -.infinity])
+        let expected: [Int16] = [.min + 1, .min + 1, 0, .max, .max, 0, .max, .min + 1]
+        let bytes = expected.map(\.littleEndian).withUnsafeBytes { Data($0) }
+        XCTAssertEqual(values, bytes)
+    }
+
+    func testDirectEncodingPreservesEveryFiniteSampleAndMultipartBoundary() throws {
+        let samples = (0..<10_003).map { Float(sin(Double($0) * 0.037) * 1.5) }
+        let expected = samples.map { Int16(min(max($0, -1), 1) * Float(Int16.max)).littleEndian }
+        XCTAssertEqual(try audioBytes(from: samples), expected.withUnsafeBytes { Data($0) })
+        XCTAssertTrue(try audioBytes(from: []).isEmpty)
+    }
+
+    private func audioBytes(from samples: [Float]) throws -> Data {
+        let config = AssemblyAIRequestConfiguration(sampleRate: 16_000, channels: 1,
+            languageCodes: ["en"], sttPrompt: nil, keytermsPrompt: nil, llmInstruction: nil)
+        let body = try AssemblyAIEngine.multipartBody(config: config, samples: samples, boundary: "odd-boundary")
+        let marker = Data("Content-Type: audio/pcm\r\n\r\n".utf8)
+        let start = try XCTUnwrap(body.range(of: marker)).upperBound
+        let suffix = Data("\r\n--odd-boundary--\r\n".utf8)
+        XCTAssertEqual(body.suffix(suffix.count), suffix)
+        return body.subdata(in: start..<(body.count - suffix.count))
     }
 
     private func makeContext(
