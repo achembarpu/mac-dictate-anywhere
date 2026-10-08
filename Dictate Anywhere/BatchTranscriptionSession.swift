@@ -69,6 +69,7 @@ actor BatchTranscriptionSession {
     }
 
     private func accept(_ update: SlidingWindowTranscriptionUpdate) {
+        guard previewsEnabled else { return }
         previewTimeline.update(update.tokenTimings)
     }
 
