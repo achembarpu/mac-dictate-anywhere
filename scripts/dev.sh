@@ -285,7 +285,9 @@ run_benchmark() {
       benchmark_test_environment+=("TEST_RUNNER_${name}=${!name}")
     fi
   done
-  [[ "$CONFIGURATION" == "Debug" ]] && benchmark_conditions="DEBUG $benchmark_conditions"
+  # Existing benchmark suites use DEBUG-only test seams in both configurations.
+  # Release still selects optimized Swift/native products; tracing is opt-in.
+  benchmark_conditions="DEBUG $benchmark_conditions"
   if [[ "$CONFIGURATION" == "Release" ]]; then
     # Testable Release products use the local development team, not the
     # distribution identity used by normal Release builds.

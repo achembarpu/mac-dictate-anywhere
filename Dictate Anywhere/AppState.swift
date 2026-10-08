@@ -166,6 +166,7 @@ final class AppState {
         let enabled: Bool
         let installed: Bool
         let runtimeRevision: Int
+        let installationIdentity: String
         let speechReady: Bool
         let idle: Bool
         let prompt: String
@@ -615,6 +616,7 @@ final class AppState {
             enabled: settings.prewarmEnginesAtStartup,
             installed: s1MiniModelManager.isModelDownloaded,
             runtimeRevision: s1MiniModelManager.runtimeRevision,
+            installationIdentity: s1MiniModelManager.installationIdentity,
             speechReady: activeEngine.isReady, idle: status == .idle,
             prompt: settings.transcriptPostProcessingMode == .appleIntelligence ? settings.aiPostProcessingPrompt : "",
             vocabulary: [.appleIntelligence, .fluidAudioVocabulary].contains(settings.transcriptPostProcessingMode)
@@ -644,6 +646,7 @@ final class AppState {
             && prepared.mode == current.mode && prepared.language == current.language
             && prepared.installed == current.installed
             && prepared.runtimeRevision == current.runtimeRevision
+            && prepared.installationIdentity == current.installationIdentity
             && prepared.prompt == current.prompt && prepared.vocabulary == current.vocabulary
             && prepared.providerURL == current.providerURL && prepared.providerModel == current.providerModel
             && prepared.credentialsRevision == current.credentialsRevision && prepared.context == current.context

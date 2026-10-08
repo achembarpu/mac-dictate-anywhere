@@ -172,7 +172,7 @@ assert_benchmark_selector_count 2
 assert_benchmark_arg Release
 assert_benchmark_arg 'CODE_SIGN_IDENTITY=Apple Development'
 assert_benchmark_arg 'ENABLE_TESTABILITY=YES'
-assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED'
+assert_benchmark_arg 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) DEBUG PIPELINE_BENCHMARK PIPELINE_BENCHMARK_OPTIMIZED'
 
 for invalid in unknown '' ',overlay' 'overlay,' 'overlay,,audio'; do
   /bin/rm -f "$XCODEBUILD_ARGS_LOG"
