@@ -370,6 +370,107 @@ final class CleanupProviderContractTests: XCTestCase {
         XCTAssertNil(jsonOnly["provider"])
     }
 
+    func testOpenRouterPreservesProviderReasoningByDefaultAndDisablesOnlyWhenAllowed() async throws {
+        let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
+        let catalog = Data(#"""
+        {"data":[
+          {
+            "id":"test/flexible",
+            "supported_parameters":["structured_outputs"],
+            "reasoning":{"supported_efforts":["minimal","low"],"mandatory":false}
+          },
+          {
+            "id":"test/explicit-none",
+            "supported_parameters":["structured_outputs"],
+            "reasoning":{"supported_efforts":["none","minimal"],"mandatory":false}
+          },
+          {
+            "id":"test/required",
+            "supported_parameters":["structured_outputs"],
+            "reasoning":{"supported_efforts":["low","minimal"],"mandatory":true}
+          },
+          {
+            "id":"test/required-any",
+            "supported_parameters":["structured_outputs"],
+            "reasoning":{"supported_efforts":null,"mandatory":true}
+          },
+          {
+            "id":"test/required-default",
+            "supported_parameters":["structured_outputs"],
+            "reasoning":{"mandatory":true}
+          },
+          {
+            "id":"test/already-off",
+            "supported_parameters":["structured_outputs"],
+            "reasoning":{"supported_efforts":["minimal"],"mandatory":false}
+          },
+          {"id":"test/unknown","supported_parameters":["structured_outputs"]},
+          {"id":"test/malformed","supported_parameters":["structured_outputs"],"reasoning":"future shape"}
+        ]}
+        """#.utf8)
+        let completion = Data(#"""
+        {
+          "choices":[
+            {
+              "finish_reason":"stop",
+              "message":{"content":"{\"action\":\"pasteCleanedText\",\"text\":\"Hello.\"}"}
+            }
+          ]
+        }
+        """#.utf8)
+        CleanupHTTPStub.handler.withLock { $0 = { request in
+            if request.url?.path.hasSuffix("models") == true {
+                return (200, catalog)
+            }
+            let payload = try Self.payload(request)
+            requests.withLock { $0.append(payload) }
+            return (200, completion)
+        } }
+
+        for (model, setting) in [
+            ("test/flexible", true),
+            ("test/flexible", false),
+            ("test/explicit-none", false),
+            ("test/required", true),
+            ("test/required", false),
+            ("test/required-any", false),
+            ("test/required-default", false),
+            ("test/already-off", true),
+            ("test/already-off", false),
+            ("test/unknown", false),
+            ("test/malformed", false),
+            ("test/flexible:floor", false),
+        ] {
+            _ = try await OpenRouterPostProcessingService.process(
+                text: "hello", model: model, prompt: "Correct punctuation.",
+                apiKey: "contract-test-key", apiKeyEnvironmentVariable: "",
+                reasoningEnabled: setting, session: session
+            )
+        }
+
+        let payloads = requests.withLock { $0 }
+        XCTAssertEqual(payloads.count, 12)
+        XCTAssertNil(payloads[0]["reasoning"], "On should preserve the provider's recommended reasoning setting")
+        XCTAssertEqual((payloads[1]["reasoning"] as? [String: Any])?["enabled"] as? Bool, false,
+                       "Off should disable reasoning when the catalog says it is optional")
+        XCTAssertEqual((payloads[2]["reasoning"] as? [String: Any])?["effort"] as? String, "none",
+                       "Off should use the advertised none effort when supported")
+        XCTAssertNil(payloads[3]["reasoning"], "On should leave mandatory model effort to the provider")
+        XCTAssertNil(payloads[4]["reasoning"], "Off must not override a model that requires reasoning")
+        XCTAssertNil(payloads[5]["reasoning"], "An explicit null effort list does not allow disabling mandatory reasoning")
+        XCTAssertNil(payloads[6]["reasoning"], "Missing effort controls on a mandatory model preserve provider behavior")
+        XCTAssertNil(payloads[7]["reasoning"], "On should preserve a model default that already has reasoning off")
+        XCTAssertEqual((payloads[8]["reasoning"] as? [String: Any])?["enabled"] as? Bool, false,
+                       "Off should remain safe for explicitly optional reasoning even when default is off")
+        XCTAssertNil(payloads[9]["reasoning"], "Unknown capabilities must never receive a guessed reasoning override")
+        XCTAssertNotNil(
+            payloads[10]["response_format"],
+            "Malformed optional reasoning metadata must not discard the catalog's other capabilities"
+        )
+        XCTAssertNil(payloads[10]["reasoning"], "Malformed optional reasoning metadata must not enable request controls")
+        XCTAssertNil(payloads[11]["reasoning"], "Dynamic routing variants must not inherit a base model's reasoning controls")
+    }
+
     func testOllamaRetriesExplicitCloudFormatRejectionOnce() async throws {
         let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
         CleanupHTTPStub.handler.withLock { $0 = { request in

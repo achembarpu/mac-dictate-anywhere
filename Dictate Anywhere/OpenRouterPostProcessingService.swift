@@ -36,6 +36,42 @@ enum OpenRouterPostProcessingService {
 
     private static let catalog = TimedRequestCache<URL, [Model]>(lifetime: .seconds(900), capacity: 1)
 
+    struct ReasoningCapabilities: Hashable, Sendable {
+        /// `nil` with `effortsFieldPresent == true` means OpenRouter reports
+        /// that all gateway effort values are accepted. An omitted field means
+        /// the model does not expose effort selection.
+        let supportedEfforts: [String]?
+        let effortsFieldPresent: Bool
+        let mandatory: Bool?
+
+        func supportsEffort(_ effort: String) -> Bool {
+            guard effortsFieldPresent else { return false }
+            return supportedEfforts?.contains { $0.caseInsensitiveCompare(effort) == .orderedSame } ?? true
+        }
+
+        var canDisableReasoning: Bool {
+            mandatory != true && (mandatory == false || supportsEffort("none"))
+        }
+
+        fileprivate func requestControl(reasoningEnabled: Bool) -> ReasoningRequestControl? {
+            guard !reasoningEnabled, canDisableReasoning else { return nil }
+            if supportsEffort("none") { return .effort("none") }
+            return mandatory == false ? .disabled : nil
+        }
+    }
+
+    fileprivate enum ReasoningRequestControl: Sendable {
+        case disabled
+        case effort(String)
+
+        var jsonValue: [String: Any] {
+            switch self {
+            case .disabled: return ["enabled": false]
+            case .effort(let effort): return ["effort": effort]
+            }
+        }
+    }
+
     struct Model: Identifiable, Hashable, Sendable {
         let id: String
         let supportsStructuredOutputs: Bool
@@ -43,12 +79,15 @@ enum OpenRouterPostProcessingService {
         let supportedParameters: Set<String>?
         let contextLength: Int?
         let maximumCompletionTokens: Int?
+        let reasoning: ReasoningCapabilities?
 
         init(id: String, supportsStructuredOutputs: Bool, supportsAudioInput: Bool,
-             supportedParameters: Set<String>? = nil, contextLength: Int? = nil, maximumCompletionTokens: Int? = nil) {
+             supportedParameters: Set<String>? = nil, contextLength: Int? = nil, maximumCompletionTokens: Int? = nil,
+             reasoning: ReasoningCapabilities? = nil) {
             self.id = id; self.supportsStructuredOutputs = supportsStructuredOutputs
             self.supportsAudioInput = supportsAudioInput; self.supportedParameters = supportedParameters
             self.contextLength = contextLength; self.maximumCompletionTokens = maximumCompletionTokens
+            self.reasoning = reasoning
         }
     }
 
@@ -142,6 +181,17 @@ enum OpenRouterPostProcessingService {
         matchingAvailableModel(for: selectedModel, in: availability)?.supportsAudioInput ?? false
     }
 
+    static func reasoningCapabilities(for selectedModel: String, in availability: Availability?) -> ReasoningCapabilities? {
+        let trimmedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedModel.isEmpty,
+              catalogLookupModelID(for: trimmedModel).caseInsensitiveCompare(trimmedModel) == .orderedSame else {
+            // Dynamic routing variants can select a different model than the
+            // catalog entry used for display and search.
+            return nil
+        }
+        return matchingAvailableModel(for: trimmedModel, in: availability)?.reasoning
+    }
+
     static func catalogLookupModelID(for selectedModel: String) -> String {
         let trimmedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedModel.isEmpty else { return "" }
@@ -166,6 +216,7 @@ enum OpenRouterPostProcessingService {
         apiKey: String,
         apiKeyEnvironmentVariable: String,
         context: DictationPostProcessingContext? = nil,
+        reasoningEnabled: Bool = true,
         session: URLSession = .shared
     ) async throws -> String {
         let trace = PerfTrace.begin("cleanup.request")
@@ -183,6 +234,9 @@ enum OpenRouterPostProcessingService {
         let models = (try? await fetchModels(session: session)) ?? []
         let availability = Availability(models: models, apiKeyStatus: apiKeyStatus(apiKey: apiKey, apiKeyEnvironmentVariable: apiKeyEnvironmentVariable))
         let capabilities = matchingAvailableModel(for: trimmedModel, in: availability)
+        let reasoningControl = reasoningCapabilities(for: trimmedModel, in: availability)?.requestControl(
+            reasoningEnabled: reasoningEnabled
+        )
         let instructions = remotePostProcessingInstructions(prompt: prompt, vocabulary: vocabulary, context: context)
         var options = CleanupChatOptions()
         if let capabilities {
@@ -204,7 +258,7 @@ enum OpenRouterPostProcessingService {
                     return try await performChatCompletionRequest(model: trimmedModel, apiKey: apiKey,
                         instructions: instructions,
                         prompt: remotePostProcessingRequestPrompt(text: chunk, vocabulary: vocabulary, context: context),
-                        options: options, session: session)
+                        options: options, reasoningControl: reasoningControl, session: session)
                 } catch let error as ServiceError {
                     guard case .serverMessage(let message) = error, attempt == 0, options.adapt(to: message) else { throw error }
                 }
@@ -241,11 +295,29 @@ enum OpenRouterPostProcessingService {
             let maxCompletionTokens: Int?
             enum CodingKeys: String, CodingKey { case contextLength = "context_length"; case maxCompletionTokens = "max_completion_tokens" }
         }
+        struct ReasoningResponse: Decodable {
+            let supportedEfforts: [String]?
+            let effortsFieldPresent: Bool
+            let mandatory: Bool?
+
+            enum CodingKeys: String, CodingKey {
+                case supportedEfforts = "supported_efforts"
+                case mandatory
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                effortsFieldPresent = container.contains(.supportedEfforts)
+                supportedEfforts = try container.decodeIfPresent([String].self, forKey: .supportedEfforts)
+                mandatory = try container.decodeIfPresent(Bool.self, forKey: .mandatory)
+            }
+        }
         let id: String
         let contextLength: Int?
         let topProvider: TopProvider?
         let supportedParameters: [String]?
         let architecture: ArchitectureResponse?
+        let reasoning: ReasoningResponse?
 
         enum CodingKeys: String, CodingKey {
             case id
@@ -253,6 +325,20 @@ enum OpenRouterPostProcessingService {
             case topProvider = "top_provider"
             case supportedParameters = "supported_parameters"
             case architecture
+            case reasoning
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            contextLength = try container.decodeIfPresent(Int.self, forKey: .contextLength)
+            topProvider = try container.decodeIfPresent(TopProvider.self, forKey: .topProvider)
+            supportedParameters = try container.decodeIfPresent([String].self, forKey: .supportedParameters)
+            architecture = try container.decodeIfPresent(ArchitectureResponse.self, forKey: .architecture)
+            // Reasoning metadata is an optional capability hint. If OpenRouter
+            // adds an incompatible shape, preserve other catalog capabilities
+            // and omit reasoning controls rather than losing the model list.
+            reasoning = try? container.decode(ReasoningResponse.self, forKey: .reasoning)
         }
     }
 
@@ -298,7 +384,14 @@ enum OpenRouterPostProcessingService {
                 supportsAudioInput: inputModalities.contains("audio"),
                 supportedParameters: model.supportedParameters == nil ? nil : supportedParameters,
                 contextLength: [model.contextLength, model.topProvider?.contextLength].compactMap { $0 }.filter { $0 > 0 }.min(),
-                maximumCompletionTokens: model.topProvider?.maxCompletionTokens.flatMap { $0 > 0 ? $0 : nil }
+                maximumCompletionTokens: model.topProvider?.maxCompletionTokens.flatMap { $0 > 0 ? $0 : nil },
+                reasoning: model.reasoning.map {
+                    ReasoningCapabilities(
+                        supportedEfforts: $0.supportedEfforts,
+                        effortsFieldPresent: $0.effortsFieldPresent,
+                        mandatory: $0.mandatory
+                    )
+                }
             )
         }
         .sorted {
@@ -316,6 +409,7 @@ enum OpenRouterPostProcessingService {
         instructions: String,
         prompt: String,
         options: CleanupChatOptions,
+        reasoningControl: ReasoningRequestControl?,
         session: URLSession
     ) async throws -> String {
         var request = URLRequest(url: endpointURL(path: "chat/completions"))
@@ -351,6 +445,10 @@ enum OpenRouterPostProcessingService {
                     "schema": remotePostProcessingOutputSchema
                 ]
             ]
+        }
+
+        if let reasoningControl {
+            payload["reasoning"] = reasoningControl.jsonValue
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)

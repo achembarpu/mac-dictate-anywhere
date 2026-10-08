@@ -1007,6 +1007,7 @@ final class Settings {
         static let ollamaReasoningSetting = "ollamaReasoningSetting"
         static let ollamaPostProcessingPrompt = "ollamaPostProcessingPrompt"
         static let openRouterModel = "openRouterModel"
+        static let openRouterReasoningEnabled = "openRouterReasoningEnabled"
         static let openRouterPostProcessingPrompt = "openRouterPostProcessingPrompt"
         static let openRouterAPIKeyEnvironmentVariable = "openRouterAPIKeyEnvironmentVariable"
         static let openAICompatibleBaseURL = "openAICompatibleBaseURL"
@@ -1433,6 +1434,12 @@ final class Settings {
         }
     }
 
+    var openRouterReasoningEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(openRouterReasoningEnabled, forKey: Keys.openRouterReasoningEnabled)
+        }
+    }
+
     var openRouterPostProcessingPrompt: String {
         didSet {
             UserDefaults.standard.set(openRouterPostProcessingPrompt, forKey: Keys.openRouterPostProcessingPrompt)
@@ -1829,6 +1836,7 @@ final class Settings {
         openRouterAPIKeyError = credentials.error
         openRouterAPIKeyEnvironmentVariable = credentials.environmentName
         openRouterModel = defaults.string(forKey: Keys.openRouterModel) ?? ""
+        openRouterReasoningEnabled = defaults.object(forKey: Keys.openRouterReasoningEnabled) as? Bool ?? true
         openRouterPostProcessingPrompt = Self.loadCleanupPrompt(
             from: defaults, forKey: Keys.openRouterPostProcessingPrompt,
             defaultPrompt: Self.recommendedTranscriptCleanupPrompt

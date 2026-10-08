@@ -1451,7 +1451,8 @@ final class AppState {
                     vocabulary: settings.customVocabulary,
                     apiKey: settings.openRouterAPIKey,
                     apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable,
-                    context: postProcessingContext(for: .openRouter)
+                    context: postProcessingContext(for: .openRouter),
+                    reasoningEnabled: settings.openRouterReasoningEnabled
                 )
             } catch {
                 logger.error("postProcessing: OpenRouter failed: \(error.localizedDescription, privacy: .public)")

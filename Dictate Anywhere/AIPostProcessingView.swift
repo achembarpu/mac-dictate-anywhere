@@ -1098,6 +1098,28 @@ struct AIPostProcessingView: View {
             openRouterModelSearchSection(settings: settings, availability: availability)
         }
 
+        if let reasoning = OpenRouterPostProcessingService.reasoningCapabilities(
+            for: currentOpenRouterModel(settings: settings), in: openRouterAvailability
+        ), reasoning.canDisableReasoning || reasoning.mandatory == true {
+            DSSection(overline: "Cleanup Reasoning") {
+                DSDetailRow(
+                    label: "Allow reasoning",
+                    caption: reasoning.mandatory == true
+                        ? "This model requires reasoning, so it cannot be turned off."
+                        : "On preserves the provider's recommended reasoning setting and effort. Off can reduce wait time, but may affect corrections."
+                ) {
+                    DSSwitch(
+                        accessibilityName: "Allow OpenRouter cleanup reasoning",
+                        isOn: Binding(
+                            get: { reasoning.mandatory == true || settings.openRouterReasoningEnabled },
+                            set: { settings.openRouterReasoningEnabled = $0 }
+                        )
+                    )
+                    .disabled(reasoning.mandatory == true)
+                }
+            }
+        }
+
         let supportedFeatures = settings.transcriptPostProcessingMode.supportedFeatures
         if supportedFeatures.contains(.customPrompt) {
             cleanupPromptSection(
