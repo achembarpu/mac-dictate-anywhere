@@ -758,10 +758,14 @@ final class AppState {
             guard !Task.isCancelled, !isShuttingDown, !isCancelling else { return }
             if cleanupConfigurationMatches(inFlight.key, cleanupPreparationKey) || isCleanupEnginePrepared { return }
         }
-        let key = cleanupPreparationKey
+        var key = cleanupPreparationKey
         if force, settings.transcriptPostProcessingMode == .fluidAudioVocabulary,
            settings.engineChoice == .parakeet, !parakeetEngine.isReady {
+            let operationID = selectionOperationID
             await prepareActiveEngine()
+            guard ownsSelectionOperation(operationID),
+                  cleanupConfigurationMatches(key, cleanupPreparationKey) else { return }
+            key = cleanupPreparationKey
             if cleanupPreparation != nil {
                 await prepareCleanupEngineIfNeeded(force: force, allowRecording: allowRecording)
                 return

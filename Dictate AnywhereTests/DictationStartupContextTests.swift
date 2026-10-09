@@ -225,6 +225,41 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testManualVocabularyPreparationWarmsSpeechOnceAndRejectsChangedConfiguration() async {
+        let settings = Settings.shared
+        settings.engineChoice = .parakeet
+        settings.parakeetModelChoice = .multilingual
+        settings.selectedLanguage = .english
+        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
+        settings.prewarmEnginesAtStartup = false
+        for changeSelection in [false, true] {
+            settings.customVocabulary = ["Quilter"]
+            let engine = StartupContextEngine()
+            engine.isReady = false
+            let started = expectation(description: "manual speech dependency preparation")
+            let gate = StartupModelPreparationGate(started: started)
+            engine.onPrepareAsync = { await gate.wait() }
+            var calls = 0
+            let app = app(engine: engine, capture: { _ in nil }, cleanupPreparation: { mode in
+                XCTAssertEqual(mode, .fluidAudioVocabulary)
+                XCTAssertTrue(engine.isReady)
+                calls += 1
+                return true
+            })
+            let preparing = Task { await app.prepareCleanupEngineIfNeeded(force: true) }
+            await fulfillment(of: [started], timeout: 2)
+            if changeSelection { settings.customVocabulary = ["Metal"] }
+            await gate.release()
+            await preparing.value
+            XCTAssertEqual(engine.prepareCount, 1)
+            XCTAssertTrue(engine.isReady)
+            XCTAssertEqual(calls, changeSelection ? 0 : 1,
+                           "One manual action must complete vocabulary preparation only for the requested configuration")
+            XCTAssertEqual(app.isCleanupEnginePrepared, !changeSelection)
+            await app.shutdown()
+        }
+    }
+
     func testCredentialRevisionInvalidatesPreparationDuringAnInFlightLoad() async {
         let settings = Settings.shared
         let savedModel = settings.openRouterModel
