@@ -23,14 +23,6 @@ final class AppState {
         case error(String)
     }
 
-    struct OllamaDownloadState: Equatable {
-        let model: String
-        let status: String
-        let fractionCompleted: Double?
-        let completed: Int64?
-        let total: Int64?
-    }
-
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.pixelforty.dictate-anywhere",
         category: "AppState"
@@ -43,7 +35,6 @@ final class AppState {
     var lastTranscript = ""
     var selectedPage: SidebarPage = .models
     var selectedAttentionIssueID: AttentionIssue.ID?
-    var ollamaDownloadState: OllamaDownloadState?
     var ollamaDeletingModel: String?
     var ollamaModelActionError: String?
     var ollamaModelActionsRevision = 0
@@ -900,50 +891,8 @@ final class AppState {
 
     // MARK: - Ollama Model Management
 
-    func startOllamaModelDownload(_ model: String) async {
-        let trace = PerfTrace.begin("cleanup.modelDownload")
-        defer { trace.end() }
-        guard ollamaDownloadState == nil, ollamaDeletingModel == nil else { return }
-
-        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedModel.isEmpty else { return }
-
-        ollamaModelActionError = nil
-        ollamaDownloadState = OllamaDownloadState(
-            model: trimmedModel,
-            status: "Preparing model download…",
-            fractionCompleted: nil,
-            completed: nil,
-            total: nil
-        )
-
-        do {
-            for try await progress in OllamaPostProcessingService.pullModel(
-                baseURL: settings.ollamaBaseURL,
-                model: trimmedModel
-            ) {
-                guard !Task.isCancelled else { return }
-                ollamaDownloadState = OllamaDownloadState(
-                    model: trimmedModel,
-                    status: progress.displayStatus,
-                    fractionCompleted: progress.fractionCompleted,
-                    completed: progress.overallCompleted ?? progress.completed,
-                    total: progress.overallTotal ?? progress.total
-                )
-            }
-
-            ollamaDownloadState = nil
-            ollamaModelActionError = nil
-            ollamaModelActionsRevision += 1
-        } catch {
-            guard !Task.isCancelled else { return }
-            ollamaDownloadState = nil
-            ollamaModelActionError = error.localizedDescription
-        }
-    }
-
     func deleteOllamaModel(_ model: String) async {
-        guard ollamaDownloadState == nil, ollamaDeletingModel == nil else { return }
+        guard ollamaDeletingModel == nil else { return }
 
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedModel.isEmpty else { return }
@@ -1434,26 +1383,21 @@ final class AppState {
             break
         case .appleIntelligence:
             let context = postProcessingContext(for: .appleIntelligence)
-            if !settings.aiPostProcessingPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || context != nil {
-                if #available(macOS 26, *) {
-                    if case .available = AIPostProcessingService.availability {
-                        do {
-                            processedText = try await AIPostProcessingService.process(
-                                text: finalText,
-                                prompt: settings.aiPostProcessingPrompt,
-                                vocabulary: settings.customVocabulary,
-                                context: context
-                            )
-                        } catch {
-                            logger.error("postProcessing: Apple Intelligence failed: \(error.localizedDescription, privacy: .public)")
-                        }
-                    } else {
-                        logger.warning("postProcessing: Apple Intelligence is not available")
+            if #available(macOS 26, *) {
+                if case .available = AIPostProcessingService.availability {
+                    do {
+                        processedText = try await AIPostProcessingService.process(
+                            text: finalText,
+                            prompt: settings.aiPostProcessingPrompt,
+                            vocabulary: settings.customVocabulary,
+                            context: context
+                        )
+                    } catch {
+                        logger.error("postProcessing: Apple Intelligence failed: \(error.localizedDescription, privacy: .public)")
                     }
+                } else {
+                    logger.warning("postProcessing: Apple Intelligence is not available")
                 }
-            } else {
-                logger.info("postProcessing: Apple Intelligence skipped because prompt is empty")
             }
         case .s1Mini:
             let activeLanguage = settings.engineChoice == .appleSpeech
@@ -1464,12 +1408,13 @@ final class AppState {
                     "postProcessing: S1-mini skipped because language is \(activeLanguage.rawValue, privacy: .public); S1-mini supports English only"
                 )
             } else {
+                var runtimeURL = s1MiniModelManager.modelURL
                 do {
-                    let modelURL = try await s1MiniModelManager.validatedModelURL()
+                    runtimeURL = try await s1MiniModelManager.validatedModelURL()
                     let context = postProcessingContext(for: .s1Mini)
                     processedText = try await S1MiniPostProcessingService.process(
                         text: finalText,
-                        modelURL: modelURL,
+                        modelURL: runtimeURL,
                         styling: settings.s1MiniStyling(for: context?.category),
                         structure: settings.s1MiniStructure,
                         contextSetting: settings.s1MiniContextSetting,
@@ -1486,7 +1431,7 @@ final class AppState {
                     text: finalText,
                     baseURL: settings.ollamaBaseURL,
                     model: settings.ollamaModel,
-                    reasoning: settings.ollamaReasoningSetting,
+                    reasoningEnabled: settings.ollamaReasoningEnabled,
                     prompt: settings.ollamaPostProcessingPrompt,
                     vocabulary: settings.customVocabulary,
                     context: postProcessingContext(
@@ -1506,7 +1451,8 @@ final class AppState {
                     vocabulary: settings.customVocabulary,
                     apiKey: settings.openRouterAPIKey,
                     apiKeyEnvironmentVariable: settings.openRouterAPIKeyEnvironmentVariable,
-                    context: postProcessingContext(for: .openRouter)
+                    context: postProcessingContext(for: .openRouter),
+                    reasoningEnabled: settings.openRouterReasoningEnabled
                 )
             } catch {
                 logger.error("postProcessing: OpenRouter failed: \(error.localizedDescription, privacy: .public)")

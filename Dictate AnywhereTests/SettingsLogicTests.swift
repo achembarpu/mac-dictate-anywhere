@@ -78,6 +78,26 @@ final class SettingsLogicTests: XCTestCase {
         XCTAssertEqual(UserDefaults.standard.object(forKey: "prewarmEnginesAtStartup") as? Bool, true)
     }
 
+    func testOllamaReasoningMigrationPreservesOffAndDefaultsOtherModesOn() throws {
+        let suiteName = "SettingsLogicTests.OllamaReasoningMigration.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("disabled", forKey: "ollamaReasoningSetting")
+        XCTAssertFalse(Settings.loadOllamaReasoningEnabled(from: defaults))
+        XCTAssertEqual(defaults.object(forKey: "ollamaReasoningEnabled") as? Bool, false)
+        XCTAssertNil(defaults.object(forKey: "ollamaReasoningSetting"))
+
+        defaults.removeObject(forKey: "ollamaReasoningEnabled")
+        defaults.set("low", forKey: "ollamaReasoningSetting")
+        XCTAssertTrue(Settings.loadOllamaReasoningEnabled(from: defaults))
+        XCTAssertEqual(defaults.object(forKey: "ollamaReasoningEnabled") as? Bool, true)
+        XCTAssertNil(defaults.object(forKey: "ollamaReasoningSetting"))
+
+        defaults.removeObject(forKey: "ollamaReasoningEnabled")
+        XCTAssertTrue(Settings.loadOllamaReasoningEnabled(from: defaults))
+    }
+
     func testHistoryDecodesOlderEntriesWithoutRawText() throws {
         let json = #"{"id":"5B5304DB-AD12-40AD-928B-43A113D1E9DE","text":"Older dictation","createdAt":811700095}"#
         let entry = try JSONDecoder().decode(TranscriptHistoryEntry.self, from: Data(json.utf8))
