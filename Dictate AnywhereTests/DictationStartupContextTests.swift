@@ -1,6 +1,7 @@
 import XCTest
 import CoreAudio
 import FoundationModels
+import os
 @testable import Dictate_Anywhere
 
 @MainActor
@@ -167,6 +168,60 @@ final class DictationStartupContextTests: XCTestCase {
         XCTAssertTrue(app.isCleanupEnginePrepared)
         await app.cancelDictation()
         XCTAssertFalse(app.isCleanupEnginePrepared)
+        await app.shutdown()
+    }
+
+    func testCancelReleasesDictationWhileSharedRemotePreloadContinuesForNextRecording() async {
+        let settings = Settings.shared
+        let savedModel = settings.ollamaModel
+        defer { settings.ollamaModel = savedModel }
+        settings.engineChoice = .parakeet
+        settings.transcriptPostProcessingMode = .ollama
+        settings.ollamaModel = "test-model"
+        settings.prewarmEnginesAtStartup = true
+        let started = expectation(description: "remote cache loader started")
+        let gate = StartupModelPreparationGate(started: started)
+        let cache = TimedRequestCache<String, Bool>()
+        let loads = OSAllocatedUnfairLock(initialState: 0)
+        var secondPreparation: XCTestExpectation?
+        var calls = 0
+        let engine = StartupContextEngine()
+        let app = app(engine: engine, capture: { _ in nil }, cleanupPreparation: { _ in
+            calls += 1
+            if calls == 2 { secondPreparation?.fulfill() }
+            return (try? await cache.value(for: "remote") {
+                loads.withLock { $0 += 1 }
+                await gate.wait()
+                return true
+            }) ?? false
+        })
+        await app.startDictation()
+        await fulfillment(of: [started], timeout: 2)
+        let cancelled = expectation(description: "Cancel returns before the remote loader")
+        let cancellation = Task { await app.cancelDictation(); cancelled.fulfill() }
+        await fulfillment(of: [cancelled], timeout: 1)
+        guard app.status == .idle else {
+            await gate.release()
+            await cancellation.value
+            await app.shutdown()
+            return
+        }
+        XCTAssertFalse(engine.capturing)
+        XCTAssertFalse(app.isPreparingCleanupEngine)
+        XCTAssertFalse(app.isCleanupEnginePrepared)
+        let nextPreparation = expectation(description: "next recording joins the remote load")
+        secondPreparation = nextPreparation
+        await app.startDictation()
+        await fulfillment(of: [nextPreparation], timeout: 2)
+        XCTAssertEqual(app.status, .recording)
+        XCTAssertTrue(engine.capturing, "Cancel must unlock the next recording without waiting for network work")
+        await gate.release()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while app.isPreparingCleanupEngine, ContinuousClock.now < deadline { await Task.yield() }
+        XCTAssertTrue(app.isCleanupEnginePrepared)
+        XCTAssertEqual(loads.withLock { $0 }, 1, "Cancelling a consumer must preserve the shared cache load")
+        await cancellation.value
+        await app.cancelDictation()
         await app.shutdown()
     }
 
@@ -617,8 +672,11 @@ final class DictationStartupContextTests: XCTestCase {
         let deadline = ContinuousClock.now + .seconds(2)
         while engine.capturing, ContinuousClock.now < deadline { await Task.yield() }
         XCTAssertFalse(engine.capturing, "Cancellation must stop capture before waiting for preparation")
+        XCTAssertEqual(app.status, .recording, "Local session preparation must finish before teardown permits reuse")
+        XCTAssertFalse(app.canStopDictation)
         await gate.release()
         await cancellation.value
+        XCTAssertEqual(app.status, .idle)
         await app.shutdown()
     }
 

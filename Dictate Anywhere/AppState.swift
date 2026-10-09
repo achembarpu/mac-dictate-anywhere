@@ -2160,9 +2160,9 @@ final class AppState {
         processingOperationID = nil
         processingTask = nil
         await engine.cancel()
-        // Stop microphone capture before joining a network/model preload.
-        // Join before allowing another recording, so a stale preparation
-        // cannot overwrite its new session.
+        // Stop capture before joining preparation. Remote cache consumers
+        // unwind on cancellation while shared requests continue; local loads
+        // still join before their runtime/session can be reused.
         _ = await cancelledCleanup?.task.value
         if cleanupPreparation?.id == cancelledCleanup?.id {
             cleanupPreparation = nil
