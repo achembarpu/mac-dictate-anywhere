@@ -587,23 +587,38 @@ enum S1MiniPostProcessingService {
             // The author recommends sentence chunks near 1,000 input tokens.
             // Short dictation keeps the existing single-request fast path.
             let chunks = try await S1MiniInferenceEngine.shared.transcriptChunks(text, modelURL: modelURL)
-            var results: [String] = []
             do {
-                for chunk in chunks {
-                    try Task.checkCancellation()
-                    results.append(try await processChunk(chunk.text, modelURL: modelURL, styling: styling,
-                                                         structure: structure, context: resolvedContext,
-                                                         knownTranscriptTokenCount: chunk.tokenCount))
+                return try await processChunks(chunks) { chunk in
+                    try await processChunk(chunk.text, modelURL: modelURL, styling: styling,
+                                           structure: structure, context: resolvedContext,
+                                           knownTranscriptTokenCount: chunk.tokenCount)
                 }
             } catch S1MiniServiceError.outputLimitReached {
                 trace.end(outcome: "output_limit_fallback")
                 return text
             }
-            return results.joined(separator: structure == .lists ? "\n" : " ")
         } catch S1MiniServiceError.outputLimitReached {
             trace.end(outcome: "output_limit_fallback")
             return text
         }
+    }
+
+    /// Restore source boundaries after normalization trims the model output.
+    /// Keep the raw chunk for inference so its cached token count stays exact.
+    static func processChunks(
+        _ chunks: [S1MiniTranscriptChunk],
+        process: (S1MiniTranscriptChunk) async throws -> String
+    ) async throws -> String {
+        var results: [String] = []
+        for chunk in chunks {
+            try Task.checkCancellation()
+            let source = TranscriptCleanupChunk(chunk.text)
+            guard !source.text.isEmpty else { results.append(source.original); continue }
+            let output = try await process(chunk)
+            try Task.checkCancellation()
+            results.append(source.replacingText(with: output.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }
+        return results.joined()
     }
 
     private static func processChunk(

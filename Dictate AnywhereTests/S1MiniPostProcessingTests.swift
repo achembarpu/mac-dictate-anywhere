@@ -153,6 +153,21 @@ final class S1MiniPostProcessingTests: XCTestCase {
         XCTAssertTrue(chunks.allSatisfy { $0.tokenCount <= 7 })
     }
 
+    func testChunkAssemblyPreservesSourceSeparatorsAfterNormalizedRewrites() async throws {
+        for text in ["  Keep invoice 43.\n\nSend invoice 44.\n\nKeep invoice 45.\t ",
+                     "- Keep invoice 43.\n- Send invoice 44.\n- Keep invoice 45.\n",
+                     "Keep 43. Send 44. Keep 45.", " \n\t"] {
+            let chunks = try S1MiniTranscriptChunker.chunks(text, maximumTokens: 5) {
+                $0.split(whereSeparator: \.isWhitespace).count
+            }
+            if text.contains("invoice") { XCTAssertGreaterThan(chunks.count, 1) }
+            let output = try await S1MiniPostProcessingService.processChunks(chunks) { chunk in
+                normalizePostProcessedTranscript(chunk.text).replacingOccurrences(of: "Keep", with: "Retain")
+            }
+            XCTAssertEqual(output, text.replacingOccurrences(of: "Keep", with: "Retain"))
+        }
+    }
+
     func testLongSentenceChunksAtWordBoundariesAndShortTextStaysWhole() throws {
         let text = "one two three four five six seven eight nine ten"
         let count: (String) -> Int = { $0.split(whereSeparator: \.isWhitespace).count }
