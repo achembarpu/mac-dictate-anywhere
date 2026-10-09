@@ -563,44 +563,59 @@ final class CleanupProviderContractTests: XCTestCase {
         }
     }
 
-    func testOllamaReasoningTogglePreservesProviderDefaultAndDisablesOnlyAdvertisedOff() async throws {
+    func testOllamaReasoningTogglePreservesDefaultsAndSavedOffAcrossMetadataVersions() async throws {
+        let suite = "CleanupProviderContractTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("disabled", forKey: "ollamaReasoningSetting")
+        let savedOff = Settings.loadOllamaReasoningEnabled(from: defaults)
+        XCTAssertFalse(savedOff)
+
+        let cases: [(model: String, details: String, enabled: Bool,
+                     capability: OllamaReasoningCapability, sendsOff: Bool)] = [
+            ("test/toggle", #"{"thinking":{"values":[false,true]}}"#, true, .toggle, false),
+            ("test/toggle", #"{"thinking":{"values":[false,true]}}"#, savedOff, .toggle, true),
+            ("test/levels", #"{"thinking":{"values":["low","medium","high"]}}"#, savedOff, .level, false),
+            ("test/required", #"{"thinking":{"values":[true]}}"#, savedOff, .required, false),
+            ("test/unknown", #"{}"#, savedOff, .unsupported, false),
+            ("qwen3:8b", #"{"capabilities":["completion","thinking"]}"#, savedOff, .toggle, true),
+            ("qwen3:8b", #"{"capabilities":["completion","thinking"]}"#, true, .toggle, false),
+            ("gpt-oss:20b", #"{"capabilities":["completion","thinking"]}"#, savedOff, .level, false),
+            ("local-alias", #"{"capabilities":["completion","thinking"],"details":{"family":"gptoss"}}"#, savedOff, .level, false),
+            ("family-alias", #"{"capabilities":["completion","thinking"],"details":{"families":["gpt-oss"]}}"#, savedOff, .level, false),
+            ("qwen3:required", #"{"capabilities":["completion","thinking"],"thinking":{"values":[true]}}"#, savedOff, .required, false),
+            ("qwen3:empty", #"{"capabilities":["completion","thinking"],"thinking":{"values":[]}}"#, savedOff, .unsupported, false),
+            ("qwen3:instruct", #"{"capabilities":["completion"]}"#, savedOff, .unsupported, false),
+        ]
         let requests = OSAllocatedUnfairLock(initialState: [[String: Any]]())
         CleanupHTTPStub.handler.withLock { $0 = { request in
             if request.url?.path.hasSuffix("show") == true {
                 let model = try Self.payload(request)["model"] as? String
-                let details: String
-                switch model {
-                case "test/toggle": details = #"{"thinking":{"values":[false,true]}}"#
-                case "test/levels": details = #"{"thinking":{"values":["low","medium","high"]}}"#
-                case "test/required": details = #"{"thinking":{"values":[true]}}"#
-                default: details = #"{}"#
-                }
+                let details = try XCTUnwrap(cases.first(where: { $0.model == model })).details
                 return (200, Data(details.utf8))
             }
             try requests.withLock { $0.append(try Self.payload(request)) }
             return (200, Data(#"{"done":true,"done_reason":"stop","response":"{\"action\":\"pasteCleanedText\",\"text\":\"Hello.\"}"}"#.utf8))
         } }
 
-        for (model, enabled) in [
-            ("test/toggle", true),
-            ("test/toggle", false),
-            ("test/levels", false),
-            ("test/required", false),
-            ("test/unknown", false),
-        ] {
+        for item in cases {
+            let details = try JSONDecoder().decode(OllamaModelDetails.self, from: Data(item.details.utf8))
+            XCTAssertEqual(details.reasoningCapability(for: item.model), item.capability, item.model)
             _ = try await OllamaPostProcessingService.process(
-                text: "hello", baseURL: "http://cleanup.test", model: model,
-                reasoningEnabled: enabled, prompt: "Correct punctuation.", session: session
+                text: "hello", baseURL: "http://cleanup.test", model: item.model,
+                reasoningEnabled: item.enabled, prompt: "Correct punctuation.", session: session
             )
         }
 
         let payloads = requests.withLock { $0 }
-        XCTAssertEqual(payloads.count, 5)
-        XCTAssertNil(payloads[0]["think"], "On leaves the model/server reasoning recommendation unchanged")
-        XCTAssertEqual(payloads[1]["think"] as? Bool, false, "Off sends the override only when false is advertised")
-        XCTAssertNil(payloads[2]["think"], "Effort-only models keep their provider effort; low is not substituted for Off")
-        XCTAssertNil(payloads[3]["think"], "Mandatory reasoning cannot be overridden off")
-        XCTAssertNil(payloads[4]["think"], "Unknown capabilities must not receive a guessed override")
+        XCTAssertEqual(payloads.count, cases.count)
+        for (item, payload) in zip(cases, payloads) {
+            if item.sendsOff {
+                XCTAssertEqual(payload["think"] as? Bool, false, item.model)
+            } else {
+                XCTAssertNil(payload["think"], "\(item.model): preserve defaults and required/effort-only reasoning")
+            }
+        }
 
         var options = CleanupChatOptions()
         XCTAssertFalse(options.adapt(to: "Unsupported value: temperature only supports the default"))

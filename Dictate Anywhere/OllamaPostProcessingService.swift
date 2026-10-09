@@ -137,7 +137,7 @@ enum OllamaPostProcessingService {
                     "stream": false, "keep_alive": "10m", "options": options
                 ]
                 if structuredOutput { payload["format"] = remotePostProcessingOutputSchema }
-                if let think = details?.reasoningOffOverride(enabled: reasoningEnabled) {
+                if let think = details?.reasoningOffOverride(enabled: reasoningEnabled, model: trimmedModel) {
                     payload["think"] = think.jsonValue
                 }
                 request.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -514,7 +514,7 @@ enum OllamaPostProcessingService {
     ) async -> OllamaReasoningCapability {
         let lookupModel = (resolvedSelectedModel ?? selectedModel).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !lookupModel.isEmpty else { return .unsupported }
-        return (try? await modelDetails(baseURL: baseURL, model: lookupModel, refresh: true))?.reasoningCapability ?? .unsupported
+        return (try? await modelDetails(baseURL: baseURL, model: lookupModel, refresh: true))?.reasoningCapability(for: lookupModel) ?? .unsupported
     }
 
     private static func modelDetails(baseURL: String, model: String, refresh: Bool = false,

@@ -14,6 +14,10 @@ nonisolated struct OllamaModelDetails: Decodable, Sendable {
         }
     }
     struct Thinking: Decodable, Sendable { let values: [ThinkingValue] }
+    struct Details: Decodable, Sendable {
+        let family: String?
+        let families: [String]?
+    }
     struct ModelInfo: Decodable, Sendable {
         let contextLength: Int?
         struct Key: CodingKey {
@@ -31,7 +35,8 @@ nonisolated struct OllamaModelDetails: Decodable, Sendable {
     let thinking: Thinking?
     let capabilities: [String]?
     let modelInfo: ModelInfo?
-    enum CodingKeys: String, CodingKey { case thinking, capabilities; case modelInfo = "model_info" }
+    let details: Details?
+    enum CodingKeys: String, CodingKey { case thinking, capabilities, details; case modelInfo = "model_info" }
 
     var isKnownNonThinking: Bool {
         if let values = thinking?.values { return values == [.toggle(false)] }
@@ -43,8 +48,18 @@ nonisolated struct OllamaModelDetails: Decodable, Sendable {
     /// context (potentially hundreds of thousands of tokens) to clean a note.
     var cleanupContextLength: Int { min(8_192, modelInfo?.contextLength ?? 8_192) }
 
-    var reasoningCapability: OllamaReasoningCapability {
-        guard let values = thinking?.values else { return .unsupported }
+    func reasoningCapability(for model: String) -> OllamaReasoningCapability {
+        guard let values = thinking?.values else {
+            // Older /api/show responses advertise thinking without its values.
+            // Preserve their boolean control, except GPT-OSS's effort-only API.
+            guard capabilities?.contains(where: { $0.lowercased() == "thinking" }) == true else { return .unsupported }
+            let identifiers = [model, details?.family ?? ""] + (details?.families ?? [])
+            if identifiers.contains(where: {
+                let identifier = $0.lowercased()
+                return identifier.contains("gpt-oss") || identifier.contains("gptoss")
+            }) { return .level }
+            return .toggle
+        }
         let hasReasoning = values.contains(.toggle(true)) || values.contains {
             if case .level = $0 { return true }
             return false
@@ -56,9 +71,12 @@ nonisolated struct OllamaModelDetails: Decodable, Sendable {
         return .unsupported
     }
 
-    func reasoningOffOverride(enabled: Bool) -> ThinkingValue? {
-        guard !enabled, let values = thinking?.values, values.contains(.toggle(false)) else { return nil }
-        return .toggle(false)
+    func reasoningOffOverride(enabled: Bool, model: String) -> ThinkingValue? {
+        guard !enabled else { return nil }
+        if let values = thinking?.values {
+            return values.contains(.toggle(false)) ? .toggle(false) : nil
+        }
+        return reasoningCapability(for: model) == .toggle ? .toggle(false) : nil
     }
 }
 
