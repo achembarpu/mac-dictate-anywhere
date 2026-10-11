@@ -1137,7 +1137,6 @@ final class AppState {
 
         // Resolve preferred input route up front; startup will retry with fallbacks if needed.
         let preferredDeviceID = MicrophoneHelper.effectiveDeviceID()
-        let hasExplicitMicrophoneSelection = settings.selectedMicrophoneUID != nil
 
         // Boost mic volume if enabled
         if settings.boostMicrophoneVolumeEnabled {
@@ -1152,9 +1151,6 @@ final class AppState {
         // Start recording (must complete before showing overlay so the mic
         // is actually capturing audio when the user sees the "listening" UI)
         let startCandidates: [AudioDeviceID?] = {
-            if hasExplicitMicrophoneSelection {
-                return preferredDeviceID.map { [$0] } ?? []
-            }
             var ids: [AudioDeviceID?] = [preferredDeviceID]
             let refreshedDefault = MicrophoneHelper.currentDefaultInputDeviceID()
             if refreshedDefault != preferredDeviceID {
@@ -1166,9 +1162,7 @@ final class AppState {
             return ids
         }()
 
-        var lastStartError: Error? = hasExplicitMicrophoneSelection && preferredDeviceID == nil
-            ? TranscriptionError.deviceSelectionFailed
-            : nil
+        var lastStartError: Error?
         var didStart = false
         for (index, candidateID) in startCandidates.enumerated() {
             guard !isShuttingDown, activeRecordingStartupID == recordingStartupID else { return }
@@ -2226,7 +2220,8 @@ enum MicrophoneHelper {
         guard let uid = Settings.shared.selectedMicrophoneUID else {
             return currentDefaultInputDeviceID()
         }
-        return deviceID(forUID: uid)
+        // Keep the saved preference so a reconnected microphone is used next time.
+        return deviceID(forUID: uid) ?? currentDefaultInputDeviceID()
     }
 
     static func currentDefaultInputDeviceID() -> AudioDeviceID? {

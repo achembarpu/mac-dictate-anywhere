@@ -114,10 +114,13 @@ require_command hdiutil
 
 require_value "NOTARY_PROFILE" "$NOTARY_PROFILE"
 require_value "TEAM_ID" "$TEAM_ID"
-require_value "DEVELOPER_ID_APP" "$DEVELOPER_ID_APP"
 require_value "DOWNLOAD_URL_PREFIX" "$DOWNLOAD_URL_PREFIX"
 require_value "REPOSITORY_LINK" "$REPOSITORY_LINK"
 
+# Use the same explicit identity for archiving and all packaged helpers.
+BUILD_SETTINGS="$(xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings)"
+DEVELOPER_ID_APP="${DEVELOPER_ID_APP:-$(read_build_setting CODE_SIGN_IDENTITY)}"
+[[ -n "$DEVELOPER_ID_APP" ]] || fail "Missing Developer ID Application signing identity"
 require_identity "$DEVELOPER_ID_APP"
 require_notary_profile
 
@@ -135,7 +138,7 @@ CURRENT_PROJECT_VERSION="$(read_build_setting "CURRENT_PROJECT_VERSION")"
 ZIP_ASSET="$DIST_DIR/DictateAnywhere-${MARKETING_VERSION}.zip"
 DMG_ASSET="$DIST_DIR/DictateAnywhere-${MARKETING_VERSION}.dmg"
 APP_PATH="$DIST_DIR/$APP_NAME"
-APPCAST_PATH="$ROOT_DIR/appcast.xml"
+APPCAST_PATH="${APPCAST_PATH:-$ROOT_DIR/appcast.xml}"
 APP_NOTARY_ZIP="$TEMP_DIR/DictateAnywhere-notary.zip"
 
 log "Archiving signed app"
@@ -150,6 +153,9 @@ xcodebuild \
   'ARCHS=$(ARCHS_STANDARD)' \
   ONLY_ACTIVE_ARCH=NO \
   SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) DISTRIBUTION_BUILD" \
+  CODE_SIGN_IDENTITY="$DEVELOPER_ID_APP" \
+  CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM="$TEAM_ID" \
   archive
 
 log "Verifying universal archive"

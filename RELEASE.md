@@ -59,9 +59,17 @@ Create `Config/Signing.local.xcconfig` on your machine:
 
 ```xcconfig
 DEVELOPMENT_TEAM = YOUR_TEAM_ID
+DEVELOPER_ID_APPLICATION_IDENTITY = YOUR_G2_CERTIFICATE_SHA1
 ```
 
-This file is ignored by Git.
+This file is ignored by Git. Pin the Developer ID Application identity to the
+G2 certificate SHA-1 shown by `security find-identity -v -p codesigning`; the
+old and new certificates may have the same name. Release builds and the packaging
+script use this identity, including Sparkle helper signing. Update this value
+when renewing the certificate.
+
+For validation without replacing the normal release outputs, override `DIST_DIR`,
+`SPARKLE_RELEASES_DIR`, `ARCHIVE_PATH`, and `APPCAST_PATH` when running the script.
 
 ## Release Steps
 

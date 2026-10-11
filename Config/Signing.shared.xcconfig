@@ -1,3 +1,5 @@
+// Release identity can be pinned to a certificate SHA-1 in Signing.local.xcconfig.
+DEVELOPER_ID_APPLICATION_IDENTITY = Developer ID Application
 #include? "Signing.local.xcconfig"
 
 // Create Config/Signing.local.xcconfig on your machine and set:

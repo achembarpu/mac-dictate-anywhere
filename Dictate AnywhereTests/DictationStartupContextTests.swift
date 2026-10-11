@@ -83,6 +83,23 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
+    func testUnavailableSelectedMicrophoneFallsBackWithoutLosingPreference() async {
+        let missingUID = "unavailable-microphone-\(UUID())"
+        Settings.shared.selectedMicrophoneUID = missingUID
+        let defaultDeviceID = MicrophoneHelper.currentDefaultInputDeviceID()
+        let engine = StartupContextEngine()
+        let app = app(engine: engine, capture: { _ in nil })
+
+        await app.startDictation()
+
+        XCTAssertTrue(engine.capturing)
+        XCTAssertEqual(engine.startDeviceIDs.count, 1)
+        XCTAssertEqual(engine.startDeviceIDs.first ?? nil, defaultDeviceID)
+        XCTAssertEqual(Settings.shared.selectedMicrophoneUID, missingUID)
+        await app.cancelDictation()
+        await app.shutdown()
+    }
+
     func testConcurrentPreparationJoinsTheInFlightModelLoad() async {
         let started = expectation(description: "model preparation started")
         let gate = StartupModelPreparationGate(started: started)
@@ -551,6 +568,7 @@ private final class StartupContextEngine: TranscriptionEngine {
     var currentTranscript = ""
     var audioSamples: [Float] = []
     var capturing = false
+    var startDeviceIDs: [AudioDeviceID?] = []
     var context: DictationContext?
     var contextAtFinalization: DictationContext?
     var vocabulary: [String] = []
@@ -574,7 +592,10 @@ private final class StartupContextEngine: TranscriptionEngine {
         isReady = true
         onPrepare?()
     }
-    func startRecording(deviceID: AudioDeviceID?) async throws { capturing = true }
+    func startRecording(deviceID: AudioDeviceID?) async throws {
+        startDeviceIDs.append(deviceID)
+        capturing = true
+    }
     func stopAudioCapture() async {
         guard capturing else { return }
         capturing = false
