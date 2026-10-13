@@ -1,5 +1,6 @@
 import XCTest
 import CoreAudio
+import AVFoundation
 @testable import Dictate_Anywhere
 
 @MainActor
@@ -83,10 +84,11 @@ final class DictationStartupContextTests: XCTestCase {
         await app.shutdown()
     }
 
-    func testUnavailableSelectedMicrophoneFallsBackWithoutLosingPreference() async {
+    func testUnavailableSelectedMicrophoneFallsBackWithoutLosingPreference() async throws {
         let missingUID = "unavailable-microphone-\(UUID())"
         Settings.shared.selectedMicrophoneUID = missingUID
-        let defaultDeviceID = MicrophoneHelper.currentDefaultInputDeviceID()
+        let defaultDeviceID = MicrophoneHelper.effectiveDeviceID()
+        try XCTSkipIf(defaultDeviceID == nil, "No usable microphone is attached")
         let engine = StartupContextEngine()
         let app = app(engine: engine, capture: { _ in nil })
 
@@ -98,6 +100,80 @@ final class DictationStartupContextTests: XCTestCase {
         XCTAssertEqual(Settings.shared.selectedMicrophoneUID, missingUID)
         await app.cancelDictation()
         await app.shutdown()
+    }
+
+    func testRoutingAcrossDisconnectReconnectAndClamshell() {
+        let laptop = MicrophoneHelper.Input(id: 1, uid: "laptop", isBuiltIn: true)
+        let monitor = MicrophoneHelper.Input(id: 2, uid: "monitor", isBuiltIn: false)
+        // Unplug monitor while the system default is still stale.
+        XCTAssertEqual(MicrophoneHelper.candidates(selectedUID: "monitor", defaultID: 2,
+            inputs: [laptop], lidClosed: false), [1])
+        // Preference is restored when the monitor returns.
+        XCTAssertEqual(MicrophoneHelper.candidates(selectedUID: "monitor", defaultID: 1,
+            inputs: [laptop, monitor], lidClosed: false), [2, 1])
+        // Built-in mic may still be enumerated and even remain the system default.
+        XCTAssertEqual(MicrophoneHelper.candidates(selectedUID: "laptop", defaultID: 1,
+            inputs: [laptop, monitor], lidClosed: true), [2])
+        XCTAssertEqual(MicrophoneHelper.candidates(selectedUID: "laptop", defaultID: 2,
+            inputs: [laptop, monitor], lidClosed: false), [1, 2])
+    }
+
+    func testSystemDefaultUsesConcreteUsableRouteAndNeverImplicitFallback() {
+        let laptop = MicrophoneHelper.Input(id: 1, uid: "laptop", isBuiltIn: true)
+        let monitor = MicrophoneHelper.Input(id: 2, uid: "monitor", isBuiltIn: false)
+        XCTAssertEqual(MicrophoneHelper.candidates(selectedUID: nil, defaultID: 2,
+            inputs: [laptop, monitor], lidClosed: false), [2, 1])
+        XCTAssertEqual(MicrophoneHelper.candidates(selectedUID: nil, defaultID: 1,
+            inputs: [laptop, monitor], lidClosed: true), [2])
+        XCTAssertEqual(MicrophoneHelper.candidates(selectedUID: "removed-iPhone", defaultID: 99,
+            inputs: [monitor, laptop], lidClosed: false), [1, 2])
+        XCTAssertTrue(MicrophoneHelper.candidates(selectedUID: nil, defaultID: 1,
+            inputs: [laptop], lidClosed: true).isEmpty)
+        XCTAssertTrue(MicrophoneHelper.candidates(selectedUID: nil, defaultID: nil,
+            inputs: [], lidClosed: false).isEmpty)
+    }
+
+    func testContinuityAndAggregateInputsAreExcluded() {
+        XCTAssertFalse(AudioDeviceManager.supportsTransport(kAudioDeviceTransportTypeVirtual))
+        XCTAssertFalse(AudioDeviceManager.supportsTransport(kAudioDeviceTransportTypeAggregate))
+        XCTAssertFalse(AudioDeviceManager.supportsTransport(kAudioDeviceTransportTypeContinuityCaptureWired))
+        XCTAssertFalse(AudioDeviceManager.supportsTransport(kAudioDeviceTransportTypeContinuityCaptureWireless))
+        for transport in [kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeUSB,
+                          kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeDisplayPort] {
+            XCTAssertTrue(AudioDeviceManager.supportsTransport(transport))
+        }
+    }
+
+    func testCaptureReadinessRequiresBuffersButDoesNotRequireSpeaking() throws {
+        let silentCapture = AudioCaptureReadiness()
+        silentCapture.signalSamples()
+        silentCapture.signalSamples()
+        try silentCapture.wait(timeout: 0.01)
+        XCTAssertThrowsError(try AudioCaptureReadiness().wait(timeout: 0.01)) { error in
+            guard case TranscriptionError.audioEngineSetupTimedOut = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    func testResolvedDefaultHardwareCaptureSmoke() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["RUN_AUDIO_CAPTURE_SMOKE"] == "1",
+                          "Opt in for microphone hardware capture")
+        try XCTSkipUnless(AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+                          "The Debug app needs existing microphone permission")
+        let deviceID = try XCTUnwrap(MicrophoneHelper.effectiveDeviceID())
+        // Both settings must capture the same concrete default input successfully.
+        for explicitSelection in [false, true] {
+            let controller = try await startAudioCaptureOffMainActor(
+                timeout: 5, queue: DispatchQueue(label: "DictationStartupContextTests.defaultCapture"),
+                cancellation: AudioCaptureStartupCancellation()
+            ) {
+                try makeAudioCaptureController(deviceID: deviceID,
+                    usesExplicitMicrophoneSelection: explicitSelection) { _ in }
+            }
+            controller.stop()
+            AudioCaptureRestartGate.shared.recordStop()
+        }
     }
 
     func testConcurrentPreparationJoinsTheInFlightModelLoad() async {

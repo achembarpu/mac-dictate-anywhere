@@ -8,6 +8,8 @@
 import Foundation
 import AppKit
 import CoreAudio
+import AVFoundation
+import IOKit
 import os
 import FoundationModels
 
@@ -1135,40 +1137,26 @@ final class AppState {
         // Play start sound
         settings.playSound("Tink")
 
-        // Resolve preferred input route up front; startup will retry with fallbacks if needed.
-        let preferredDeviceID = MicrophoneHelper.effectiveDeviceID()
+        // Snapshot routing for every recording; a saved UID is a preference, not
+        // proof that a device can still capture (notably in clamshell mode).
+        audioDeviceManager.refreshDevices()
+        let startCandidates = MicrophoneHelper.startCandidates()
+        let preferredDeviceID = startCandidates.first
 
-        // Boost mic volume if enabled
-        if settings.boostMicrophoneVolumeEnabled {
+        if settings.boostMicrophoneVolumeEnabled, let preferredDeviceID {
             volumeController.boostMicrophoneVolume(deviceID: preferredDeviceID)
         }
-
-        // Mute system audio if enabled
         if settings.muteSystemAudioDuringRecordingEnabled {
             volumeController.adjustForRecording()
         }
 
-        // Start recording (must complete before showing overlay so the mic
-        // is actually capturing audio when the user sees the "listening" UI)
-        let startCandidates: [AudioDeviceID?] = {
-            var ids: [AudioDeviceID?] = [preferredDeviceID]
-            let refreshedDefault = MicrophoneHelper.currentDefaultInputDeviceID()
-            if refreshedDefault != preferredDeviceID {
-                ids.append(refreshedDefault)
-            }
-            if !ids.contains(where: { $0 == nil }) {
-                ids.append(nil)
-            }
-            return ids
-        }()
-
-        var lastStartError: Error?
+        var lastStartError: Error? = startCandidates.isEmpty ? TranscriptionError.audioEngineSetupFailed : nil
         var didStart = false
         for (index, candidateID) in startCandidates.enumerated() {
             guard !isShuttingDown, activeRecordingStartupID == recordingStartupID else { return }
             if index > 0 {
                 logger.warning(
-                    "startDictation: retrying startRecording attempt \(index + 1, privacy: .public) with deviceID=\(candidateID.map { String($0) } ?? "nil", privacy: .public)"
+                    "startDictation: retrying startRecording attempt \(index + 1, privacy: .public) with deviceID=\(String(candidateID), privacy: .public)"
                 )
                 try? await Task.sleep(for: .milliseconds(220))
                 guard !isShuttingDown, activeRecordingStartupID == recordingStartupID else { return }
@@ -1185,7 +1173,7 @@ final class AppState {
                 guard !isShuttingDown, activeRecordingStartupID == recordingStartupID else { return }
                 didStart = true
                 logger.info(
-                    "startDictation: startRecording succeeded on attempt \(index + 1, privacy: .public), deviceID=\(candidateID.map { String($0) } ?? "nil", privacy: .public)"
+                    "startDictation: startRecording succeeded on attempt \(index + 1, privacy: .public), deviceID=\(String(candidateID), privacy: .public)"
                 )
                 break
             } catch {
@@ -2096,10 +2084,13 @@ final class AudioDeviceManager {
             AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, &deviceIDs
         ) == noErr else { return [] }
 
+        let lidClosed = MicrophoneHelper.isLidClosed()
         var result: [(uid: String, name: String)] = []
         for id in deviceIDs {
             guard isPhysicalDevice(deviceID: id),
                   hasInputChannels(deviceID: id),
+                  isAvailable(deviceID: id),
+                  !(lidClosed && transport(for: id) == kAudioDeviceTransportTypeBuiltIn),
                   let uid = deviceUID(for: id),
                   let name = deviceName(for: id) else { continue }
             result.append((uid: uid, name: name))
@@ -2118,17 +2109,43 @@ final class AudioDeviceManager {
         guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &transportType) == noErr else {
             return false
         }
-        // Block aggregate devices (e.g. CADefaultDeviceAggregate)
-        if transportType == kAudioDeviceTransportTypeAggregate {
-            return false
+        return supportsTransport(transportType)
+    }
+
+    nonisolated static func supportsTransport(_ transport: UInt32) -> Bool {
+        // Continuity microphones are virtual inputs and can take seconds to wake.
+        ![kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeVirtual,
+          kAudioDeviceTransportTypeContinuityCaptureWired,
+          kAudioDeviceTransportTypeContinuityCaptureWireless].contains(transport)
+    }
+
+    static func isAvailable(deviceID: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var alive: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &alive) == noErr,
+              alive != 0 else { return false }
+        if let uid = deviceUID(for: deviceID),
+           let device = AVCaptureDevice(uniqueID: uid) {
+            return device.isConnected && !device.isSuspended
         }
-        // Allow all non-virtual transports (built-in, USB, Bluetooth, etc.)
-        if transportType != kAudioDeviceTransportTypeVirtual {
-            return true
-        }
-        // Virtual transport: allow Continuity devices (iPhone/iPad), block the rest
-        guard let name = deviceName(for: deviceID) else { return false }
-        return name.contains("iPhone") || name.contains("iPad")
+        return true
+    }
+
+    nonisolated static func transport(for deviceID: AudioDeviceID) -> UInt32? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &transport) == noErr else { return nil }
+        return transport
     }
 
     private static func hasInputChannels(deviceID: AudioDeviceID) -> Bool {
@@ -2216,15 +2233,46 @@ final class AudioDeviceManager {
 // MARK: - Microphone Helper
 
 enum MicrophoneHelper {
-    static func effectiveDeviceID() -> AudioDeviceID? {
-        guard let uid = Settings.shared.selectedMicrophoneUID else {
-            return currentDefaultInputDeviceID()
-        }
-        // Keep the saved preference so a reconnected microphone is used next time.
-        return deviceID(forUID: uid) ?? currentDefaultInputDeviceID()
+    struct Input: Equatable {
+        let id: AudioDeviceID
+        let uid: String
+        let isBuiltIn: Bool
     }
 
-    static func currentDefaultInputDeviceID() -> AudioDeviceID? {
+    // Pure routing policy: preferred usable input, usable system default, then
+    // local hardware. Never try an implicit route that bypasses this filtering.
+    static func candidates(selectedUID: String?, defaultID: AudioDeviceID?, inputs: [Input], lidClosed: Bool) -> [AudioDeviceID] {
+        let usable = inputs.filter { !($0.isBuiltIn && lidClosed) }
+        var result: [AudioDeviceID] = []
+        if let selected = usable.first(where: { $0.uid == selectedUID }) { result.append(selected.id) }
+        if let system = usable.first(where: { $0.id == defaultID }), !result.contains(system.id) { result.append(system.id) }
+        for input in usable.sorted(by: { $0.isBuiltIn && !$1.isBuiltIn }) where !result.contains(input.id) {
+            result.append(input.id)
+        }
+        return result
+    }
+
+    static func startCandidates() -> [AudioDeviceID] {
+        let inputs = AudioDeviceManager.enumerateInputDevices().compactMap { device -> Input? in
+            guard let id = deviceID(forUID: device.uid), let transport = AudioDeviceManager.transport(for: id) else { return nil }
+            return Input(id: id, uid: device.uid, isBuiltIn: transport == kAudioDeviceTransportTypeBuiltIn)
+        }
+        return candidates(selectedUID: Settings.shared.selectedMicrophoneUID,
+                          defaultID: currentDefaultInputDeviceID(), inputs: inputs, lidClosed: isLidClosed())
+    }
+
+    static func effectiveDeviceID() -> AudioDeviceID? {
+        startCandidates().first
+    }
+
+    nonisolated static func isLidClosed() -> Bool {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard service != 0 else { return false }
+        defer { IOObjectRelease(service) }
+        return (IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool) ?? false
+    }
+
+    nonisolated static func currentDefaultInputDeviceID() -> AudioDeviceID? {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,

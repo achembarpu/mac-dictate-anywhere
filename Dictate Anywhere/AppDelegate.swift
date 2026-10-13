@@ -311,12 +311,15 @@ extension AppDelegate: NSMenuDelegate {
         guard menu.title == "Microphone" else { return }
         menu.removeAllItems()
 
+        appState.audioDeviceManager.refreshDevices()
         let selectedUID = Settings.shared.selectedMicrophoneUID
+        let devices = appState.audioDeviceManager.availableInputDevices
+        let isFallingBack = selectedUID != nil && !devices.contains { $0.uid == selectedUID }
 
-        let defaultItem = NSMenuItem(title: "System Default", action: #selector(selectMicrophone(_:)), keyEquivalent: "")
+        let defaultItem = NSMenuItem(title: isFallingBack ? "Automatic (selected microphone unavailable)" : "Automatic", action: #selector(selectMicrophone(_:)), keyEquivalent: "")
         defaultItem.target = self
         defaultItem.representedObject = nil
-        defaultItem.state = selectedUID == nil ? .on : .off
+        defaultItem.state = selectedUID == nil || isFallingBack ? .on : .off
         menu.addItem(defaultItem)
 
         menu.addItem(NSMenuItem.separator())

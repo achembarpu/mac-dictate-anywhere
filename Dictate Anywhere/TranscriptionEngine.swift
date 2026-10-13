@@ -87,12 +87,36 @@ private final class SendableAudioEngineRef: @unchecked Sendable {
     }
 }
 
+/// Readiness means delivery of PCM, even silence, rather than merely isRunning.
+/// This runs on the capture setup queue, never on the main actor.
+nonisolated final class AudioCaptureReadiness: @unchecked Sendable {
+    private let lock = NSLock()
+    private let firstBuffer = DispatchSemaphore(value: 0)
+    private var received = false
+
+    func signalSamples() {
+        let first = lock.withLock {
+            guard !received else { return false }
+            received = true
+            return true
+        }
+        if first { firstBuffer.signal() }
+    }
+
+    func wait(timeout: TimeInterval = 1.5) throws {
+        guard firstBuffer.wait(timeout: .now() + timeout) == .success else {
+            throw TranscriptionError.audioEngineSetupTimedOut
+        }
+    }
+}
+
 nonisolated private final class AVCaptureDeviceCaptureController: NSObject, @unchecked Sendable, AudioCaptureController, AVCaptureAudioDataOutputSampleBufferDelegate {
     private let session = AVCaptureSession()
     private let output = AVCaptureAudioDataOutput()
     private let sampleQueue = DispatchQueue(label: "com.dictate-anywhere.capture-session-samples", qos: .userInitiated)
     private let onSamples: ([Float]) -> Void
     private var hasLoggedFirstBuffer = false
+    private let readiness = AudioCaptureReadiness()
 
     init(device: AVCaptureDevice, onSamples: @escaping ([Float]) -> Void) throws {
         self.onSamples = onSamples
@@ -129,6 +153,11 @@ nonisolated private final class AVCaptureDeviceCaptureController: NSObject, @unc
         session.startRunning()
         guard session.isRunning else {
             throw TranscriptionError.audioEngineSetupFailed
+        }
+        do { try readiness.wait() }
+        catch {
+            stop()
+            throw error
         }
     }
 
@@ -177,6 +206,7 @@ nonisolated private final class AVCaptureDeviceCaptureController: NSObject, @unc
         }
 
         onSamples(samples)
+        readiness.signalSamples()
     }
 }
 
@@ -331,6 +361,7 @@ private func makeRecordingEngine(
     }
     let samples = try CapturePCMStream(from: recFormat, to: targetFormat, onSamples: onSamples)
 
+    let readiness = AudioCaptureReadiness()
     var tapCallbackCount = 0
     let tapStartTime = CFAbsoluteTimeGetCurrent()
     inputNode.installTap(onBus: 0, bufferSize: 4096, format: recFormat) { buffer, _ in
@@ -341,6 +372,7 @@ private func makeRecordingEngine(
             audioLogger.info("makeRecordingEngine: first tap callback after \(String(format: "%.3f", elapsed), privacy: .public)s, frameLength=\(buffer.frameLength, privacy: .public)")
         }
         samples.append(buffer)
+        readiness.signalSamples()
     }
 
     engine.prepare()
@@ -357,6 +389,13 @@ private func makeRecordingEngine(
         throw TranscriptionError.audioEngineSetupFailed
     }
 
+    do { try readiness.wait() }
+    catch {
+        engine.stop()
+        inputNode.removeTap(onBus: 0)
+        samples.finish()
+        throw error
+    }
     return AVAudioEngineCaptureController(engine: engine, samples: samples)
 }
 
@@ -412,15 +451,24 @@ private func captureDevice(for deviceID: AudioDeviceID) -> AVCaptureDevice? {
 
 func makeAudioCaptureController(
     deviceID: AudioDeviceID?,
-    usesExplicitMicrophoneSelection: Bool,
+    usesExplicitMicrophoneSelection _: Bool,
     onSamples: @escaping ([Float]) -> Void
 ) throws -> AudioCaptureController {
-    if usesExplicitMicrophoneSelection,
-       let deviceID,
-       let captureDevice = captureDevice(for: deviceID) {
+    // Resolve even legacy implicit-default callers before constructing capture.
+    // Automatic and manual selection must use the same device-backed path.
+    guard let deviceID = deviceID ?? MicrophoneHelper.currentDefaultInputDeviceID(),
+          let transport = AudioDeviceManager.transport(for: deviceID),
+          AudioDeviceManager.supportsTransport(transport),
+          !(transport == kAudioDeviceTransportTypeBuiltIn && MicrophoneHelper.isLidClosed()) else {
+        throw TranscriptionError.deviceSelectionFailed
+    }
+    if let captureDevice = captureDevice(for: deviceID) {
         audioLogger.info(
-            "makeAudioCaptureController: using AVCaptureSession for explicit microphone \(captureDevice.uniqueID, privacy: .public)"
+            "makeAudioCaptureController: using AVCaptureSession for resolved microphone \(captureDevice.uniqueID, privacy: .public)"
         )
+        guard captureDevice.isConnected, !captureDevice.isSuspended else {
+            throw TranscriptionError.deviceSelectionFailed
+        }
         let controller = try AVCaptureDeviceCaptureController(device: captureDevice, onSamples: onSamples)
         try controller.start()
         return controller

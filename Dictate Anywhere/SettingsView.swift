@@ -117,9 +117,12 @@ struct SettingsView: View {
                             get: { settings.selectedMicrophoneUID },
                             set: { settings.selectedMicrophoneUID = $0 }
                         ),
-                        options: [nil] + appState.audioDeviceManager.availableInputDevices.map { $0.uid },
+                        options: [nil] + appState.audioDeviceManager.availableInputDevices.map { $0.uid }
+                            + (settings.selectedMicrophoneUID.map { uid in
+                                appState.audioDeviceManager.availableInputDevices.contains { $0.uid == uid } ? [] : [uid]
+                            } ?? []),
                         title: { uid in
-                            guard let uid else { return "System Default" }
+                            guard let uid else { return "Automatic" }
                             return appState.audioDeviceManager.availableInputDevices
                                 .first { $0.uid == uid }?.name ?? "Selected microphone unavailable"
                         },
@@ -129,7 +132,7 @@ struct SettingsView: View {
                 if let uid = settings.selectedMicrophoneUID,
                    !appState.audioDeviceManager.availableInputDevices.contains(where: { $0.uid == uid }) {
                     DSFieldMessage(
-                        text: "The selected microphone is disconnected or unavailable. Reconnect it, choose another microphone, or select System Default.",
+                        text: "The selected microphone is unavailable. An available microphone will be used automatically; your preference will be restored when it becomes available again.",
                         tone: .warning
                     )
                     .padding(.horizontal, DS.Spacing.rowHorizontal)
