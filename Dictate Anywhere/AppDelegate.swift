@@ -316,7 +316,7 @@ extension AppDelegate: NSMenuDelegate {
         let devices = appState.audioDeviceManager.availableInputDevices
         let isFallingBack = selectedUID != nil && !devices.contains { $0.uid == selectedUID }
 
-        let defaultItem = NSMenuItem(title: isFallingBack ? "Automatic (selected microphone unavailable)" : "Automatic", action: #selector(selectMicrophone(_:)), keyEquivalent: "")
+        let defaultItem = NSMenuItem(title: appState.automaticMicrophoneTitle, action: #selector(selectMicrophone(_:)), keyEquivalent: "")
         defaultItem.target = self
         defaultItem.representedObject = nil
         defaultItem.state = selectedUID == nil || isFallingBack ? .on : .off

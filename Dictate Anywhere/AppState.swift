@@ -120,6 +120,20 @@ final class AppState {
     private var sessionHotkeyMode: HotkeyMode?
     private var activeRecordingStartupID: UUID?
     private var recordingStartTask: Task<Void, Error>?
+    private var recordingInputDeviceID: AudioDeviceID?
+
+    var automaticMicrophoneTitle: String {
+        // Only annotate Automatic when it describes the current selection.
+        if let uid = settings.selectedMicrophoneUID,
+           audioDeviceManager.availableInputDevices.contains(where: { $0.uid == uid }) {
+            return "Automatic"
+        }
+        let deviceID = status == .recording ? recordingInputDeviceID : MicrophoneHelper.effectiveDeviceID()
+        guard let deviceID, let name = AudioDeviceManager.deviceName(for: deviceID) else {
+            return "Automatic"
+        }
+        return "Automatic (\(name))"
+    }
     private var startupTask: Task<Void, Never>?
     /// The startup sequence refreshes these assets before resolving input-source
     /// profiles. Preparation during that sequence can reuse the same snapshot.
@@ -1106,6 +1120,7 @@ final class AppState {
 
         isTransitioning = true
         pendingHoldRelease = false
+        recordingInputDeviceID = nil
         let recordingStartupID = UUID()
         activeRecordingStartupID = recordingStartupID
         sessionEngine = engine
@@ -1171,6 +1186,7 @@ final class AppState {
                 try await startTask.value
                 recordingStartTask = nil
                 guard !isShuttingDown, activeRecordingStartupID == recordingStartupID else { return }
+                recordingInputDeviceID = candidateID
                 didStart = true
                 logger.info(
                     "startDictation: startRecording succeeded on attempt \(index + 1, privacy: .public), deviceID=\(String(candidateID), privacy: .public)"
@@ -2184,7 +2200,7 @@ final class AudioDeviceManager {
         return result as String
     }
 
-    private static func deviceName(for deviceID: AudioDeviceID) -> String? {
+    static func deviceName(for deviceID: AudioDeviceID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceNameCFString,
             mScope: kAudioObjectPropertyScopeGlobal,

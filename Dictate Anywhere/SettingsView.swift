@@ -114,29 +114,23 @@ struct SettingsView: View {
                 DSInfoRow(label: "Microphone") {
                     DSDropdown(
                         selection: Binding<String?>(
-                            get: { settings.selectedMicrophoneUID },
+                            get: {
+                                guard let uid = settings.selectedMicrophoneUID,
+                                      appState.audioDeviceManager.availableInputDevices.contains(where: { $0.uid == uid }) else {
+                                    return nil
+                                }
+                                return uid
+                            },
                             set: { settings.selectedMicrophoneUID = $0 }
                         ),
-                        options: [nil] + appState.audioDeviceManager.availableInputDevices.map { $0.uid }
-                            + (settings.selectedMicrophoneUID.map { uid in
-                                appState.audioDeviceManager.availableInputDevices.contains { $0.uid == uid } ? [] : [uid]
-                            } ?? []),
+                        options: [nil] + appState.audioDeviceManager.availableInputDevices.map { $0.uid },
                         title: { uid in
-                            guard let uid else { return "Automatic" }
+                            guard let uid else { return appState.automaticMicrophoneTitle }
                             return appState.audioDeviceManager.availableInputDevices
-                                .first { $0.uid == uid }?.name ?? "Selected microphone unavailable"
+                                .first { $0.uid == uid }?.name ?? appState.automaticMicrophoneTitle
                         },
                         accessibilityName: "Microphone"
                     )
-                }
-                if let uid = settings.selectedMicrophoneUID,
-                   !appState.audioDeviceManager.availableInputDevices.contains(where: { $0.uid == uid }) {
-                    DSFieldMessage(
-                        text: "The selected microphone is unavailable. An available microphone will be used automatically; your preference will be restored when it becomes available again.",
-                        tone: .warning
-                    )
-                    .padding(.horizontal, DS.Spacing.rowHorizontal)
-                    .padding(.bottom, 10)
                 }
                 DSDivider()
                 DSInfoRow(label: "Boost microphone volume during recording") {
