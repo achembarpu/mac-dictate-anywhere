@@ -48,6 +48,7 @@ actor S1MiniMLXInferenceEngine {
     private var prefixTokens: [Int] = []
     private var prefixCache: [KVCache] = []
     private var usePrefix = true
+    private var useInputDrafting = true
     private var prefillStep = 256
     private var operationRunning = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -151,7 +152,8 @@ actor S1MiniMLXInferenceEngine {
         let trace = PerfTrace.begin("cleanup.generate")
         defer { trace.end() }
         let tokenizerTrace = PerfTrace.begin("cleanup.tokenize")
-        let count = knownTranscriptTokenCount ?? context.tokenizer.encode(text: transcript, addSpecialTokens: false).count
+        let transcriptTokens = context.tokenizer.encode(text: transcript, addSpecialTokens: false)
+        let count = knownTranscriptTokenCount ?? transcriptTokens.count
         guard count <= S1MiniModelSpec.maximumTranscriptTokens else {
             tokenizerTrace.end()
             throw S1MiniServiceError.transcriptTooLong(actual: count, maximum: S1MiniModelSpec.maximumTranscriptTokens)
@@ -176,16 +178,17 @@ actor S1MiniMLXInferenceEngine {
         // Scheduling is asynchronous. firstToken ends only when the first
         // token reaches the CPU, including the GPU's completed prompt work.
         let promptTrace = PerfTrace.begin("cleanup.prefillSchedule")
-        var iterator: TokenIterator
+        var iterator: S1MiniMLXTokenIterator
         do {
             defer { promptTrace.end() }
-            iterator = try makeIterator(tokens: tokens, maximum: maximum + 1, context: context)
+            iterator = try makeGenerationIterator(tokens: tokens, transcriptTokens: transcriptTokens,
+                                                 maximum: maximum + 1, context: context)
         }
         try Task.checkCancellation()
         let decodeTrace = PerfTrace.begin("cleanup.decode")
         defer { decodeTrace.end() }
         var output: [Int] = []
-        while let token = iterator.next() {
+        while let token = try iterator.next() {
             firstTokenTrace.end()
             try Task.checkCancellation()
             if stops.contains(token) {
@@ -210,11 +213,26 @@ actor S1MiniMLXInferenceEngine {
             cache: matchesPrefix ? prefixCache.map { $0.copy() } : nil, parameters: parameters(maximum: maximum))
     }
 
+    private func makeGenerationIterator(tokens: [Int], transcriptTokens: [Int], maximum: Int,
+                                        context: ModelContext) throws -> S1MiniMLXTokenIterator {
+        guard useInputDrafting else {
+            return .standard(try makeIterator(tokens: tokens, maximum: maximum, context: context))
+        }
+        let matchesPrefix = usePrefix && tokens.starts(with: prefixTokens)
+        let requestTokens = matchesPrefix ? Array(tokens.dropFirst(prefixTokens.count)) : tokens
+        let cache = matchesPrefix ? prefixCache.map { $0.copy() }
+            : context.model.newCache(parameters: parameters(maximum: maximum))
+        return .inputDraft(try S1MiniMLXInputDraftIterator(tokens: requestTokens,
+            transcriptTokens: transcriptTokens, model: context.model, cache: cache,
+            maximumTokens: maximum, prefillStepSize: prefillStep))
+    }
+
     #if DEBUG || PIPELINE_BENCHMARK
-    func configureForTesting(prefix: Bool, prefill: Int = 256) async {
+    func configureForTesting(prefix: Bool, prefill: Int = 256, drafting: Bool = true) async {
         await acquireOperation()
         defer { releaseOperation() }
         usePrefix = prefix
+        useInputDrafting = drafting
         prefillStep = prefill
     }
 
