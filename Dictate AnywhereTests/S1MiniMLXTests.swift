@@ -71,7 +71,7 @@ final class S1MiniMLXTests: XCTestCase {
                     await engine.configureForTesting(prefix: true)
                     let cached = try await S1MiniPostProcessingService.process(text: text, modelURL: url,
                         styling: style, structure: structure, contextSetting: context, context: nil)
-                    await engine.configureForTesting(prefix: false)
+                    await engine.configureForTesting(prefix: false, drafting: false)
                     let fresh = try await S1MiniPostProcessingService.process(text: text, modelURL: url,
                         styling: style, structure: structure, contextSetting: context, context: nil)
                     XCTAssertEqual(cached, fresh, "\(style)/\(structure)/\(context)")

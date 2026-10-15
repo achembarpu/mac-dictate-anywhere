@@ -31,13 +31,16 @@ final class S1MiniPostProcessingTests: XCTestCase {
         let fixtures = [
             (id: "invoice", input: "Send invoice 43 on Thursday."),
             (id: "question", input: "When does the office open?"),
-            (id: "name", input: "Please send the report to Nadia tomorrow.")
+            (id: "name", input: "Please send the report to Nadia tomorrow."),
+            (id: "repeated", input: "Send invoice 43 to Nadia. Send invoice 430 to Mara. Do not cancel invoice 43.")
         ]
         var baseline: [String: String] = [:]
+        await engine.configureInputDraftingForTesting(false)
         for fixture in fixtures {
             await engine.discardInferenceContextForTesting()
             baseline[fixture.id] = try await process(fixture.input, modelURL: url)
         }
+        await engine.configureInputDraftingForTesting(true)
         // Reverse order so previous requests have different names, numbers,
         // intent and prompt lengths than the fresh-context baseline.
         for fixture in fixtures.reversed() {
