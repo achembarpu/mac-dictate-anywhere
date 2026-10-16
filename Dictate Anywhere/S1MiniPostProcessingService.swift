@@ -263,7 +263,8 @@ actor S1MiniInferenceEngine {
         transcript: String,
         styling: S1MiniStyling,
         modelURL: URL,
-        knownTranscriptTokenCount: Int? = nil
+        knownTranscriptTokenCount: Int? = nil,
+        earlierOutputDraft: String? = nil
     ) throws -> String {
         let trace = PerfTrace.begin("cleanup.generate")
         defer { trace.end() }
@@ -282,6 +283,13 @@ actor S1MiniInferenceEngine {
         )
         var promptTokens = initialPromptTokens
         let maximumOutputTokens = max(32, Int(ceil(Double(transcriptTokenCount) * 1.3)) + 32)
+        // Earlier output is ordinary proposal material only. The complete raw
+        // transcript above still determines the prompt, length guard and budget.
+        var earlierTokens: [Int] = []
+        if useInputDrafting, let earlierOutputDraft, earlierOutputDraft.utf8.count <= 12_000 {
+            earlierTokens = Array(try tokenize(earlierOutputDraft, vocabulary: vocabulary,
+                addSpecial: false, parseSpecial: false).prefix(maximumOutputTokens)).map(Int.init)
+        }
         trace.recordCounts([
             "input_tokens": transcriptTokenCount,
             "prompt_tokens": promptTokens.count
@@ -327,7 +335,7 @@ actor S1MiniInferenceEngine {
             vocabulary: vocabulary,
             sampler: sampler,
             maximumOutputTokens: maximumOutputTokens, firstTokenTrace: firstTokenTrace,
-            transcriptTokens: transcriptTokens.map(Int.init)
+            transcriptTokens: transcriptTokens.map(Int.init), earlierOutputTokens: earlierTokens
         )
         trace.recordCounts(["output_tokens": outputTokenCount, "output_bytes": output.count])
 
@@ -439,13 +447,14 @@ actor S1MiniInferenceEngine {
         context: OpaquePointer,
         vocabulary: OpaquePointer,
         sampler: UnsafeMutablePointer<llama_sampler>,
-        maximumOutputTokens: Int, firstTokenTrace: PerfInterval, transcriptTokens: [Int]
+        maximumOutputTokens: Int, firstTokenTrace: PerfInterval, transcriptTokens: [Int],
+        earlierOutputTokens: [Int]
     ) throws -> (Data, Int) {
         let trace = PerfTrace.begin("cleanup.decode")
         defer { trace.end() }
         var output = Data()
         var outputTokenCount = 0
-        var draft = S1MiniInputDraft(tokens: transcriptTokens)
+        var draft = S1MiniVerifiedDraft(transcriptTokens: transcriptTokens, earlierOutputTokens: earlierOutputTokens)
         var nextToken = llama_sampler_sample(sampler, context, -1)
         var position = llama_memory_seq_pos_max(llama_get_memory(context), 0) + 1
         var batch = llama_batch_init(17, 0, 1)
@@ -622,7 +631,8 @@ enum S1MiniPostProcessingService {
         styling: S1MiniStyling,
         structure: S1MiniStructure,
         contextSetting: S1MiniContextSetting,
-        context: DictationPostProcessingContext?
+        context: DictationPostProcessingContext?,
+        earlierOutputDraft: String? = nil
     ) async throws -> String {
         let trace = PerfTrace.begin("cleanup.request")
         defer { trace.end() }
@@ -635,7 +645,7 @@ enum S1MiniPostProcessingService {
         let resolvedContext = contextSetting.resolved(for: context)
         do {
             return try await processChunk(text, modelURL: modelURL, styling: styling,
-                                          structure: structure, context: resolvedContext)
+                                          structure: structure, context: resolvedContext, earlierOutputDraft: earlierOutputDraft)
         } catch S1MiniServiceError.transcriptTooLong {
             // The author recommends sentence chunks near 1,000 input tokens.
             // Short dictation keeps the existing single-request fast path.
@@ -654,6 +664,18 @@ enum S1MiniPostProcessingService {
             trace.end(outcome: "output_limit_fallback")
             return text
         }
+    }
+
+    /// Speculation has a single-request budget. Long input waits for ordinary
+    /// final cleanup, whose chunking policy preserves the complete transcript.
+    static func processDraft(
+        text: String, configuration: EOUCleanupDraftSession.Configuration
+    ) async throws -> String {
+        try Task.checkCancellation()
+        guard !(text.contains("<|") && text.contains("|>")) else { return text }
+        return try await processChunk(text, modelURL: configuration.modelURL,
+            styling: configuration.styling, structure: configuration.structure,
+            context: configuration.context)
     }
 
     /// Restore source boundaries after normalization trims the model output.
@@ -676,7 +698,8 @@ enum S1MiniPostProcessingService {
 
     private static func processChunk(
         _ text: String, modelURL: URL, styling: S1MiniStyling,
-        structure: S1MiniStructure, context: String, knownTranscriptTokenCount: Int? = nil
+        structure: S1MiniStructure, context: String, knownTranscriptTokenCount: Int? = nil,
+        earlierOutputDraft: String? = nil
     ) async throws -> String {
         let prompt = S1MiniPromptBuilder.prompt(
             transcript: text,
@@ -689,7 +712,8 @@ enum S1MiniPostProcessingService {
             transcript: text,
             styling: styling,
             modelURL: modelURL,
-            knownTranscriptTokenCount: knownTranscriptTokenCount
+            knownTranscriptTokenCount: knownTranscriptTokenCount,
+            earlierOutputDraft: earlierOutputDraft
         )
 
         guard !output.contains("<think>"), !output.contains("<|im_") else {

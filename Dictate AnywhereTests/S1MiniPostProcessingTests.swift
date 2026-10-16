@@ -67,6 +67,32 @@ final class S1MiniPostProcessingTests: XCTestCase {
         XCTAssertFalse(state.allocated)
     }
 
+    // A stale cleanup must not preserve an old fact, drop new negation or omit
+    // the final ASR tail. Exercise real greedy verification and request isolation.
+    func testEarlierDraftCannotOverrideFinalFactsNegationOrTail() async throws {
+        guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check verified drafts") }
+        let url = URL(fileURLWithPath: path)
+        let engine = S1MiniInferenceEngine.shared
+        let final = "do not send 50 euros on friday. send the invoice to laura on monday."
+        let stale = "Send 15 euros on Thursday."
+        for styling in [S1MiniStyling.casual, .semiFormal] {
+            let baseline = try await S1MiniPostProcessingService.process(
+                text: final, modelURL: url, styling: styling, structure: .prose,
+                contextSetting: .general, context: nil)
+            let output = try await S1MiniPostProcessingService.process(
+                text: final, modelURL: url, styling: styling, structure: .prose,
+                contextSetting: .general, context: nil, earlierOutputDraft: stale)
+            XCTAssertEqual(output, baseline)
+            XCTAssertTrue(output.lowercased().contains("not"))
+            XCTAssertTrue(output.contains("50"))
+            XCTAssertTrue(output.lowercased().contains("laura"))
+            XCTAssertTrue(output.lowercased().contains("monday"))
+            let state = await engine.inferenceContextStateForTesting()
+            XCTAssertEqual(state.maximumPosition, -1)
+        }
+        await engine.unload()
+    }
+
     func testRealModelPathChangeReleasesContextBeforeReplacingWeights() async throws {
         guard let path = realModelPath() else { throw XCTSkip("Install S1-mini to check context ownership") }
         let url = URL(fileURLWithPath: path)

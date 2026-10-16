@@ -118,6 +118,8 @@ final class AppState {
     /// Engine pinned for the active dictation session (start -> stop/cancel).
     private var sessionEngine: TranscriptionEngine?
     private var sessionHotkeyMode: HotkeyMode?
+    private var sessionSupportsEOUCleanupDrafts = false
+    private var eouCleanupDrafts: EOUCleanupDraftSession?
     private var activeRecordingStartupID: UUID?
     private var recordingStartTask: Task<Void, Error>?
     private var recordingInputDeviceID: AudioDeviceID?
@@ -489,10 +491,15 @@ final class AppState {
         let recordingStartTask = recordingStartTask
         recordingStartTask?.cancel()
         processingTask?.cancel()
+        eouCleanupDrafts?.cancel()
         stopAudioLevelPolling()
         inputSourceMonitor.stopMonitoring()
         hotkeyService.stopMonitoring()
         permissions.stopPolling()
+
+        await eouCleanupDrafts?.join()
+        eouCleanupDrafts = nil
+        sessionSupportsEOUCleanupDrafts = false
 
         // A cancelled finish task must unwind before its engine can be unloaded.
         await processingTask?.value
@@ -1463,6 +1470,7 @@ final class AppState {
                 && settings.autoStopAfterSpeechEndsEnabled),
             "cleanup_mode": settings.transcriptPostProcessingMode.rawValue,
             "s1_mini_enabled": String(settings.transcriptPostProcessingMode == .s1Mini),
+            "s1_mini_eou_drafts_enabled": String(settings.s1MiniEOUFasterFinishEnabled),
             "filler_removal_enabled": String(settings.isFillerWordRemovalEnabled
                 && !settings.fillerWordsToRemove.isEmpty),
             "context_awareness_enabled": String(settings.dictationContextAwarenessEnabled),
@@ -1619,6 +1627,10 @@ final class AppState {
         let recordingStartupID = UUID()
         activeRecordingStartupID = recordingStartupID
         sessionEngine = engine
+        sessionSupportsEOUCleanupDrafts = settings.engineChoice == .parakeet
+            && settings.parakeetModelChoice.supportsEndOfUtterance
+            && settings.selectedLanguage == .english
+            && (engine === parakeetEngine || engineOverride != nil)
         sessionHotkeyMode = mode
         configureEndOfUtteranceHandler(for: engine)
 
@@ -1778,12 +1790,18 @@ final class AppState {
 
     func stopDictation() async {
         guard status == .recording, !isTransitioning else { return }
+        // Freeze synchronously at Stop. A request finishing during final ASR
+        // cannot become a draft, and capture is stopped before joining it.
+        let drafts = eouCleanupDrafts
+        let candidate = drafts?.freeze()
         isTransitioning = true
         status = .processing
         hotkeyService.resetCancellationGesture()
         let operationID = UUID()
         processingOperationID = operationID
-        let task = Task { @MainActor in await self.finishDictation() }
+        let task = Task { @MainActor in
+            await self.finishDictation(drafts: drafts, candidate: candidate)
+        }
         processingTask = task
         await task.value
         guard processingOperationID == operationID else { return }
@@ -1792,7 +1810,9 @@ final class AppState {
         if !isCancelling { isTransitioning = false }
     }
 
-    private func finishDictation() async {
+    private func finishDictation(
+        drafts: EOUCleanupDraftSession?, candidate: EOUCleanupDraftSession.Candidate?
+    ) async {
         let trace = PerfTrace.begin("dictation.stopToInsertion")
         defer {
             trace.end(outcome: Task.isCancelled ? "cancelled" : "aborted")
@@ -1817,6 +1837,8 @@ final class AppState {
             engine: engine,
             contextTask: engine.requiresContextBeforeFinalization ? contextTask : nil
         )
+        await drafts?.join()
+        if eouCleanupDrafts === drafts { eouCleanupDrafts = nil }
         await contextTask?.value
         let newTranscript = await recognition
         invalidateContextCapture()
@@ -1935,7 +1957,8 @@ final class AppState {
                         styling: settings.s1MiniStyling(for: context?.category),
                         structure: settings.s1MiniStructure,
                         contextSetting: settings.s1MiniContextSetting,
-                        context: context
+                        context: context,
+                        earlierOutputDraft: candidate?.output(matching: eouCleanupDraftConfiguration)
                     )
                 } catch {
                     logger.error("postProcessing: S1-mini failed: \(error.localizedDescription, privacy: .public)")
@@ -2145,6 +2168,8 @@ final class AppState {
         updateCancellationAvailability()
         let preview = currentTranscript
         processingTask?.cancel()
+        let drafts = eouCleanupDrafts
+        drafts?.cancel()
 
         activeRecordingStartupID = nil
         isTransitioning = true
@@ -2158,6 +2183,9 @@ final class AppState {
         // The task checks cancellation before saving or delivering its result.
         await engine.stopAudioCapture()
         volumeController.recordCaptureStopped()
+        await drafts?.join()
+        if eouCleanupDrafts === drafts { eouCleanupDrafts = nil }
+        sessionSupportsEOUCleanupDrafts = false
         await processingTask?.value
         processingOperationID = nil
         processingTask = nil
@@ -2537,6 +2565,47 @@ final class AppState {
         return refreshed
     }
 
+    /// The pinned recording backend must also be eligible. Changing the model
+    /// picker cannot turn an Apple/non-EOU recording into an EOU session.
+    private var eouCleanupDraftConfiguration: EOUCleanupDraftSession.Configuration? {
+        guard sessionSupportsEOUCleanupDrafts, settings.s1MiniEOUFasterFinishEnabled,
+              settings.engineChoice == .parakeet,
+              settings.parakeetModelChoice.supportsEndOfUtterance,
+              settings.selectedLanguage == .english,
+              settings.transcriptPostProcessingMode == .s1Mini,
+              s1MiniModelManager.isModelDownloaded,
+              !s1MiniModelManager.isDownloading, !s1MiniModelManager.isDeleting else { return nil }
+        let context = postProcessingContext(includeCapturedText: false)
+        return .init(modelURL: s1MiniModelManager.modelURL,
+            modelRevision: s1MiniModelManager.runtimeRevision,
+            settingsRevision: settings.s1MiniDraftRevision,
+            styling: settings.s1MiniStyling(for: context?.category),
+            structure: settings.s1MiniStructure,
+            context: settings.s1MiniContextSetting.resolved(for: context))
+    }
+
+    func invalidateEOUCleanupDraft() {
+        eouCleanupDrafts?.invalidate()
+    }
+
+    private func updateEOUCleanupDraft(source: String) {
+        let configuration = eouCleanupDraftConfiguration
+        guard eouCleanupDrafts != nil || configuration != nil else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if eouCleanupDrafts == nil {
+            eouCleanupDrafts = EOUCleanupDraftSession(now: now) { [manager = s1MiniModelManager] text, configuration in
+                let url = try await manager.validatedModelURL()
+                try Task.checkCancellation()
+                guard manager.runtimeRevision == configuration.modelRevision,
+                      url == configuration.modelURL else { throw CancellationError() }
+                return try await S1MiniPostProcessingService.processDraft(text: text, configuration: configuration)
+            }
+        }
+        eouCleanupDrafts?.update(source: source, configuration: configuration, now: now) {
+            self.settings.removeFillerWords(from: $0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
     private func startAudioLevelPolling(engine: TranscriptionEngine) {
         audioLevelTask = Task { [weak self] in
             var displayTranscript = self?.transcriptPrefix ?? ""
@@ -2570,6 +2639,11 @@ final class AppState {
                     }
                 }
 
+                // Reuse recording polling; no extra task/timer when disabled.
+                if transcriptPollTick.isMultiple(of: 3) {
+                    self.updateEOUCleanupDraft(source: displayTranscript)
+                }
+
                 if transcriptChanged || AudioMonitor.hasMeaningfulLevelChange(from: lastDisplayedLevel, to: level) {
                     self.overlay.showListening(level: level, transcript: displayTranscript)
                     lastDisplayedLevel = level
@@ -2592,6 +2666,9 @@ final class AppState {
             PerfTrace.event("eou.detected")
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                if self.status == .recording {
+                    self.eouCleanupDrafts?.noteEndOfUtterance(now: ProcessInfo.processInfo.systemUptime)
+                }
                 guard self.settings.autoStopAfterSpeechEndsEnabled else { return }
                 guard self.settings.parakeetModelChoice.supportsEndOfUtterance else { return }
                 guard self.sessionHotkeyMode == .handsFreeToggle else { return }

@@ -1023,6 +1023,7 @@ final class Settings {
         static let dictationAppRules = "dictationAppRules"
         static let transcriptHistory = "transcriptHistory"
         static let transcriptPostProcessingMode = "transcriptPostProcessingMode"
+        static let s1MiniEOUFasterFinishEnabled = "s1MiniEOUFasterFinishEnabled"
         static let s1MiniStyling = "s1MiniStyling"
         static let s1MiniAppStyling = "s1MiniAppStyling"
         static let s1MiniStructure = "s1MiniStructure"
@@ -1080,6 +1081,7 @@ final class Settings {
     /// Which transcription engine to use
     var engineChoice: TranscriptionEngineChoice {
         didSet {
+            if engineChoice != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(engineChoice.rawValue, forKey: Keys.engineChoice)
             if engineChoice == .parakeet,
                !parakeetModelChoice.supportsFluidAudioVocabulary,
@@ -1092,6 +1094,7 @@ final class Settings {
     /// Which FluidAudio model variant to use for transcription.
     var parakeetModelChoice: ParakeetModelChoice {
         didSet {
+            if parakeetModelChoice != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(parakeetModelChoice.rawValue, forKey: Keys.parakeetModelChoice)
             // Keep the expected language. The catalog filters compatible models
             // and recording validates the pair instead of silently choosing English.
@@ -1125,6 +1128,7 @@ final class Settings {
 
     var selectedLanguage: SupportedLanguage {
         didSet {
+            if selectedLanguage != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(selectedLanguage.rawValue, forKey: Keys.selectedLanguage)
         }
     }
@@ -1272,12 +1276,14 @@ final class Settings {
 
     var isFillerWordRemovalEnabled: Bool {
         didSet {
+            if isFillerWordRemovalEnabled != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(isFillerWordRemovalEnabled, forKey: Keys.isFillerWordRemovalEnabled)
         }
     }
 
     var fillerWordsToRemove: [String] {
         didSet {
+            if fillerWordsToRemove != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(fillerWordsToRemove, forKey: Keys.fillerWordsToRemove)
             cachedFillerRegex = nil
         }
@@ -1310,6 +1316,7 @@ final class Settings {
 
     var dictationContextAwarenessEnabled: Bool {
         didSet {
+            if dictationContextAwarenessEnabled != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(
                 dictationContextAwarenessEnabled,
                 forKey: Keys.dictationContextAwarenessEnabled
@@ -1376,18 +1383,31 @@ final class Settings {
 
     var transcriptPostProcessingMode: TranscriptPostProcessingMode {
         didSet {
+            if transcriptPostProcessingMode != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(transcriptPostProcessingMode.rawValue, forKey: Keys.transcriptPostProcessingMode)
+        }
+    }
+
+    // Includes disable/re-enable and control changes between recording polls.
+    @ObservationIgnored private(set) var s1MiniDraftRevision = 0
+
+    var s1MiniEOUFasterFinishEnabled: Bool {
+        didSet {
+            if s1MiniEOUFasterFinishEnabled != oldValue { s1MiniDraftRevision += 1 }
+            UserDefaults.standard.set(s1MiniEOUFasterFinishEnabled, forKey: Keys.s1MiniEOUFasterFinishEnabled)
         }
     }
 
     var s1MiniStyling: S1MiniStyling {
         didSet {
+            if s1MiniStyling != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(s1MiniStyling.rawValue, forKey: Keys.s1MiniStyling)
         }
     }
 
     var s1MiniAppStyling: S1MiniAppStyling {
         didSet {
+            if s1MiniAppStyling != oldValue { s1MiniDraftRevision += 1 }
             guard let data = try? JSONEncoder().encode(s1MiniAppStyling) else { return }
             UserDefaults.standard.set(data, forKey: Keys.s1MiniAppStyling)
         }
@@ -1400,12 +1420,14 @@ final class Settings {
 
     var s1MiniStructure: S1MiniStructure {
         didSet {
+            if s1MiniStructure != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(s1MiniStructure.rawValue, forKey: Keys.s1MiniStructure)
         }
     }
 
     var s1MiniContextSetting: S1MiniContextSetting {
         didSet {
+            if s1MiniContextSetting != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(s1MiniContextSetting.rawValue, forKey: Keys.s1MiniContextSetting)
         }
     }
@@ -1852,6 +1874,7 @@ final class Settings {
             from: defaults, forKey: Keys.aiPostProcessingPrompt,
             defaultPrompt: Self.recommendedAppleIntelligenceCleanupPrompt
         )
+        s1MiniEOUFasterFinishEnabled = defaults.bool(forKey: Keys.s1MiniEOUFasterFinishEnabled)
         let storedS1MiniStyling = S1MiniStyling(
             rawValue: defaults.string(forKey: Keys.s1MiniStyling) ?? ""
         )

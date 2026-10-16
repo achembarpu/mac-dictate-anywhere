@@ -88,6 +88,20 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 - Splits longer English transcripts into lossless chunks of approximately 1,000 model tokens; unsupported languages or a failed chunk preserve the entire original transcript
 - Can be removed from the Transcript Cleanup page, including its locally stored license file
 
+The optional **Finish dictation faster (Experimental)** switch is off by default.
+With English S1-mini cleanup and the Parakeet EOU model, it uses extra computing
+power during recording to prepare occasional cleanup drafts. The complete final
+speech transcript still controls the final cleanup; every proposed token is
+verified against it. Apple Speech and other speech models keep their existing
+pipelines.
+
+Drafts run at least eight seconds apart, with at most 15 requests per recording.
+Changing cleanup controls or the model, turning the switch off, or cancelling
+invalidates draft work. Stop cancels any unfinished draft and uses only one that
+was already complete. Long transcripts retain ordinary final cleanup and its
+sentence chunking. This experimental setting may reduce the wait after Stop but
+increases total work and may compete with speech recognition for resources.
+
 ### Ollama
 
 Use Ollama when you want transcript cleanup with a local model or your own hosted Ollama server.
