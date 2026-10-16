@@ -82,7 +82,9 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 [S1-mini by Superwhisper](https://huggingface.co/superwhisper/s1-mini) is a compact model trained specifically to normalize speech-to-text transcripts.
 
 - Downloads a pinned MLX 4-bit package for Apple Silicon or Q4_K_M GGUF for Intel; verifies model, tokenizer, configuration, and license assets by size and SHA-256 before installation
-- Uses native MLX on Apple Silicon and embedded llama.cpp on Intel. Existing GGUF downloads remain usable offline; **Optimize Model** installs the MLX package alongside them
+- Uses native MLX on Apple Silicon and embedded llama.cpp on Intel. Existing GGUF downloads remain usable offline until you choose **Optimize Model** in Transcript Cleanup
+- **Optimize Model** reuses an already-installed MLX package or downloads it, verifies the assets, and prepares the runtime before automatically removing the old GGUF copy. Failed or cancelled preparation keeps GGUF available. Active cleanup requests finish before their model files are retired
+- Uses request-local transcript drafts verified by greedy inference to reduce repeated generation on both runtimes; transcript and generation caches are isolated between requests
 - Provides the model's trained styling, structure, and context controls instead of an arbitrary prompt
 - Splits longer English transcripts into lossless chunks of approximately 1,000 model tokens; unsupported languages or a failed chunk preserve the entire original transcript
 - Can be removed from the Transcript Cleanup page, including its locally stored license file

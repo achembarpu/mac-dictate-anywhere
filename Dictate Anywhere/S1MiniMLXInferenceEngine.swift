@@ -80,16 +80,23 @@ actor S1MiniMLXInferenceEngine {
         try await loadIfNeeded(from: modelURL)
         guard !warmed, let context else { return }
         let trace = PerfTrace.begin("cleanup.prewarm")
-        defer { trace.end() }
+        defer { Stream().synchronize(); trace.end() }
         // Exercise both short and batched prefill kernels plus autoregressive
         // decoding. Synthetic output/cache never becomes a user response.
         for text in ["Hello.", String(repeating: "This is a preparation sentence. ", count: 90)] {
             try Task.checkCancellation()
             let prompt = S1MiniPromptBuilder.prompt(transcript: text, styling: .semiFormal,
                                                    structure: .prose, context: "general")
-            var iterator = try makeIterator(tokens: context.tokenizer.encode(text: prompt, addSpecialTokens: false),
-                                            maximum: 1, context: context)
-            _ = iterator.next()
+            var iterator = try makeGenerationIterator(
+                tokens: context.tokenizer.encode(text: prompt, addSpecialTokens: false),
+                transcriptTokens: context.tokenizer.encode(text: text, addSpecialTokens: false),
+                maximum: 8, context: context)
+            let stops = Set([context.tokenizer.eosTokenId,
+                             context.tokenizer.convertTokenToId("<|endoftext|>")].compactMap { $0 })
+            for _ in 0..<8 {
+                try Task.checkCancellation()
+                guard let token = try iterator.next(), !stops.contains(token) else { break }
+            }
             Stream().synchronize()
             try Task.checkCancellation()
         }

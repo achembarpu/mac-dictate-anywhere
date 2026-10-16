@@ -244,6 +244,11 @@ final class S1MiniModelManager {
     private var verifiedFingerprint: [FileFingerprint]?
     @ObservationIgnored private var installedValidation: InstalledValidation?
     @ObservationIgnored private var downloadID: UUID?
+    @ObservationIgnored private var changingInstallation = false
+    @ObservationIgnored private var activeModelUsers = 0
+    @ObservationIgnored private var installationWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var usersDrained: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private let runtimePreparer: @Sendable (URL) async throws -> Void
     @ObservationIgnored private let assetDownloader: @Sendable (S1MiniModelAsset, URL, @escaping @Sendable (Double) -> Void) async throws -> Void
     @ObservationIgnored private let integrityValidator: @Sendable (URL) throws -> Void
 
@@ -251,13 +256,15 @@ final class S1MiniModelManager {
         modelDirectory: URL = S1MiniModelManager.defaultModelDirectory,
         recommendedRuntime: S1MiniRuntime = .recommended,
         assetDownloader: @escaping @Sendable (S1MiniModelAsset, URL, @escaping @Sendable (Double) -> Void) async throws -> Void = S1MiniModelManager.downloadAsset,
+        runtimePreparer: @escaping @Sendable (URL) async throws -> Void = S1MiniModelManager.prepareRuntime,
         integrityValidator: @escaping @Sendable (URL) throws -> Void = S1MiniModelIntegrity.validate
     ) {
         self.modelDirectory = modelDirectory
         self.recommendedRuntime = recommendedRuntime
         self.integrityValidator = integrityValidator
         self.assetDownloader = assetDownloader
-        installedModelURL = Self.installedURL(in: modelDirectory, runtime: recommendedRuntime)
+        self.runtimePreparer = runtimePreparer
+        installedModelURL = Self.installedURLs(in: modelDirectory, runtime: recommendedRuntime).first
         isModelDownloaded = installedModelURL != nil
     }
 
@@ -270,14 +277,16 @@ final class S1MiniModelManager {
     var licenseURL: URL { (modelURL.pathExtension == "gguf" ? modelURL.deletingLastPathComponent() : modelURL).appendingPathComponent("LICENSE") }
     var downloadByteCount: Int64 { recommendedRuntime.downloadByteCount }
     var canOptimizeInstalledModel: Bool {
-        recommendedRuntime == .mlx && installedModelURL?.pathExtension == "gguf"
+        recommendedRuntime == .mlx && installedModelURL != nil
+            && (FileManager.default.fileExists(atPath: modelDirectory.appendingPathComponent(S1MiniModelSpec.filename).path)
+                || FileManager.default.fileExists(atPath: S1MiniRuntime.llama.modelURL(in: modelDirectory).path))
     }
     var installationIdentity: String { installedModelURL?.path ?? "" }
     var isBusy: Bool { isDownloading || isDeleting || isVerifying }
 
     func refreshInstallationState() async {
         guard !isDownloading, !isDeleting else { return }
-        installedModelURL = Self.installedURL(in: modelDirectory, runtime: recommendedRuntime)
+        installedModelURL = Self.installedURLs(in: modelDirectory, runtime: recommendedRuntime).first
         guard installedModelURL != nil else {
             isModelDownloaded = false
             verifiedFingerprint = nil
@@ -294,23 +303,68 @@ final class S1MiniModelManager {
     }
 
     func validatedModelURL() async throws -> URL {
+        try await validatedModelURL(excluding: [])
+    }
+
+    private func validatedModelURL(excluding rejected: Set<URL>) async throws -> URL {
         let trace = PerfTrace.begin("cleanup.validate")
         defer { trace.end() }
         guard let url = installedModelURL else { throw S1MiniServiceError.modelNotDownloaded }
-        let fingerprint: [FileFingerprint]
         do {
-            fingerprint = try Self.fingerprint(at: url)
+            let fingerprint = try Self.fingerprint(at: url)
+            if fingerprint != verifiedFingerprint {
+                try await validateInstalledModel(url: url, fingerprint: fingerprint)
+            }
+            try Task.checkCancellation()
+            isModelDownloaded = true
+            return url
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             verifiedFingerprint = nil
             isModelDownloaded = false
-            throw error
+            // A damaged preferred package must not hide an existing offline GGUF.
+            let rejected = rejected.union([url])
+            guard installedModelURL == url,
+                  let fallback = Self.installedURLs(in: modelDirectory, runtime: recommendedRuntime)
+                    .first(where: { !rejected.contains($0) }) else { throw error }
+            try Task.checkCancellation()
+            installedModelURL = fallback
+            return try await validatedModelURL(excluding: rejected)
         }
-        if fingerprint != verifiedFingerprint {
-            try await validateInstalledModel(url: url, fingerprint: fingerprint)
+    }
+
+    /// Hold the selected installation for the entire request, including every
+    /// long-input chunk. Upgrade/deletion waits before retiring its files.
+    func withValidatedModel<Result>(_ use: (URL) async throws -> Result) async throws -> Result {
+        while changingInstallation {
+            await withCheckedContinuation { installationWaiters.append($0) }
         }
         try Task.checkCancellation()
-        isModelDownloaded = true
-        return url
+        activeModelUsers += 1
+        defer {
+            activeModelUsers -= 1
+            if activeModelUsers == 0 {
+                usersDrained?.resume()
+                usersDrained = nil
+            }
+        }
+        return try await use(validatedModelURL())
+    }
+
+    private func changeInstallation<Result>(_ change: () async throws -> Result) async throws -> Result {
+        changingInstallation = true
+        defer {
+            changingInstallation = false
+            let waiting = installationWaiters
+            installationWaiters.removeAll()
+            for waiter in waiting { waiter.resume() }
+        }
+        if activeModelUsers > 0 {
+            await withCheckedContinuation { usersDrained = $0 }
+        }
+        try Task.checkCancellation()
+        return try await change()
     }
 
     func downloadModel() async throws {
@@ -321,10 +375,24 @@ final class S1MiniModelManager {
         let operationID = UUID()
         downloadID = operationID
         defer { isDownloading = false; downloadID = nil }
-        if !canOptimizeInstalledModel, (try? await validatedModelURL()) != nil {
-            lastError = nil
-            return
+        if let url = try? await validatedModelURL() {
+            if !canOptimizeInstalledModel {
+                lastError = nil
+                return
+            }
+            if url.pathExtension != "gguf" {
+                do {
+                    try await changeInstallation { try await finishOptimization(at: url, newlyInstalled: false) }
+                    downloadProgress = 1
+                    lastError = nil
+                    return
+                } catch {
+                    lastError = error.localizedDescription
+                    throw error
+                }
+            }
         }
+        try Task.checkCancellation()
         downloadProgress = 0
         lastError = nil
         let fileManager = FileManager.default
@@ -355,22 +423,27 @@ final class S1MiniModelManager {
                 transferred += asset.byteCount
             }
             downloadProgress = 0.99
-            runtimeRevision += 1
-            await S1MiniPostProcessingService.unload()
-            try Task.checkCancellation()
-            let destination = recommendedRuntime.directory(in: modelDirectory)
-            // Keep an existing valid installation until every replacement asset
-            // has passed validation. Rename one complete directory at commit.
-            if fileManager.fileExists(atPath: destination.path) {
-                _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
-            } else {
-                try fileManager.moveItem(at: staging, to: destination)
+            try await changeInstallation {
+                runtimeRevision += 1
+                await S1MiniPostProcessingService.unload()
+                try Task.checkCancellation()
+                let destination = recommendedRuntime.directory(in: modelDirectory)
+                // Commit a complete, verified package. The old GGUF stays until
+                // actual MLX preparation succeeds, including drafted decoding.
+                if fileManager.fileExists(atPath: destination.path) {
+                    _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
+                } else {
+                    try fileManager.moveItem(at: staging, to: destination)
+                }
+                let url = recommendedRuntime.modelURL(in: modelDirectory)
+                installedModelURL = url
+                verifiedFingerprint = try Self.fingerprint(at: url)
+                isModelDownloaded = true
+                if canOptimizeInstalledModel {
+                    try await finishOptimization(at: url, newlyInstalled: true)
+                }
+                downloadProgress = 1
             }
-            let url = recommendedRuntime.modelURL(in: modelDirectory)
-            installedModelURL = url
-            verifiedFingerprint = try Self.fingerprint(at: url)
-            isModelDownloaded = true
-            downloadProgress = 1
         } catch {
             lastError = error.localizedDescription
             throw error
@@ -382,22 +455,55 @@ final class S1MiniModelManager {
         isDeleting = true
         lastError = nil
         defer { isDeleting = false }
-        runtimeRevision += 1
-        await S1MiniPostProcessingService.unload()
+        try await changeInstallation {
+            runtimeRevision += 1
+            await S1MiniPostProcessingService.unload()
+            try Task.checkCancellation()
+            let fileManager = FileManager.default
+            for runtime in [S1MiniRuntime.llama, .mlx] {
+                let directory = runtime.directory(in: modelDirectory)
+                if fileManager.fileExists(atPath: directory.path) { try fileManager.removeItem(at: directory) }
+            }
+            for filename in [S1MiniModelSpec.filename, "LICENSE", "NOTICE"] {
+                let url = modelDirectory.appendingPathComponent(filename)
+                if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
+            }
+            verifiedFingerprint = nil
+            installedModelURL = nil
+            isModelDownloaded = false
+            downloadProgress = 0
+        }
+    }
+
+    private func finishOptimization(at url: URL, newlyInstalled: Bool) async throws {
+        do {
+            try await runtimePreparer(url)
+            try Task.checkCancellation()
+        } catch {
+            await S1MiniPostProcessingService.unload()
+            if newlyInstalled { try? FileManager.default.removeItem(at: url) }
+            installedModelURL = Self.installedURLs(in: modelDirectory, runtime: .llama).first
+            verifiedFingerprint = nil
+            isModelDownloaded = installedModelURL != nil
+            throw error
+        }
+        // No request can still hold these files: changeInstallation joins
+        // existing users and keeps new requests waiting until selection commits.
+        await S1MiniInferenceEngine.shared.unload()
+        try Task.checkCancellation()
         let fileManager = FileManager.default
-        // Only managed S1 files; preserve unrelated data in the model root.
-        for runtime in [S1MiniRuntime.llama, .mlx] {
-            let directory = runtime.directory(in: modelDirectory)
-            if fileManager.fileExists(atPath: directory.path) { try fileManager.removeItem(at: directory) }
-        }
+        let managed = S1MiniRuntime.llama.directory(in: modelDirectory)
+        if fileManager.fileExists(atPath: managed.path) { try fileManager.removeItem(at: managed) }
         for filename in [S1MiniModelSpec.filename, "LICENSE", "NOTICE"] {
-            let url = modelDirectory.appendingPathComponent(filename)
-            if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
+            let legacy = modelDirectory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: legacy.path) { try fileManager.removeItem(at: legacy) }
         }
-        verifiedFingerprint = nil
-        installedModelURL = nil
-        isModelDownloaded = false
-        downloadProgress = 0
+    }
+
+    nonisolated private static func prepareRuntime(_ url: URL) async throws {
+        let ready = await S1MiniPostProcessingService.prewarm(modelURL: url)
+        try Task.checkCancellation()
+        guard ready else { throw S1MiniServiceError.modelLoadFailed }
     }
 
     private func validateInstalledModel(url: URL, fingerprint: [FileFingerprint]) async throws {
@@ -430,16 +536,21 @@ final class S1MiniModelManager {
         }
     }
 
-    nonisolated private static func installedURL(in root: URL, runtime: S1MiniRuntime) -> URL? {
-        if complete(runtime.directory(in: root), assets: runtime.assets) { return runtime.modelURL(in: root) }
-        if runtime == .mlx, complete(S1MiniRuntime.llama.directory(in: root), assets: S1MiniRuntime.llama.assets) {
-            return S1MiniRuntime.llama.modelURL(in: root)
+    nonisolated private static func installedURLs(in root: URL, runtime: S1MiniRuntime) -> [URL] {
+        var candidates: [URL] = []
+        if complete(runtime.directory(in: root), assets: runtime.assets) {
+            candidates.append(runtime.modelURL(in: root))
         }
-        // Existing GGUF downloads remain usable offline during the optimized
-        // model migration. The explicit Optimize action installs MLX alongside.
+        if runtime == .mlx, complete(S1MiniRuntime.llama.directory(in: root), assets: S1MiniRuntime.llama.assets) {
+            candidates.append(S1MiniRuntime.llama.modelURL(in: root))
+        }
+        // Existing GGUF downloads remain usable offline until an explicit
+        // optimization has verified and prepared their replacement.
         let legacy = root.appendingPathComponent(S1MiniModelSpec.filename)
-        if size(legacy) == S1MiniModelSpec.byteCount, size(root.appendingPathComponent("LICENSE")) > 0 { return legacy }
-        return nil
+        if size(legacy) == S1MiniModelSpec.byteCount, size(root.appendingPathComponent("LICENSE")) > 0 {
+            candidates.append(legacy)
+        }
+        return candidates
     }
 
     nonisolated private static func complete(_ directory: URL, assets: [S1MiniModelAsset]) -> Bool {

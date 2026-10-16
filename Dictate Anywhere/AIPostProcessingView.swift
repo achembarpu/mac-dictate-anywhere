@@ -833,8 +833,9 @@ struct AIPostProcessingView: View {
                 DSInfoRow(label: "Use the optimized model for this Mac.", labelColor: DS.Colors.textSecondary) {
                     Button(manager.isDownloading ? "Optimizing…" : "Optimize Model") { downloadS1MiniModel() }
                         .buttonStyle(.dsPrimary)
-                        .disabled(manager.isBusy || appState.isPreparingCleanupEngine)
+                        .disabled(manager.isBusy || appState.isPreparingCleanupEngine || appState.status != .idle)
                 }
+                DSCardCaption(text: "Optimization verifies and prepares MLX before automatically removing the previous GGUF download. If preparation fails, the GGUF copy is kept.")
             }
             if manager.isModelDownloaded {
                 DSDivider()
@@ -938,8 +939,9 @@ struct AIPostProcessingView: View {
         s1MiniActionError = nil
         Task {
             do {
+                let optimizing = appState.s1MiniModelManager.canOptimizeInstalledModel
                 try await appState.s1MiniModelManager.downloadModel()
-                await appState.prepareCleanupEngineIfNeeded()
+                await appState.prepareCleanupEngineIfNeeded(force: optimizing)
             } catch {
                 s1MiniActionError = error.localizedDescription
             }

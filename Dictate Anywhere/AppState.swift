@@ -841,9 +841,10 @@ final class AppState {
             if key.mode == .fluidAudioVocabulary {
                 return await self.parakeetEngine.prepareVocabularyIfNeeded()
             }
-            guard let url = try? await self.s1MiniModelManager.validatedModelURL(),
-                  !self.isShuttingDown, !Task.isCancelled else { return false }
-            return await S1MiniPostProcessingService.prewarm(modelURL: url)
+            return (try? await self.s1MiniModelManager.withValidatedModel { url in
+                guard !self.isShuttingDown, !Task.isCancelled else { return false }
+                return await S1MiniPostProcessingService.prewarm(modelURL: url)
+            }) ?? false
         }
         cleanupPreparation = CleanupPreparation(id: id, key: key, task: task)
         let ready = await task.value
@@ -1929,17 +1930,20 @@ final class AppState {
                 var runtimeKey = cleanupPreparationKey
                 var runtimeURL = s1MiniModelManager.modelURL
                 do {
-                    runtimeURL = try await s1MiniModelManager.validatedModelURL()
-                    runtimeKey = cleanupPreparationKey
-                    let context = postProcessingContext(for: .s1Mini)
-                    processedText = try await S1MiniPostProcessingService.process(
-                        text: finalText,
-                        modelURL: runtimeURL,
-                        styling: settings.s1MiniStyling(for: context?.category),
-                        structure: settings.s1MiniStructure,
-                        contextSetting: settings.s1MiniContextSetting,
-                        context: context
-                    )
+                    processedText = try await s1MiniModelManager.withValidatedModel { url in
+                        runtimeURL = url
+                        runtimeKey = cleanupPreparationKey
+                        let context = postProcessingContext(for: .s1Mini)
+                        let output = try await S1MiniPostProcessingService.process(
+                            text: finalText,
+                            modelURL: runtimeURL,
+                            styling: settings.s1MiniStyling(for: context?.category),
+                            structure: settings.s1MiniStructure,
+                            contextSetting: settings.s1MiniContextSetting,
+                            context: context
+                        )
+                        return output
+                    }
                 } catch {
                     logger.error("postProcessing: S1-mini failed: \(error.localizedDescription, privacy: .public)")
                 }
