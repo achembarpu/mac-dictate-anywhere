@@ -1388,6 +1388,13 @@ final class Settings {
         }
     }
 
+    /// Shared by the settings row and runtime; an ineligible selection never
+    /// activates a saved opt-in preference.
+    var supportsS1MiniEOUCleanupDrafts: Bool {
+        engineChoice == .parakeet && parakeetModelChoice == .parakeetEou320
+            && selectedLanguage == .english && transcriptPostProcessingMode == .s1Mini
+    }
+
     // Includes disable/re-enable and control changes between recording polls.
     @ObservationIgnored private(set) var s1MiniDraftRevision = 0
 

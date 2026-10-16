@@ -857,15 +857,17 @@ struct AIPostProcessingView: View {
 
         if settings.transcriptPostProcessingMode.supportedFeatures.contains(.s1MiniTrainedControls) {
             DSSection(overline: "Cleanup Controls") {
-                DSStackedRow(
-                    label: "Finish dictation faster (Experimental)",
-                    caption: "Uses more computing power during dictation to reduce the wait after you stop. Applies only to the Parakeet EOU model with English S1-mini cleanup.",
-                    isOn: $settings.s1MiniEOUFasterFinishEnabled
-                )
-                .onChange(of: settings.s1MiniEOUFasterFinishEnabled) {
-                    appState.invalidateEOUCleanupDraft()
+                if settings.supportsS1MiniEOUCleanupDrafts {
+                    DSStackedRow(
+                        label: "Finish dictation faster (Experimental)",
+                        caption: "Uses more computing power during dictation to reduce the wait after you stop.",
+                        isOn: $settings.s1MiniEOUFasterFinishEnabled
+                    )
+                    .onChange(of: settings.s1MiniEOUFasterFinishEnabled) {
+                        appState.invalidateEOUCleanupDraft()
+                    }
+                    DSDivider()
                 }
-                DSDivider()
                 if !settings.dictationContextAwarenessEnabled {
                     DSDetailRow(
                         label: "Styling",

@@ -1628,7 +1628,7 @@ final class AppState {
         activeRecordingStartupID = recordingStartupID
         sessionEngine = engine
         sessionSupportsEOUCleanupDrafts = settings.engineChoice == .parakeet
-            && settings.parakeetModelChoice.supportsEndOfUtterance
+            && settings.parakeetModelChoice == .parakeetEou320
             && settings.selectedLanguage == .english
             && (engine === parakeetEngine || engineOverride != nil)
         sessionHotkeyMode = mode
@@ -2568,11 +2568,8 @@ final class AppState {
     /// The pinned recording backend must also be eligible. Changing the model
     /// picker cannot turn an Apple/non-EOU recording into an EOU session.
     private var eouCleanupDraftConfiguration: EOUCleanupDraftSession.Configuration? {
-        guard sessionSupportsEOUCleanupDrafts, settings.s1MiniEOUFasterFinishEnabled,
-              settings.engineChoice == .parakeet,
-              settings.parakeetModelChoice.supportsEndOfUtterance,
-              settings.selectedLanguage == .english,
-              settings.transcriptPostProcessingMode == .s1Mini,
+        guard sessionSupportsEOUCleanupDrafts, settings.supportsS1MiniEOUCleanupDrafts,
+              settings.s1MiniEOUFasterFinishEnabled,
               s1MiniModelManager.isModelDownloaded,
               !s1MiniModelManager.isDownloading, !s1MiniModelManager.isDeleting else { return nil }
         let context = postProcessingContext(includeCapturedText: false)

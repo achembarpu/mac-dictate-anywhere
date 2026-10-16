@@ -47,6 +47,61 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
         await stable.join()
     }
 
+    // A saved opt-in must stop authorizing background work when the selected
+    // engine/model/language/cleanup changes, without losing the preference.
+    func testSelectionChangesSuspendSavedOptInAndRejectTheEarlierDraft() async {
+        let settings = Settings.shared
+        let saved = (settings.engineChoice, settings.parakeetModelChoice, settings.selectedLanguage,
+                     settings.transcriptPostProcessingMode, settings.s1MiniEOUFasterFinishEnabled)
+        defer {
+            settings.engineChoice = saved.0
+            settings.parakeetModelChoice = saved.1
+            settings.selectedLanguage = saved.2
+            settings.transcriptPostProcessingMode = saved.3
+            settings.s1MiniEOUFasterFinishEnabled = saved.4
+        }
+        settings.engineChoice = .parakeet
+        settings.parakeetModelChoice = .parakeetEou320
+        settings.selectedLanguage = .english
+        settings.transcriptPostProcessingMode = .s1Mini
+        settings.s1MiniEOUFasterFinishEnabled = true
+        var requests: [String] = []
+        let session = EOUCleanupDraftSession(now: 0) { source, _ in
+            requests.append(source)
+            return source
+        }
+        func currentConfiguration() -> EOUCleanupDraftSession.Configuration? {
+            settings.supportsS1MiniEOUCleanupDrafts && settings.s1MiniEOUFasterFinishEnabled
+                ? configuration(revision: settings.s1MiniDraftRevision) : nil
+        }
+        let original = currentConfiguration()
+        session.update(source: "first preview", configuration: original, now: 0)
+        session.update(source: "first preview", configuration: original, now: 8)
+        await session.join()
+        settings.engineChoice = .appleSpeech
+        session.update(source: "Apple preview", configuration: currentConfiguration(), now: 16)
+        settings.engineChoice = .parakeet
+        settings.parakeetModelChoice = .nemotron560
+        session.update(source: "Nemotron preview", configuration: currentConfiguration(), now: 24)
+        settings.parakeetModelChoice = .parakeetEou320
+        settings.selectedLanguage = .german
+        session.update(source: "other language", configuration: currentConfiguration(), now: 32)
+        settings.selectedLanguage = .english
+        settings.transcriptPostProcessingMode = .none
+        session.update(source: "no S1-mini", configuration: currentConfiguration(), now: 40)
+        await session.join()
+        XCTAssertEqual(requests, ["first preview"])
+        XCTAssertTrue(settings.s1MiniEOUFasterFinishEnabled, "Switching a selection must preserve the opt-in preference")
+        settings.transcriptPostProcessingMode = .s1Mini
+        session.update(source: "eligible again", configuration: currentConfiguration(), now: 48)
+        session.update(source: "eligible again", configuration: currentConfiguration(), now: 49)
+        await session.join()
+        let candidate = session.freeze()
+        XCTAssertEqual(requests, ["first preview", "eligible again"])
+        XCTAssertEqual(candidate?.output(matching: currentConfiguration()), "eligible again")
+        XCTAssertNil(candidate?.output(matching: original))
+    }
+
     // A native decode may ignore cancellation until its current call returns.
     // Cancellation must retain ownership, reject its late result, and join it.
     func testCancellationJoinsUncooperativeWorkAndDoesNotPublishIt() async {

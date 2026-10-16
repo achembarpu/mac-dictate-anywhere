@@ -89,7 +89,9 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 - Can be removed from the Transcript Cleanup page, including its locally stored license file
 
 The optional **Finish dictation faster (Experimental)** switch is off by default.
-With English S1-mini cleanup and the Parakeet EOU model, it uses extra computing
+It appears only with English S1-mini cleanup and the Parakeet EOU model selected.
+The preference stays saved when switching away, but does no background work there.
+For the eligible combination it uses extra computing
 power during recording to prepare occasional cleanup drafts. The complete final
 speech transcript still controls the final cleanup; every proposed token is
 verified against it. Apple Speech and other speech models keep their existing
