@@ -32,7 +32,7 @@ final class S1MiniPostProcessingTests: XCTestCase {
             (id: "invoice", input: "Send invoice 43 on Thursday."),
             (id: "question", input: "When does the office open?"),
             (id: "name", input: "Please send the report to Nadia tomorrow."),
-            (id: "repeated", input: "Send invoice 43 to Nadia. Send invoice 430 to Mara. Do not cancel invoice 43.")
+            (id: "repeated", input: "send invoice 43 to Nadia. send invoice 430 to Mara. do not cancel invoice 43.")
         ]
         var baseline: [String: String] = [:]
         await engine.configureInputDraftingForTesting(false)

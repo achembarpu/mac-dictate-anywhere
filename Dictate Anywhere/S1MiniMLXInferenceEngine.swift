@@ -53,13 +53,13 @@ actor S1MiniMLXInferenceEngine {
     private var operationRunning = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    func generate(prompt: String, transcript: String, modelURL: URL, knownTranscriptTokenCount: Int? = nil) async throws -> String {
+    func generate(prompt: String, transcript: String, styling: S1MiniStyling, modelURL: URL, knownTranscriptTokenCount: Int? = nil) async throws -> String {
         await acquireOperation()
         defer { releaseOperation() }
         try Task.checkCancellation()
         try await loadIfNeeded(from: modelURL)
         guard let context else { throw S1MiniServiceError.modelLoadFailed }
-        return try generate(prompt: prompt, transcript: transcript, context: context, knownTranscriptTokenCount: knownTranscriptTokenCount)
+        return try generate(prompt: prompt, transcript: transcript, styling: styling, context: context, knownTranscriptTokenCount: knownTranscriptTokenCount)
     }
 
     func transcriptChunks(_ text: String, modelURL: URL) async throws -> [S1MiniTranscriptChunk] {
@@ -155,7 +155,7 @@ actor S1MiniMLXInferenceEngine {
         GenerateParameters(maxTokens: maximum, temperature: 0, prefillStepSize: prefillStep)
     }
 
-    private func generate(prompt: String, transcript: String, context: ModelContext, knownTranscriptTokenCount: Int?) throws -> String {
+    private func generate(prompt: String, transcript: String, styling: S1MiniStyling, context: ModelContext, knownTranscriptTokenCount: Int?) throws -> String {
         let trace = PerfTrace.begin("cleanup.generate")
         defer { trace.end() }
         let tokenizerTrace = PerfTrace.begin("cleanup.tokenize")
@@ -164,6 +164,13 @@ actor S1MiniMLXInferenceEngine {
         guard count <= S1MiniModelSpec.maximumTranscriptTokens else {
             tokenizerTrace.end()
             throw S1MiniServiceError.transcriptTooLong(actual: count, maximum: S1MiniModelSpec.maximumTranscriptTokens)
+        }
+        var proposalTokens = transcriptTokens
+        if useInputDrafting {
+            let proposalText = S1MiniInputDraft.proposalSource(transcript, styling: styling)
+            if proposalText != transcript {
+                proposalTokens = context.tokenizer.encode(text: proposalText, addSpecialTokens: false)
+            }
         }
         let tokens = context.tokenizer.encode(text: prompt, addSpecialTokens: false)
         tokenizerTrace.end()
@@ -188,7 +195,7 @@ actor S1MiniMLXInferenceEngine {
         var iterator: S1MiniMLXTokenIterator
         do {
             defer { promptTrace.end() }
-            iterator = try makeGenerationIterator(tokens: tokens, transcriptTokens: transcriptTokens,
+            iterator = try makeGenerationIterator(tokens: tokens, transcriptTokens: proposalTokens,
                                                  maximum: maximum + 1, context: context)
         }
         try Task.checkCancellation()

@@ -240,7 +240,7 @@ actor S1MiniInferenceEngine {
         _ = try generate(
             prompt: S1MiniPromptBuilder.prompt(transcript: text, styling: .semiFormal,
                                                structure: .prose, context: "general"),
-            transcript: text, modelURL: url
+            transcript: text, styling: .semiFormal, modelURL: url
         )
     }
 
@@ -257,6 +257,7 @@ actor S1MiniInferenceEngine {
     func generate(
         prompt: String,
         transcript: String,
+        styling: S1MiniStyling,
         modelURL: URL,
         knownTranscriptTokenCount: Int? = nil
     ) throws -> String {
@@ -271,6 +272,7 @@ actor S1MiniInferenceEngine {
         let (transcriptTokenCount, initialPromptTokens, transcriptTokens) = try tokenizeInputs(
             transcript: transcript,
             prompt: prompt,
+            styling: styling,
             vocabulary: vocabulary,
             knownTranscriptTokenCount: knownTranscriptTokenCount
         )
@@ -389,6 +391,7 @@ actor S1MiniInferenceEngine {
     private func tokenizeInputs(
         transcript: String,
         prompt: String,
+        styling: S1MiniStyling,
         vocabulary: OpaquePointer,
         knownTranscriptTokenCount: Int?
     ) throws -> (transcriptTokenCount: Int, promptTokens: [llama_token], transcriptTokens: [llama_token]) {
@@ -415,7 +418,15 @@ actor S1MiniInferenceEngine {
             addSpecial: false,
             parseSpecial: true
         )
-        return (transcriptTokenCount, promptTokens, transcriptTokens)
+        var draftTokens = transcriptTokens
+        if useInputDrafting {
+            let proposalText = S1MiniInputDraft.proposalSource(transcript, styling: styling)
+            if proposalText != transcript {
+                draftTokens = try tokenize(proposalText, vocabulary: vocabulary,
+                    addSpecial: false, parseSpecial: false)
+            }
+        }
+        return (transcriptTokenCount, promptTokens, draftTokens)
     }
 
     /// Runs the autoregressive sampling loop. Traced separately so future
@@ -671,11 +682,11 @@ enum S1MiniPostProcessingService {
         )
         let output: String
         if modelURL.pathExtension == "gguf" {
-            output = try await S1MiniInferenceEngine.shared.generate(prompt: prompt, transcript: text, modelURL: modelURL,
+            output = try await S1MiniInferenceEngine.shared.generate(prompt: prompt, transcript: text, styling: styling, modelURL: modelURL,
                                                                     knownTranscriptTokenCount: knownTranscriptTokenCount)
         } else {
             #if arch(arm64)
-            output = try await S1MiniMLXInferenceEngine.shared.generate(prompt: prompt, transcript: text, modelURL: modelURL,
+            output = try await S1MiniMLXInferenceEngine.shared.generate(prompt: prompt, transcript: text, styling: styling, modelURL: modelURL,
                                                                       knownTranscriptTokenCount: knownTranscriptTokenCount)
             #else
             throw S1MiniServiceError.modelLoadFailed

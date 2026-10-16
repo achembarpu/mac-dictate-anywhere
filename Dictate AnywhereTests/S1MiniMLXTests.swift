@@ -67,7 +67,7 @@ final class S1MiniMLXTests: XCTestCase {
         for style in S1MiniStyling.allCases {
             for structure in S1MiniStructure.allCases {
                 for context: S1MiniContextSetting in [.general, .email] {
-                    let text = "please send invoice 4182 to Mara tomorrow and do not include the draft"
+                    let text = "please send invoice 4182 to Mara tomorrow. do not include the draft."
                     await engine.configureForTesting(prefix: true)
                     let cached = try await S1MiniPostProcessingService.process(text: text, modelURL: url,
                         styling: style, structure: structure, contextSetting: context, context: nil)
