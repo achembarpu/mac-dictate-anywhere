@@ -15,7 +15,7 @@ final class PrivacyRegressionTests: XCTestCase {
     }
 
     func testFocusChangeDuringScriptPreventsKeyboardFallback() async {
-        for failure in [PasteScriptOutcome.failed, .automationDenied] {
+        for failure in [PasteScriptOutcome.preDispatchFailed, .automationDenied] {
             var focused = true
             var fallback = false
             let result = await TextInserter.deliverToTarget(
@@ -38,10 +38,57 @@ final class PrivacyRegressionTests: XCTestCase {
         XCTAssertFalse(fallback)
     }
 
+    func testNativePasteUsesScriptOnlyAfterConfirmedPreDispatchFailure() async {
+        for outcome in [PasteScriptOutcome.success, .possiblyDispatched, .targetUnavailable, .preDispatchFailed] {
+            for hasPendingListEdit in [false, true] {
+                var scriptCount = 0
+                var keyboardCount = 0
+                let result = await TextInserter.deliverToTarget(
+                    isTargetReady: { true },
+                    pasteScript: {
+                        await TextInserter.pasteWithScriptFallback(
+                            accessibilityOutcome: outcome,
+                            hasPendingListEdit: hasPendingListEdit
+                        ) {
+                            scriptCount += 1
+                            return .success
+                        }
+                    },
+                    pasteEvent: { keyboardCount += 1; return true }
+                )
+                let shouldUseScript = outcome == .preDispatchFailed && !hasPendingListEdit
+                XCTAssertEqual(scriptCount, shouldUseScript ? 1 : 0, "Native outcome: \(outcome)")
+                XCTAssertEqual(keyboardCount, 0, "Native outcome: \(outcome)")
+                let expected: PasteDeliveryOutcome = outcome == .possiblyDispatched ? .possiblyDispatched
+                    : (outcome == .success || shouldUseScript ? .success : .copiedOnly)
+                XCTAssertEqual(result, expected)
+            }
+        }
+    }
+
+    func testListPasteProofRequiresSameFocusedElementAndExactRange() {
+        let expected = CFRange(location: 24, length: 18)
+        XCTAssertTrue(pasteTargetProofMatches(
+            expected: expected,
+            actual: expected,
+            sameFocusedElement: true
+        ))
+        XCTAssertFalse(pasteTargetProofMatches(
+            expected: expected,
+            actual: CFRange(location: 24, length: 5),
+            sameFocusedElement: true
+        ))
+        XCTAssertFalse(pasteTargetProofMatches(
+            expected: expected,
+            actual: expected,
+            sameFocusedElement: false
+        ))
+    }
+
     func testSameDestinationSupportsFallbackAndSuccessfulScriptDoesNotDoublePaste() async {
         var pastes = 0
         let fallbackResult = await TextInserter.deliverToTarget(
-            isTargetReady: { true }, pasteScript: { .failed },
+            isTargetReady: { true }, pasteScript: { .preDispatchFailed },
             pasteEvent: { pastes += 1; return true }
         )
         XCTAssertEqual(fallbackResult, .success)
