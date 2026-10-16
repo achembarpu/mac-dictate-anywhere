@@ -89,20 +89,31 @@ FluidAudio and Apple Speech transcribe locally. Their raw audio stays on your Ma
 - Can be removed from the Transcript Cleanup page, including its locally stored license file
 
 The optional **Finish dictation faster (Experimental)** switch is off by default.
-It appears only with English S1-mini cleanup and the Parakeet EOU model selected.
-The preference stays saved when switching away, but does no background work there.
-For the eligible combination it uses extra computing
-power during recording to prepare occasional cleanup drafts. The complete final
-speech transcript still controls the final cleanup; every proposed token is
-verified against it. Apple Speech and other speech models keep their existing
-pipelines.
+The Speech Model page and eligible S1-mini Cleanup Controls share one saved preference.
+It appears only for supported English combinations:
 
-Drafts run at least eight seconds apart, with at most 15 requests per recording.
-Changing cleanup controls or the model, turning the switch off, or cancelling
-invalidates draft work. Stop cancels any unfinished draft and uses only one that
-was already complete. Long transcripts retain ordinary final cleanup and its
-sentence chunking. This experimental setting may reduce the wait after Stop but
-increases total work and may compete with speech recognition for resources.
+- **S1-mini cleanup drafts:** Parakeet EOU, compact 110M, Nemotron English Balanced
+  (1120 ms), and Nemotron multilingual. Non-EOU models require live text previews.
+  Drafts run at least eight seconds apart, with at most 15 requests per recording.
+  This reduces the wait after Stop by doing additional cleanup work during recording.
+- **Exact speech-window reuse:** Parakeet v2, and compact 110M with nonempty FluidAudio
+  vocabulary. Live previews must be enabled. Recordings up to two minutes can reuse
+  byte-identical completed batch requests; longer recordings discard the cache and
+  return to rolling previews. Final window selection, merging, gap repair, and the
+  fresh vocabulary pass over original audio still run.
+
+Switching to an unsupported combination suspends the saved preference. No extra
+speech recognition requests are added to produce cleanup drafts. The complete final
+speech transcript controls final cleanup; every proposed token is verified against it.
+Changing controls or the model, disabling the switch, or cancelling invalidates cleanup
+work. Stop uses only drafts completed before Stop and joins cancelled work alongside
+final recognition. Long transcripts retain ordinary final cleanup and sentence chunking.
+Exact-window reuse is owned by one recording and is discarded on disable, completion,
+cancellation, reset, or model changes. Apple Speech retains its existing pipeline.
+
+This experiment may increase CPU and memory use and compete with recognition during
+recording. Results vary by transcript and model; it is not a general compute-saving
+mode. The experimental FluidAudio dependency is pinned to a companion fork revision.
 
 ### Ollama
 

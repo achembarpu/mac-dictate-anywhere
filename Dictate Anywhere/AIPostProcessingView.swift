@@ -857,14 +857,14 @@ struct AIPostProcessingView: View {
 
         if settings.transcriptPostProcessingMode.supportedFeatures.contains(.s1MiniTrainedControls) {
             DSSection(overline: "Cleanup Controls") {
-                if settings.supportsS1MiniEOUCleanupDrafts {
+                if settings.supportsS1MiniCleanupDrafts {
                     DSStackedRow(
                         label: "Finish dictation faster (Experimental)",
-                        caption: "Uses more computing power during dictation to reduce the wait after you stop.",
-                        isOn: $settings.s1MiniEOUFasterFinishEnabled
+                        caption: settings.fasterFinishCaption,
+                        isOn: $settings.fasterFinishEnabled
                     )
-                    .onChange(of: settings.s1MiniEOUFasterFinishEnabled) {
-                        appState.invalidateEOUCleanupDraft()
+                    .onChange(of: settings.fasterFinishEnabled) {
+                        appState.invalidateCleanupDraft()
                     }
                     DSDivider()
                 }

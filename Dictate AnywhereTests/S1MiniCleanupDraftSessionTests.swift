@@ -2,8 +2,8 @@ import XCTest
 @testable import Dictate_Anywhere
 
 @MainActor
-final class EOUCleanupDraftSessionTests: XCTestCase {
-    private func configuration(revision: Int = 0, modelRevision: Int = 0) -> EOUCleanupDraftSession.Configuration {
+final class S1MiniCleanupDraftSessionTests: XCTestCase {
+    private func configuration(revision: Int = 0, modelRevision: Int = 0) -> S1MiniCleanupDraftSession.Configuration {
         .init(modelURL: URL(fileURLWithPath: "/unused/model.gguf"), modelRevision: modelRevision,
               settingsRevision: revision, styling: .semiFormal, structure: .prose, context: "general")
     }
@@ -13,7 +13,7 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
     func testSparseScheduleCoalescesRevisionsAndBoundsContinuousSpeech() async {
         var requests: [String] = []
         let config = configuration()
-        let session = EOUCleanupDraftSession(now: 0) { source, _ in
+        let session = S1MiniCleanupDraftSession(now: 0) { source, _ in
             requests.append(source)
             return source
         }
@@ -31,7 +31,7 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
         await session.join()
 
         var stableSources: [String] = []
-        let stable = EOUCleanupDraftSession(now: 0) { source, _ in
+        let stable = S1MiniCleanupDraftSession(now: 0) { source, _ in
             stableSources.append(source)
             return source
         }
@@ -52,26 +52,26 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
     func testSelectionChangesSuspendSavedOptInAndRejectTheEarlierDraft() async {
         let settings = Settings.shared
         let saved = (settings.engineChoice, settings.parakeetModelChoice, settings.selectedLanguage,
-                     settings.transcriptPostProcessingMode, settings.s1MiniEOUFasterFinishEnabled)
+                     settings.transcriptPostProcessingMode, settings.fasterFinishEnabled)
         defer {
             settings.engineChoice = saved.0
             settings.parakeetModelChoice = saved.1
             settings.selectedLanguage = saved.2
             settings.transcriptPostProcessingMode = saved.3
-            settings.s1MiniEOUFasterFinishEnabled = saved.4
+            settings.fasterFinishEnabled = saved.4
         }
         settings.engineChoice = .parakeet
         settings.parakeetModelChoice = .parakeetEou320
         settings.selectedLanguage = .english
         settings.transcriptPostProcessingMode = .s1Mini
-        settings.s1MiniEOUFasterFinishEnabled = true
+        settings.fasterFinishEnabled = true
         var requests: [String] = []
-        let session = EOUCleanupDraftSession(now: 0) { source, _ in
+        let session = S1MiniCleanupDraftSession(now: 0) { source, _ in
             requests.append(source)
             return source
         }
-        func currentConfiguration() -> EOUCleanupDraftSession.Configuration? {
-            settings.supportsS1MiniEOUCleanupDrafts && settings.s1MiniEOUFasterFinishEnabled
+        func currentConfiguration() -> S1MiniCleanupDraftSession.Configuration? {
+            settings.supportsS1MiniCleanupDrafts && settings.fasterFinishEnabled
                 ? configuration(revision: settings.s1MiniDraftRevision) : nil
         }
         let original = currentConfiguration()
@@ -91,7 +91,7 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
         session.update(source: "no S1-mini", configuration: currentConfiguration(), now: 40)
         await session.join()
         XCTAssertEqual(requests, ["first preview"])
-        XCTAssertTrue(settings.s1MiniEOUFasterFinishEnabled, "Switching a selection must preserve the opt-in preference")
+        XCTAssertTrue(settings.fasterFinishEnabled, "Switching a selection must preserve the opt-in preference")
         settings.transcriptPostProcessingMode = .s1Mini
         session.update(source: "eligible again", configuration: currentConfiguration(), now: 48)
         session.update(source: "eligible again", configuration: currentConfiguration(), now: 49)
@@ -102,13 +102,56 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
         XCTAssertNil(candidate?.output(matching: original))
     }
 
+    // A saved opt-in must not add inference for unmeasured models, hidden batch
+    // previews, empty vocabulary, or unsupported language/cleanup combinations.
+    func testExperimentalSelectionEnablesOnlySupportedWork() {
+        let settings = Settings.shared
+        let saved = (settings.engineChoice, settings.parakeetModelChoice, settings.selectedLanguage,
+                     settings.transcriptPostProcessingMode, settings.showTextPreview, settings.customVocabulary)
+        defer {
+            settings.engineChoice = saved.0
+            settings.parakeetModelChoice = saved.1
+            settings.selectedLanguage = saved.2
+            settings.transcriptPostProcessingMode = saved.3
+            settings.showTextPreview = saved.4
+            settings.customVocabulary = saved.5
+        }
+        settings.engineChoice = .parakeet
+        settings.selectedLanguage = .english
+        settings.showTextPreview = true
+        settings.customVocabulary = ["Zephyr"]
+        settings.transcriptPostProcessingMode = .s1Mini
+        for model in ParakeetModelChoice.allCases {
+            settings.parakeetModelChoice = model
+            XCTAssertEqual(settings.supportsS1MiniCleanupDrafts,
+                           [.parakeetEou320, .compactEnglish, .nemotron1120, .nemotronMultilingual].contains(model),
+                           model.rawValue)
+            XCTAssertEqual(settings.supportsExactWindowReuse, model == .englishOnly, model.rawValue)
+        }
+        settings.parakeetModelChoice = .compactEnglish
+        settings.transcriptPostProcessingMode = .fluidAudioVocabulary
+        XCTAssertFalse(settings.supportsS1MiniCleanupDrafts)
+        XCTAssertTrue(settings.supportsExactWindowReuse)
+        settings.customVocabulary = []
+        XCTAssertFalse(settings.supportsFasterFinish)
+        settings.customVocabulary = ["Zephyr"]
+        settings.showTextPreview = false
+        XCTAssertFalse(settings.supportsFasterFinish)
+        settings.showTextPreview = true
+        settings.selectedLanguage = .german
+        XCTAssertFalse(settings.supportsFasterFinish)
+        settings.selectedLanguage = .english
+        settings.engineChoice = .appleSpeech
+        XCTAssertFalse(settings.supportsFasterFinish)
+    }
+
     // A native decode may ignore cancellation until its current call returns.
     // Cancellation must retain ownership, reject its late result, and join it.
     func testCancellationJoinsUncooperativeWorkAndDoesNotPublishIt() async {
         let probe = DraftProbe()
         let started = expectation(description: "request started")
         probe.onStart = { started.fulfill() }
-        let session = EOUCleanupDraftSession(now: 0, process: probe.process)
+        let session = S1MiniCleanupDraftSession(now: 0, process: probe.process)
         session.update(source: "preview", configuration: configuration(), now: 0)
         session.update(source: "preview", configuration: configuration(), now: 8)
         await fulfillment(of: [started], timeout: 2)
@@ -129,7 +172,7 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
     // after Stop. Full final ASR is separately verified by the real-model test.
     func testStopFreezesCompletedOutputBeforeJoiningTheTrailingRequest() async {
         let probe = DraftProbe()
-        let session = EOUCleanupDraftSession(now: 0, process: probe.process)
+        let session = S1MiniCleanupDraftSession(now: 0, process: probe.process)
         let config = configuration()
         let first = expectation(description: "first started")
         probe.onStart = { first.fulfill() }
@@ -155,7 +198,7 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
     // a replacement cannot overlap that request or replenish the launch budget.
     func testControlChangesCancelOldWorkAndKeepOnlyTheNewConfiguration() async {
         let probe = DraftProbe()
-        let session = EOUCleanupDraftSession(now: 0, process: probe.process)
+        let session = S1MiniCleanupDraftSession(now: 0, process: probe.process)
         let old = configuration()
         let new = configuration(revision: 1)
         let started = expectation(description: "old request started")
@@ -184,18 +227,18 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
     // resurrect work produced before the user disabled the setting.
     func testDisablingMidRecordingCancelsWorkAndInvalidatesDisableReenableDrafts() async {
         let settings = Settings.shared
-        let saved = settings.s1MiniEOUFasterFinishEnabled
-        defer { settings.s1MiniEOUFasterFinishEnabled = saved }
-        settings.s1MiniEOUFasterFinishEnabled = true
+        let saved = settings.fasterFinishEnabled
+        defer { settings.fasterFinishEnabled = saved }
+        settings.fasterFinishEnabled = true
         let old = configuration(revision: settings.s1MiniDraftRevision)
         let probe = DraftProbe()
-        let session = EOUCleanupDraftSession(now: 0, process: probe.process)
+        let session = S1MiniCleanupDraftSession(now: 0, process: probe.process)
         let started = expectation(description: "request started")
         probe.onStart = { started.fulfill() }
         session.update(source: "preview", configuration: old, now: 0)
         session.update(source: "preview", configuration: old, now: 8)
         await fulfillment(of: [started], timeout: 2)
-        settings.s1MiniEOUFasterFinishEnabled = false
+        settings.fasterFinishEnabled = false
         session.update(source: "preview", configuration: nil, now: 9)
         probe.finish("disabled result")
         await session.join()
@@ -205,11 +248,11 @@ final class EOUCleanupDraftSessionTests: XCTestCase {
         XCTAssertEqual(probe.sources.count, 1)
         XCTAssertNil(session.freeze())
 
-        let cached = EOUCleanupDraftSession(now: 0) { _, _ in "cached output" }
+        let cached = S1MiniCleanupDraftSession(now: 0) { _, _ in "cached output" }
         cached.update(source: "preview", configuration: old, now: 0)
         cached.update(source: "preview", configuration: old, now: 8)
         await cached.join()
-        settings.s1MiniEOUFasterFinishEnabled = true
+        settings.fasterFinishEnabled = true
         let current = configuration(revision: settings.s1MiniDraftRevision)
         XCTAssertNil(cached.freeze()?.output(matching: current))
     }
@@ -221,7 +264,7 @@ private final class DraftProbe {
     var onStart: (() -> Void)?
     private var continuation: CheckedContinuation<String, Never>?
 
-    func process(_ source: String, _ configuration: EOUCleanupDraftSession.Configuration) async throws -> String {
+    func process(_ source: String, _ configuration: S1MiniCleanupDraftSession.Configuration) async throws -> String {
         sources.append(source)
         return await withCheckedContinuation {
             continuation = $0

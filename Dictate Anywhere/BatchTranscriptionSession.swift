@@ -19,6 +19,7 @@ actor BatchTranscriptionSession {
     private let language: Language?
     private let vad: VadManager?
     private let previewsEnabled: Bool
+    private var exactWindowReuseActive: Bool
     private var updateTask: Task<Void, Never>?
     private var samples = AudioSampleBuffer()
     private var startSample = 0
@@ -32,23 +33,29 @@ actor BatchTranscriptionSession {
     private var speechPresence = BatchSpeechPresence()
 
     private init(backend: Backend, vad: VadManager?, language: Language? = nil,
-                 previewsEnabled: Bool, provisionalTDTWindowSamples: Int? = nil) {
+                 previewsEnabled: Bool, provisionalTDTWindowSamples: Int? = nil, exactWindowReuseActive: Bool = false) {
         self.backend = backend
         self.vad = vad
         self.language = language
         self.previewsEnabled = previewsEnabled
+        self.exactWindowReuseActive = exactWindowReuseActive
         self.provisionalTDTWindowSamples = provisionalTDTWindowSamples
     }
 
     static func parakeet(models: AsrModels, previewManager: AsrManager, vad: VadManager?, language: Language?,
-                         requiresWholeRecordingFinal: Bool, previewsEnabled: Bool) async throws -> BatchTranscriptionSession {
+                         requiresWholeRecordingFinal: Bool, previewsEnabled: Bool,
+                         exactWindowReuseEnabled: Bool = false) async throws -> BatchTranscriptionSession {
+        await previewManager.endBatchWindowReuseExperiment()
         if models.version == .v2 || requiresWholeRecordingFinal {
+            let reuse = previewsEnabled && exactWindowReuseEnabled
+                && (models.version == .v2 || models.version == .tdtCtc110m)
+            if reuse { await previewManager.beginBatchWindowReuseExperiment() }
             // The SDK batch path preserves v2 mel context and repairs gaps.
             // Its live overlap path drops clear speech in shifted-seam goldens.
             // Vocabulary uses a whole-recording final too, so its previews do
             // not need a second overlap decoder whose result would be discarded.
             return BatchTranscriptionSession(backend: .parakeetBatch(previewManager), vad: vad, language: language,
-                                             previewsEnabled: previewsEnabled)
+                                             previewsEnabled: previewsEnabled, exactWindowReuseActive: reuse)
         }
         // The short provisional window is evaluated only for the v3 and 110M
         // streaming paths. V2, Ultra, and whole-recording vocabulary previews
@@ -86,7 +93,8 @@ actor BatchTranscriptionSession {
         previewTimeline.recordAuthoritativeUpdate(update.tokenTimings)
     }
 
-    func append(_ newSamples: [Float]) async throws {
+    func append(_ newSamples: [Float], allowExactWindowReuse: Bool = true) async throws {
+        if !allowExactWindowReuse { await disableExactWindowReuse() }
         guard !newSamples.isEmpty else { return }
         samples.append(newSamples)
         totalSamples += newSamples.count
@@ -95,7 +103,10 @@ actor BatchTranscriptionSession {
             await overlapping.streamAudio(try Self.pcmBuffer(newSamples))
             retainPreviewWindow()
         case .parakeetBatch:
-            retainPreviewWindow()
+            if !allowExactWindowReuse || totalSamples > BatchTranscriptionPolicy.exactReuseMaximumSamples {
+                await disableExactWindowReuse()
+            }
+            if !exactWindowReuseActive { retainPreviewWindow() }
         case .senseVoice: break
         }
         if vad != nil {
@@ -208,7 +219,14 @@ actor BatchTranscriptionSession {
         switch backend {
         case .parakeetBatch(let manager):
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-            return try await manager.transcribe(recordedSamples, decoderState: &state, language: language).text
+            do {
+                let result = try await manager.transcribe(recordedSamples, decoderState: &state, language: language)
+                await disableExactWindowReuse()
+                return result.text
+            } catch {
+                await disableExactWindowReuse()
+                throw error
+            }
         case .parakeet(_, let overlapping):
             do {
                 let text = try await overlapping.finish()
@@ -229,7 +247,17 @@ actor BatchTranscriptionSession {
         }
     }
 
+    /// Also used after vocabulary finalization: the SDK batch pass and fresh
+    /// original-PCM vocabulary rescore both finish before retiring the cache.
+    func disableExactWindowReuse() async {
+        guard exactWindowReuseActive else { return }
+        exactWindowReuseActive = false
+        if case .parakeetBatch(let manager) = backend { await manager.endBatchWindowReuseExperiment() }
+        retainPreviewWindow()
+    }
+
     func cancel() async {
+        await disableExactWindowReuse()
         if case .parakeet(_, let overlapping) = backend {
             await overlapping.cancel()
             // The pinned SDK's cancel() requests cancellation but does not

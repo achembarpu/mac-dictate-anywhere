@@ -139,6 +139,17 @@ struct ModelsView: View {
                             DSSwitch(accessibilityName: "Stop hands-free dictation after speech ends", isOn: $settings.autoStopAfterSpeechEndsEnabled)
                         }
                     }
+                    if settings.supportsFasterFinish {
+                        DSDivider()
+                        DSStackedRow(
+                            label: "Finish dictation faster (Experimental)",
+                            caption: settings.fasterFinishCaption,
+                            isOn: $settings.fasterFinishEnabled
+                        )
+                        .onChange(of: settings.fasterFinishEnabled) {
+                            appState.invalidateCleanupDraft()
+                        }
+                    }
                     DSDivider()
                     statusRow
                     if appState.parakeetEngine.isModelDownloaded {

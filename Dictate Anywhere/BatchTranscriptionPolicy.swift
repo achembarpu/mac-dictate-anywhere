@@ -10,6 +10,9 @@ nonisolated enum BatchTranscriptionPolicy {
     static let sustainedPreviewStartSamples = sampleRate * 8
     static let sustainedPreviewDeltaSamples = sampleRate * 2
     static let previewWindowSamples = sampleRate * 15
+    // Bound full-prefix copies and cache searches; longer recordings return to
+    // rolling previews and retain the ordinary complete-recording final decode.
+    static let exactReuseMaximumSamples = sampleRate * 120
     static let senseVoiceTargetSamples = sampleRate * 15
     static let senseVoiceMaximumSamples = sampleRate * 30
 

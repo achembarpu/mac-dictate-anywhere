@@ -1023,7 +1023,8 @@ final class Settings {
         static let dictationAppRules = "dictationAppRules"
         static let transcriptHistory = "transcriptHistory"
         static let transcriptPostProcessingMode = "transcriptPostProcessingMode"
-        static let s1MiniEOUFasterFinishEnabled = "s1MiniEOUFasterFinishEnabled"
+        // Preserve the existing experimental opt-in across the expanded feature.
+        static let fasterFinishEnabled = "s1MiniEOUFasterFinishEnabled"
         static let s1MiniStyling = "s1MiniStyling"
         static let s1MiniAppStyling = "s1MiniAppStyling"
         static let s1MiniStructure = "s1MiniStructure"
@@ -1390,18 +1391,39 @@ final class Settings {
 
     /// Shared by the settings row and runtime; an ineligible selection never
     /// activates a saved opt-in preference.
-    var supportsS1MiniEOUCleanupDrafts: Bool {
-        engineChoice == .parakeet && parakeetModelChoice == .parakeetEou320
-            && selectedLanguage == .english && transcriptPostProcessingMode == .s1Mini
+    var supportsS1MiniCleanupDrafts: Bool {
+        engineChoice == .parakeet && selectedLanguage == .english
+            && transcriptPostProcessingMode == .s1Mini
+            && FasterFinishPolicy.supportsCleanupDrafts(model: parakeetModelChoice, previewsEnabled: showTextPreview)
     }
+
+    var supportsExactWindowReuse: Bool {
+        engineChoice == .parakeet && selectedLanguage == .english && showTextPreview
+            && FasterFinishPolicy.supportsExactWindowReuse(
+                model: parakeetModelChoice,
+                hasVocabulary: fluidAudioVocabularyEnabled && !customVocabulary.isEmpty)
+    }
+
+    var supportsFasterFinish: Bool { supportsS1MiniCleanupDrafts || supportsExactWindowReuse }
+
+    var fasterFinishCaption: String {
+        supportsExactWindowReuse
+            ? "Reuses speech recognition work from live previews to reduce the wait after you stop. Applies to recordings up to two minutes."
+            : "Uses more computing power during dictation to prepare cleanup drafts and reduce the wait after you stop."
+    }
+
+    @ObservationIgnored private(set) var fasterFinishRevision = 0
 
     // Includes disable/re-enable and control changes between recording polls.
     @ObservationIgnored private(set) var s1MiniDraftRevision = 0
 
-    var s1MiniEOUFasterFinishEnabled: Bool {
+    var fasterFinishEnabled: Bool {
         didSet {
-            if s1MiniEOUFasterFinishEnabled != oldValue { s1MiniDraftRevision += 1 }
-            UserDefaults.standard.set(s1MiniEOUFasterFinishEnabled, forKey: Keys.s1MiniEOUFasterFinishEnabled)
+            if fasterFinishEnabled != oldValue {
+                s1MiniDraftRevision += 1
+                fasterFinishRevision += 1
+            }
+            UserDefaults.standard.set(fasterFinishEnabled, forKey: Keys.fasterFinishEnabled)
         }
     }
 
@@ -1634,6 +1656,7 @@ final class Settings {
 
     var showTextPreview: Bool {
         didSet {
+            if showTextPreview != oldValue { s1MiniDraftRevision += 1 }
             UserDefaults.standard.set(showTextPreview, forKey: Keys.showTextPreview)
             NotificationCenter.default.post(name: .overlayPreferencesChanged, object: nil)
         }
@@ -1881,7 +1904,7 @@ final class Settings {
             from: defaults, forKey: Keys.aiPostProcessingPrompt,
             defaultPrompt: Self.recommendedAppleIntelligenceCleanupPrompt
         )
-        s1MiniEOUFasterFinishEnabled = defaults.bool(forKey: Keys.s1MiniEOUFasterFinishEnabled)
+        fasterFinishEnabled = defaults.bool(forKey: Keys.fasterFinishEnabled)
         let storedS1MiniStyling = S1MiniStyling(
             rawValue: defaults.string(forKey: Keys.s1MiniStyling) ?? ""
         )

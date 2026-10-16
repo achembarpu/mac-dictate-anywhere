@@ -669,7 +669,7 @@ enum S1MiniPostProcessingService {
     /// Speculation has a single-request budget. Long input waits for ordinary
     /// final cleanup, whose chunking policy preserves the complete transcript.
     static func processDraft(
-        text: String, configuration: EOUCleanupDraftSession.Configuration
+        text: String, configuration: S1MiniCleanupDraftSession.Configuration
     ) async throws -> String {
         try Task.checkCancellation()
         guard !(text.contains("<|") && text.contains("|>")) else { return text }

@@ -544,6 +544,11 @@ final class ParakeetEngine: TranscriptionEngine {
     private var transcriptionTask: Task<Void, Never>?
     private var lastBatchPreviewSampleCount = 0
     private var recordingPreviewsEnabled = true
+    private var recordingFasterFinishRevision: Int?
+    private var allowsRecordingWindowReuse: Bool {
+        Settings.shared.fasterFinishEnabled
+            && recordingFasterFinishRevision == Settings.shared.fasterFinishRevision
+    }
     private var recordingModelChoice: ParakeetModelChoice?
     private var recordingScriptLanguage: Language?
     private var recordingVocabularyTerms: [String] = []
@@ -1183,6 +1188,8 @@ final class ParakeetEngine: TranscriptionEngine {
         let modelChoice = selectedModelChoice
         let generation = modelSelectionGeneration
         let previewsEnabled = Settings.shared.showTextPreview
+        let exactWindowReuse = Settings.shared.fasterFinishEnabled && Settings.shared.supportsExactWindowReuse
+        let fasterFinishRevision = Settings.shared.fasterFinishRevision
         let vocabularyTerms = activeVocabularyTerms
         let language = scriptLanguage(for: modelChoice)
         let nativeLanguageCode = Settings.shared.selectedLanguage.nemotronLanguageCode
@@ -1216,13 +1223,15 @@ final class ParakeetEngine: TranscriptionEngine {
         guard ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
         try await asrCoordinator.resetSession(for: modelChoice, language: language,
                                               requiresWholeRecordingFinal: !vocabularyTerms.isEmpty,
-                                              previewsEnabled: previewsEnabled)
+                                              previewsEnabled: previewsEnabled,
+                                              exactWindowReuseEnabled: exactWindowReuse)
         let signalThreshold = try await asrCoordinator.audioProcessingSignalThreshold(for: modelChoice)
         guard ownsSelection(modelChoice, generation: generation) else { throw CancellationError() }
         recordingModelChoice = modelChoice
         recordingScriptLanguage = language
         recordingVocabularyTerms = vocabularyTerms
         recordingPreviewsEnabled = previewsEnabled
+        recordingFasterFinishRevision = exactWindowReuse ? fasterFinishRevision : nil
         lastBatchPreviewSampleCount = 0
 
         if modelChoice == .nemotronMultilingual {
@@ -1494,7 +1503,7 @@ final class ParakeetEngine: TranscriptionEngine {
             let recent = shouldPreview ? volumeGate.recentSamples : []
             return (pending, total, recent, shouldPreview)
         }
-        try await asrCoordinator.appendBatchAudio(pending)
+        try await asrCoordinator.appendBatchAudio(pending, allowExactWindowReuse: allowsRecordingWindowReuse)
         try Task.checkCancellation()
         guard shouldPreview else { return }
         if !hasSignificantAudio(recent) {
@@ -1595,7 +1604,7 @@ final class ParakeetEngine: TranscriptionEngine {
         }
         let recorded = sampleLock.withLock { fullRecordingSamples }
         do {
-            try await asrCoordinator.appendBatchAudio(pending)
+            try await asrCoordinator.appendBatchAudio(pending, allowExactWindowReuse: allowsRecordingWindowReuse)
             var hasSpeech = sampleLock.withLock { volumeGate.containsSignificantAudio }
             if !hasSpeech { hasSpeech = try await asrCoordinator.containsBatchSpeech() }
             guard hasSpeech else {
@@ -1606,8 +1615,8 @@ final class ParakeetEngine: TranscriptionEngine {
                !recordingVocabularyTerms.isEmpty {
                 // This opt-in full-recording pass already existed. Do not add
                 // an unboosted final-window decode in front of it at Stop.
-                await asrCoordinator.cancelBatch()
-                let result = try await asrCoordinator.transcribeWithCustomVocabulary(recorded, terms: recordingVocabularyTerms, language: recordingScriptLanguage)
+                let result = try await asrCoordinator.finishBatchWithCustomVocabulary(
+                    recorded, terms: recordingVocabularyTerms, language: recordingScriptLanguage)
                 return BatchTranscriptionPolicy.finalTranscript(result.text, fallback: liveText)
             }
             let finalText = try await asrCoordinator.finishBatch(recordedSamples: recorded)
@@ -1802,7 +1811,7 @@ final class ParakeetEngine: TranscriptionEngine {
 
 // MARK: - AsrManagerCoordinator
 
-private actor AsrManagerCoordinator {
+actor AsrManagerCoordinator {
     private let vadModelURL: URL
     private var manager: AsrManager?
     private var models: AsrModels?
@@ -2191,7 +2200,7 @@ private actor AsrManagerCoordinator {
     }
 
     func resetSession(for modelChoice: ParakeetModelChoice, language: Language?, requiresWholeRecordingFinal: Bool = false,
-                      previewsEnabled: Bool = true) async throws {
+                      previewsEnabled: Bool = true, exactWindowReuseEnabled: Bool = false) async throws {
         await waitForLifecycleMutation()
         try Task.checkCancellation()
         lifecycleMutationInProgress = true
@@ -2199,7 +2208,7 @@ private actor AsrManagerCoordinator {
         try await resetSessionUnlocked(
             for: modelChoice, language: language,
             requiresWholeRecordingFinal: requiresWholeRecordingFinal,
-            previewsEnabled: previewsEnabled
+            previewsEnabled: previewsEnabled, exactWindowReuseEnabled: exactWindowReuseEnabled
         )
     }
 
@@ -2207,9 +2216,13 @@ private actor AsrManagerCoordinator {
         for modelChoice: ParakeetModelChoice,
         language: Language?,
         requiresWholeRecordingFinal: Bool = false,
-        previewsEnabled: Bool = true
+        previewsEnabled: Bool = true,
+        exactWindowReuseEnabled: Bool = false
     ) async throws {
         guard isInitializedUnlocked(for: modelChoice) else { throw TranscriptionError.engineNotReady }
+        #if DEBUG
+        completedWindowReuseStatisticsForTesting = nil
+        #endif
         if !modelChoice.usesTrueStreaming {
             await cancelBatch()
             if modelChoice == .senseVoice {
@@ -2220,7 +2233,8 @@ private actor AsrManagerCoordinator {
                 guard let manager, let models else { throw TranscriptionError.engineNotReady }
                 batchSession = try await BatchTranscriptionSession.parakeet(
                     models: models, previewManager: manager, vad: batchVad, language: language,
-                    requiresWholeRecordingFinal: requiresWholeRecordingFinal, previewsEnabled: previewsEnabled)
+                    requiresWholeRecordingFinal: requiresWholeRecordingFinal, previewsEnabled: previewsEnabled,
+                    exactWindowReuseEnabled: exactWindowReuseEnabled)
             }
             return
         }
@@ -2239,9 +2253,9 @@ private actor AsrManagerCoordinator {
         try await streamingManager.reset()
     }
 
-    func appendBatchAudio(_ samples: [Float]) async throws {
+    func appendBatchAudio(_ samples: [Float], allowExactWindowReuse: Bool = true) async throws {
         guard let batchSession else { throw TranscriptionError.engineNotReady }
-        try await batchSession.append(samples)
+        try await batchSession.append(samples, allowExactWindowReuse: allowExactWindowReuse)
     }
 
     func batchPreview() async throws -> String {
@@ -2257,11 +2271,39 @@ private actor AsrManagerCoordinator {
         try await batchSession?.containsSpeechIncludingTail() ?? false
     }
 
+    #if DEBUG
+    private(set) var completedWindowReuseStatisticsForTesting: (hits: Int, misses: Int, entries: Int, pcmBytes: Int)?
+
+    func exactWindowReuseStatisticsForTesting() async -> (hits: Int, misses: Int, entries: Int, pcmBytes: Int) {
+        await manager?.batchWindowReuseExperimentStatistics() ?? (0, 0, 0, 0)
+    }
+    #endif
+
     func finishBatch(recordedSamples: [Float] = []) async throws -> String {
         guard let batchSession else { throw TranscriptionError.engineNotReady }
         self.batchSession = nil
         do {
             return try await batchSession.finish(recordedSamples: recordedSamples)
+        } catch {
+            await batchSession.cancel()
+            throw error
+        }
+    }
+
+    /// Preserve preview-window reuse through the existing full batch + fresh
+    /// CTC pass. Cancelling the session first would discard all reusable work.
+    func finishBatchWithCustomVocabulary(
+        _ samples: [Float], terms: [String], language: Language?
+    ) async throws -> ASRResult {
+        guard let batchSession else { throw TranscriptionError.engineNotReady }
+        self.batchSession = nil
+        do {
+            let result = try await transcribeWithCustomVocabulary(samples, terms: terms, language: language)
+            #if DEBUG
+            completedWindowReuseStatisticsForTesting = await exactWindowReuseStatisticsForTesting()
+            #endif
+            await batchSession.cancel()
+            return result
         } catch {
             await batchSession.cancel()
             throw error

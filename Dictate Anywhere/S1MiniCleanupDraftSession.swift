@@ -3,7 +3,7 @@ import Foundation
 /// Owns all speculative cleanup for one recording. Recording polling supplies
 /// causal observations; Stop never grants work or waits before stopping capture.
 @MainActor
-final class EOUCleanupDraftSession {
+final class S1MiniCleanupDraftSession {
     struct Configuration: Equatable, Sendable {
         let modelURL: URL
         let modelRevision: Int
