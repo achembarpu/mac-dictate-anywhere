@@ -1002,6 +1002,8 @@ final class Settings {
         static let soundEffectsEnabled = "soundEffectsEnabled"
         static let soundEffectsVolume = "soundEffectsVolume"
         static let showTextPreview = "showTextPreview"
+        static let overlayThemeMode = "overlayThemeMode"
+        static let overlaySize = "overlaySize"
         static let launchAtLogin = "launchAtLogin"
         static let prewarmEnginesAtStartup = "prewarmEnginesAtStartup"
         static let appAppearanceMode = "appAppearanceMode"
@@ -1604,6 +1606,21 @@ final class Settings {
     var showTextPreview: Bool {
         didSet {
             UserDefaults.standard.set(showTextPreview, forKey: Keys.showTextPreview)
+            NotificationCenter.default.post(name: .overlayPreferencesChanged, object: nil)
+        }
+    }
+
+    var overlaySize: OverlaySize {
+        didSet {
+            UserDefaults.standard.set(overlaySize.rawValue, forKey: Keys.overlaySize)
+            NotificationCenter.default.post(name: .overlayPreferencesChanged, object: nil)
+        }
+    }
+
+    var overlayThemeMode: ThemeMode {
+        didSet {
+            UserDefaults.standard.set(overlayThemeMode.rawValue, forKey: Keys.overlayThemeMode)
+            NotificationCenter.default.post(name: .overlayPreferencesChanged, object: nil)
         }
     }
 
@@ -1905,6 +1922,8 @@ final class Settings {
 
         // Overlay
         showTextPreview = defaults.object(forKey: Keys.showTextPreview) as? Bool ?? true
+        overlaySize = OverlaySize(rawValue: defaults.string(forKey: Keys.overlaySize) ?? "") ?? .comfortable
+        overlayThemeMode = ThemeMode(rawValue: defaults.string(forKey: Keys.overlayThemeMode) ?? "") ?? .system
 
         // App behavior
         launchAtLogin = defaults.object(forKey: Keys.launchAtLogin) as? Bool ?? false
@@ -2530,5 +2549,6 @@ final class Settings {
 // MARK: - Notification Names
 
 extension Notification.Name {
+    static let overlayPreferencesChanged = Notification.Name("overlayPreferencesChanged")
     static let appAppearanceModeChanged = Notification.Name("appAppearanceModeChanged")
 }

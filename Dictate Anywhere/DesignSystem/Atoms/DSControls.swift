@@ -19,7 +19,7 @@ struct DSToggleStyle: ToggleStyle {
                     .padding(3)
             }
             .animation(reduceMotion ? nil : .spring(duration: 0.2), value: configuration.isOn)
-            .contentShape(Rectangle())
+            .modifier(DSControlSurface(fill: .clear, border: .clear, cornerRadius: 14))
         }
         .buttonStyle(.plain)
         .accessibilityValue(configuration.isOn ? "On" : "Off")
@@ -44,6 +44,8 @@ extension ToggleStyle where Self == DSToggleStyle {
 
 /// Atom: slider matching the design (5pt track, 16pt white knob).
 struct DSSlider: View {
+    @Environment(\.isEnabled) private var isEnabled
+    @FocusState private var isFocused: Bool
     @Binding var value: Double
     var range: ClosedRange<Double> = 0...1
     let label: String
@@ -76,7 +78,7 @@ struct DSSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
-                        guard width > knobSize else { return }
+                        guard isEnabled, width > knobSize else { return }
                         let fraction = ((drag.location.x - knobSize / 2) / (width - knobSize))
                             .clamped(to: 0...1)
                         value = range.lowerBound + fraction * (range.upperBound - range.lowerBound)
@@ -84,7 +86,17 @@ struct DSSlider: View {
             )
         }
         .frame(height: knobSize)
-        .focusable()
+        .focusable(isEnabled)
+        .focused($isFocused)
+        .overlay {
+            if isFocused {
+                RoundedRectangle(cornerRadius: DS.Radius.small)
+                    .strokeBorder(DS.Colors.accentDeep, lineWidth: 2)
+                    .padding(-4)
+                    .allowsHitTesting(false)
+            }
+        }
+        .opacity(isEnabled ? 1 : 0.45)
         .onMoveCommand { direction in
             switch direction {
             case .left, .down: adjust(by: -1)
@@ -110,6 +122,7 @@ struct DSSlider: View {
     }
 
     private func adjust(by steps: Double) {
+        guard isEnabled else { return }
         let step = (range.upperBound - range.lowerBound) / 10
         value = (value + steps * step).clamped(to: range)
     }
@@ -150,7 +163,6 @@ struct DSDropdown<SelectionValue: Hashable>: View {
         .buttonStyle(.plain)
         .fixedSize(horizontal: false, vertical: true)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.5)
         .accessibilityLabel(accessibilityName)
         .accessibilityValue(title(selection))
     }
@@ -172,14 +184,13 @@ struct DSDropdownLabel: View {
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 12)
-        .background(DS.Colors.bgInset, in: RoundedRectangle(cornerRadius: DS.Radius.control))
-        .overlay(RoundedRectangle(cornerRadius: DS.Radius.control).strokeBorder(DS.Colors.border, lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control))
+        .modifier(DSControlSurface(fill: DS.Colors.bgInset))
     }
 }
 
 /// Atom: bordered search field (History page).
 struct DSSearchField: View {
+    @Environment(\.colorSchemeContrast) private var contrast
     let placeholder: String
     @Binding var text: String
     let accessibilityName: String
@@ -214,12 +225,20 @@ struct DSSearchField: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
         .background(DS.Colors.bgCard, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
-        .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Colors.border, lineWidth: 1))
+        .overlay {
+            RoundedRectangle(cornerRadius: DS.Radius.panel)
+                .strokeBorder(
+                    fieldIsFocused ? DS.Colors.accentDeep : contrast == .increased ? DS.Colors.textSecondary : DS.Colors.border,
+                    lineWidth: fieldIsFocused ? 2 : 1
+                )
+        }
     }
 }
 
 /// Atom: bordered single-line text field styled like the design's inset controls.
 struct DSTextField: View {
+    @Environment(\.colorSchemeContrast) private var contrast
+    @FocusState private var fieldIsFocused: Bool
     let placeholder: String
     @Binding var text: String
     var isSecure: Bool = false
@@ -236,11 +255,18 @@ struct DSTextField: View {
             }
         }
         .textFieldStyle(.plain)
+        .focused($fieldIsFocused)
         .font(DS.Fonts.ui(13))
         .foregroundStyle(DS.Colors.ink)
         .padding(.vertical, 7)
         .padding(.horizontal, 12)
         .background(DS.Colors.bgCard, in: RoundedRectangle(cornerRadius: DS.Radius.control))
-        .overlay(RoundedRectangle(cornerRadius: DS.Radius.control).strokeBorder(DS.Colors.border, lineWidth: 1))
+        .overlay {
+            RoundedRectangle(cornerRadius: DS.Radius.control)
+                .strokeBorder(
+                    fieldIsFocused ? DS.Colors.accentDeep : contrast == .increased ? DS.Colors.textSecondary : DS.Colors.border,
+                    lineWidth: fieldIsFocused ? 2 : 1
+                )
+        }
     }
 }

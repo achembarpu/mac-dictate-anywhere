@@ -42,6 +42,7 @@ struct DSSectionHeader: View {
             Text(subtitle)
                 .font(DS.Fonts.ui(13.5))
                 .foregroundStyle(DS.Colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -57,10 +58,11 @@ struct DSPage<Content: View>: View {
             VStack(alignment: .leading, spacing: spacing) {
                 content
             }
+            .frame(maxWidth: DS.Metrics.readableContentWidth, alignment: .leading)
             .padding(.top, DS.Spacing.contentTop)
             .padding(.horizontal, DS.Spacing.contentHorizontal)
             .padding(.bottom, DS.Spacing.contentBottom)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .background(DS.Colors.bgWindow)
     }
