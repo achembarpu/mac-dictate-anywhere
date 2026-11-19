@@ -6,7 +6,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/achembarpu/FluidAudio.git",
       "state" : {
-        "revision" : "75d40f39833e1d52bb4c5667dd243ddee5039737"
+        "revision" : "56dfafc0098b9ea83d53cbb2c569410adf74fe87"
       }
     },
     {

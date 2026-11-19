@@ -383,7 +383,9 @@ struct ModelsView: View {
         DSSection(overline: "Internal Prompts") {
             DSDetailRow(
                 label: "Customize prompts",
-                caption: "Edit AssemblyAI recognition, cleanup, destination, writing-style, and field-context instructions."
+                caption: settings.assemblyAIOutputMode == .polished
+                    ? "Edit AssemblyAI recognition, cleanup, destination, writing-style, and field-context instructions."
+                    : "Edit the context AssemblyAI uses for speech recognition."
             ) {
                 Button("Customize…") {
                     appState.selectedPage = .internalPrompts
@@ -432,7 +434,7 @@ struct ModelsView: View {
 
         DSHint(
             text:
-                "AssemblyAI requires an internet connection and accepts recordings up to 120 seconds. Dictate Anywhere deletes its temporary local recovery copy after success; failed requests remain in History when that copy is available."
+                "AssemblyAI transcribes long recordings in overlapping chunks of about 100 seconds while Apple Speech provides the live preview. Polished mode cleans the combined transcript through AssemblyAI after you stop. Audio and completed chunks stay on this Mac until success; failed sessions can be retried, copied, or exported from History."
         )
     }
 

@@ -12,15 +12,62 @@ enum DictationTextMarkerCapture {
         if let messagingTimeout { AXUIElementSetMessagingTimeout(editor, messagingTimeout) }
         guard let selection = attribute("AXSelectedTextMarkerRange", in: editor),
               let start = endpoint(selection, start: true), let end = endpoint(selection, start: false),
+              markerIsInsideEditor(start, in: editor),
+              CFEqual(start, end) || markerIsInsideEditor(end, in: editor),
               let bounds = parameter("AXTextMarkerRangeForUIElement", editor, in: editor),
               let first = endpoint(bounds, start: true), let last = endpoint(bounds, start: false),
-              let beforeStart = boundedEndpoint(from: start, to: first, backwards: true, in: editor),
-              let selectionEnd = boundedEndpoint(from: start, to: end, backwards: false, in: editor),
-              let afterEnd = boundedEndpoint(from: end, to: last, backwards: false, in: editor),
-              let before = text(from: beforeStart, to: start, in: editor),
-              let selected = text(from: start, to: selectionEnd, in: editor),
-              let after = text(from: end, to: afterEnd, in: editor) else { return nil }
+              let totalLength = length(of: bounds, in: editor),
+              let beforeLength = distance(from: first, to: start, in: editor),
+              let selectedLength = distance(from: start, to: end, in: editor),
+              let afterLength = distance(from: end, to: last, in: editor),
+              selectionFitsBounds(before: beforeLength, selected: selectedLength, after: afterLength, total: totalLength),
+              let beforeStart = boundedEndpoint(from: start, to: first, length: beforeLength, backwards: true, in: editor),
+              let selectionEnd = boundedEndpoint(from: start, to: end, length: selectedLength, backwards: false, in: editor),
+              let afterEnd = boundedEndpoint(from: end, to: last, length: afterLength, backwards: false, in: editor),
+              let before = beforeLength == 0 ? "" : text(from: beforeStart, to: start, in: editor),
+              let selected = selectedLength == 0 ? "" : text(from: start, to: selectionEnd, in: editor),
+              let after = afterLength == 0 ? "" : text(from: end, to: afterEnd, in: editor) else { return nil }
         return (String(before.suffix(600)), String(selected.prefix(600)), String(after.prefix(600)))
+    }
+
+    /// A marker envelope can itself be document-wide. Require the selection's
+    /// actual accessible node to belong to this editor, independently of lengths.
+    nonisolated static func markerIsInsideEditor(_ marker: CFTypeRef, in editor: AXUIElement) -> Bool {
+        guard let owner = parameter("AXUIElementForTextMarker", marker, in: editor),
+              CFGetTypeID(owner) == AXUIElementGetTypeID() else { return false }
+        var current = unsafeBitCast(owner, to: AXUIElement.self)
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.1
+        for _ in 0..<16 {
+            if CFEqual(current, editor) { return true }
+            guard ProcessInfo.processInfo.systemUptime < deadline else { return false }
+            AXUIElementSetMessagingTimeout(current, 0.025)
+            guard let parent = attribute(kAXParentAttribute, in: current),
+                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { return false }
+            current = unsafeBitCast(parent, to: AXUIElement.self)
+        }
+        return false
+    }
+
+    /// Unordered marker ranges silently reverse endpoints outside the editor.
+    /// A stale document selection can therefore look like surrounding text in
+    /// an empty composer. Distances must partition this editor's bounds before
+    /// any strings are read; otherwise use the ordinary numeric-range fallback.
+    nonisolated static func selectionFitsBounds(before: Int, selected: Int, after: Int, total: Int) -> Bool {
+        guard before >= 0, selected >= 0, after >= 0, total >= 0,
+              before <= total, selected <= total - before else { return false }
+        return after == total - before - selected
+    }
+
+    private nonisolated static func length(of range: CFTypeRef, in editor: AXUIElement) -> Int? {
+        guard let length = parameter("AXLengthForTextMarkerRange", range, in: editor) as? NSNumber,
+              length.intValue >= 0 else { return nil }
+        return length.intValue
+    }
+
+    private nonisolated static func distance(from start: CFTypeRef, to end: CFTypeRef, in editor: AXUIElement) -> Int? {
+        guard let range = parameter("AXTextMarkerRangeForUnorderedTextMarkers", [start, end] as CFArray, in: editor)
+        else { return nil }
+        return length(of: range, in: editor)
     }
 
     nonisolated static func selectionStart(
@@ -45,12 +92,9 @@ enum DictationTextMarkerCapture {
     }
 
     private nonisolated static func boundedEndpoint(
-        from start: CFTypeRef, to boundary: CFTypeRef, backwards: Bool, in editor: AXUIElement
+        from start: CFTypeRef, to boundary: CFTypeRef, length: Int, backwards: Bool, in editor: AXUIElement
     ) -> CFTypeRef? {
-        guard let range = parameter("AXTextMarkerRangeForUnorderedTextMarkers", [start, boundary] as CFArray, in: editor),
-              let length = parameter("AXLengthForTextMarkerRange", range, in: editor) as? NSNumber,
-              length.intValue >= 0 else { return nil }
-        if length.intValue <= 600 { return boundary }
+        if length <= 600 { return boundary }
         // Never convert rich-text markers to numeric offsets and back: web
         // implementations may count embedded objects differently in those APIs.
         let operation = backwards ? "AXPreviousTextMarkerForTextMarker" : "AXNextTextMarkerForTextMarker"
@@ -66,6 +110,19 @@ enum DictationTextMarkerCapture {
 
     private nonisolated static func text(from start: CFTypeRef, to end: CFTypeRef, in editor: AXUIElement) -> String? {
         guard let range = parameter("AXTextMarkerRangeForUnorderedTextMarkers", [start, end] as CFArray, in: editor) else { return nil }
+        // Plain AX strings can expand an image into its accessible name. The
+        // attributed representation identifies attachments separately from prose.
+        if let attributed = parameter("AXAttributedStringForTextMarkerRange", range, in: editor) as? NSAttributedString {
+            let result = NSMutableString(string: attributed.string)
+            var attachments: [NSRange] = []
+            attributed.enumerateAttributes(in: NSRange(location: 0, length: attributed.length)) { attributes, range, _ in
+                if attributes.keys.contains(where: { $0.rawValue == "AXAttachment" || $0 == .attachment }) {
+                    attachments.append(range)
+                }
+            }
+            for range in attachments.reversed() { result.replaceCharacters(in: range, with: "\u{FFFC}") }
+            return result as String
+        }
         return parameter("AXStringForTextMarkerRange", range, in: editor) as? String
     }
 
