@@ -525,7 +525,7 @@
 			repositoryURL = "https://github.com/achembarpu/FluidAudio.git";
 			requirement = {
 				kind = revision;
-				revision = 56dfafc0098b9ea83d53cbb2c569410adf74fe87;
+				revision = 36063c868a4aafaf2286ee6abfc83e7b7b37c410;
 			};
 		};
 		E2LLAMA0003 /* XCRemoteSwiftPackageReference "llama" */ = {

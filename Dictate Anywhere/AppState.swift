@@ -2599,9 +2599,7 @@ final class AppState {
                 return try await S1MiniPostProcessingService.processDraft(text: text, configuration: configuration)
             }
         }
-        cleanupDrafts?.update(source: source, configuration: configuration, now: now) {
-            self.settings.removeFillerWords(from: $0).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
+        cleanupDrafts?.update(source: source, configuration: configuration, now: now)
     }
 
     private func startAudioLevelPolling(engine: TranscriptionEngine) {

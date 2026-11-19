@@ -51,10 +51,7 @@ final class S1MiniCleanupDraftSession {
 
     /// A nil configuration disables speculation without losing ownership of a
     /// cancelled request. The budget cannot be replenished by toggling controls.
-    func update(
-        source: String, configuration: Configuration?, now: TimeInterval,
-        prepareSource: (String) -> String = { $0 }
-    ) {
+    func update(source: String, configuration: Configuration?, now: TimeInterval) {
         guard !closed else { return }
         if configuration != self.configuration {
             invalidate()
@@ -75,7 +72,8 @@ final class S1MiniCleanupDraftSession {
         guard stable || paused || elapsed >= 10 else { return }
 
         lastAttemptedSource = source
-        let preparedSource = prepareSource(source)
+        // Match final S1-mini cleanup, which normalizes fillers and wording together.
+        let preparedSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !preparedSource.isEmpty else { return }
         launchCount += 1
         lastLaunchAt = now

@@ -99,8 +99,9 @@ It appears only for supported English combinations:
 - **Exact speech-window reuse:** Parakeet v2, and compact 110M with nonempty FluidAudio
   vocabulary. Live previews must be enabled. Recordings up to two minutes can reuse
   byte-identical completed batch requests; longer recordings discard the cache and
-  return to rolling previews. Final window selection, merging, gap repair, and the
-  fresh vocabulary pass over original audio still run.
+  return to rolling previews. Final window selection, merging, and gap repair
+  still run. When vocabulary correction needs acoustic evidence, it uses the
+  original recording.
 
 Switching to an unsupported combination suspends the saved preference. No extra
 speech recognition requests are added to produce cleanup drafts. The complete final
